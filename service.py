@@ -495,7 +495,8 @@ class RadioMonitor(xbmc.Monitor):
         """Extrahiert den StreamTitle aus den rohen Metadaten"""
         try:
             # Format: StreamTitle='Artist - Title';
-            match = re.search(r"StreamTitle='([^']*)'", metadata_raw)
+            # Wichtig: Non-greedy .*? bis zum letzten ' vor ; um Apostrophe in Titeln zu unterstützen
+            match = re.search(r"StreamTitle='(.*?)';", metadata_raw)
             if match:
                 return match.group(1)
         except Exception as e:
