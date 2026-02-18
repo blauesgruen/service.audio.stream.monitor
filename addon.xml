@@ -8,8 +8,8 @@
   <extension point="xbmc.addon.metadata">
     <summary lang="de_DE">Monitor Service für Radio.de Light</summary>
     <summary lang="en_GB">Monitor Service for Radio.de Light</summary>
-    <description lang="de_DE">Überwacht Radio-Streams und zeigt aktuelle Song-Informationen (Titel, Interpret, etc.) korrekt an. Löscht Properties automatisch beim Stoppen oder Addon-Wechsel.</description>
-    <description lang="en_GB">Monitors radio streams and displays current song information (title, artist, etc.) correctly. Clears properties automatically when stopping or switching addons.</description>
+    <description lang="de_DE">Überwacht Radio-Streams aus dem Radio.de (light) Addon und zeigt aktuelle Song-Informationen (Titel, Interpret, etc.) korrekt an.</description>
+    <description lang="en_GB">Monitors radio streams and displays current song information (title, artist, etc.) correctly.</description>
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
