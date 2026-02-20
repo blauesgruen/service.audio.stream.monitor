@@ -58,10 +58,28 @@ class RadioMonitor(xbmc.Monitor):
         
         xbmc.log(f"[{ADDON_NAME}] Service gestartet", xbmc.LOGINFO)
         
+    def start_external_slideshow(self):
+        """Aktiviert den ArtistSlideshow External Call Modus (einmalig beim Stream-Start)"""
+        WINDOW.setProperty('ArtistSlideshow.ExternalCall', 'True')
+        xbmc.log(f"[{ADDON_NAME}] ArtistSlideshow External Call Modus aktiviert", xbmc.LOGINFO)
+        xbmc.executebuiltin(
+            'RunScript(script.artistslideshow,windowid=10000&artistfield=RADIODE_ARTIST&titlefield=RADIODE_TITLE)'
+        )
+
+    def stop_external_slideshow(self):
+        """Deaktiviert den ArtistSlideshow External Call Modus"""
+        WINDOW.clearProperty('ArtistSlideshow.ExternalCall')
+        WINDOW.clearProperty('RADIODE_ARTIST')
+        WINDOW.clearProperty('RADIODE_TITLE')
+        xbmc.log(f"[{ADDON_NAME}] ArtistSlideshow External Call Modus deaktiviert", xbmc.LOGINFO)
+
     def clear_properties(self):
         """Löscht alle Radio-Properties"""
         # Reset Logo
         self.station_logo = None
+        
+        # ArtistSlideshow External Call deaktivieren
+        self.stop_external_slideshow()
         
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -76,10 +94,6 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty('RadioMonitor.StreamTitle')
         WINDOW.clearProperty('RadioMonitor.Playing')
         WINDOW.clearProperty('RadioMonitor.Logo')
-        
-        # Artist Slideshow Properties (für Kompatibilität)
-        WINDOW.clearProperty('artistslideshow.artistname')
-        WINDOW.clearProperty('artistslideshow.trackname')
         
         # MusicPlayer-Properties (Kodi-Standard)
         # Diese können mit MusicPlayer.Property(Artist) in Skins abgerufen werden
@@ -514,9 +528,9 @@ class RadioMonitor(xbmc.Monitor):
                             self.set_property_safe('RadioMonitor.Artist', artist)
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', f"{artist} - {title}")
-                            # Artist Slideshow Kompatibilität
-                            self.set_property_safe('artistslideshow.artistname', artist)
-                            self.set_property_safe('artistslideshow.trackname', title)
+                            # ArtistSlideshow External Call Properties
+                            self.set_property_safe('RADIODE_ARTIST', artist)
+                            self.set_property_safe('RADIODE_TITLE', title)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
                             
                             # Aktualisiere Kodi Player Metadaten
@@ -524,11 +538,11 @@ class RadioMonitor(xbmc.Monitor):
                             self.update_player_metadata(artist, title, station_name, logo if logo else None)
                         else:
                             WINDOW.clearProperty('RadioMonitor.Artist')
-                            WINDOW.clearProperty('artistslideshow.artistname')
+                            WINDOW.clearProperty('RADIODE_ARTIST')
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', title)
-                            # Artist Slideshow Kompatibilität
-                            self.set_property_safe('artistslideshow.trackname', title)
+                            # ArtistSlideshow External Call Properties
+                            self.set_property_safe('RADIODE_TITLE', title)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {title}", xbmc.LOGINFO)
                             
                             # Aktualisiere Kodi Player Metadaten
@@ -782,9 +796,8 @@ class RadioMonitor(xbmc.Monitor):
                             WINDOW.clearProperty('RadioMonitor.Artist')
                             WINDOW.clearProperty('RadioMonitor.Title')
                             WINDOW.clearProperty('RadioMonitor.StreamTitle')
-                            # Artist Slideshow Properties auch löschen
-                            WINDOW.clearProperty('artistslideshow.artistname')
-                            WINDOW.clearProperty('artistslideshow.trackname')
+                            WINDOW.clearProperty('RADIODE_ARTIST')
+                            WINDOW.clearProperty('RADIODE_TITLE')
                             continue
                         
                         # Window-Properties NUR setzen wenn valide Werte vorhanden
@@ -795,22 +808,20 @@ class RadioMonitor(xbmc.Monitor):
                         
                         if artist:
                             self.set_property_safe('RadioMonitor.Artist', artist)
-                            # Artist Slideshow Kompatibilität
-                            self.set_property_safe('artistslideshow.artistname', artist)
+                            self.set_property_safe('RADIODE_ARTIST', artist)
                             xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
                         else:
                             WINDOW.clearProperty('RadioMonitor.Artist')
-                            WINDOW.clearProperty('artistslideshow.artistname')
+                            WINDOW.clearProperty('RADIODE_ARTIST')
                             artist = ''
                             
                         if title:
                             self.set_property_safe('RadioMonitor.Title', title)
-                            # Artist Slideshow Kompatibilität
-                            self.set_property_safe('artistslideshow.trackname', title)
+                            self.set_property_safe('RADIODE_TITLE', title)
                             xbmc.log(f"[{ADDON_NAME}] Title: {title}", xbmc.LOGDEBUG)
                         else:
                             WINDOW.clearProperty('RadioMonitor.Title')
-                            WINDOW.clearProperty('artistslideshow.trackname')
+                            WINDOW.clearProperty('RADIODE_TITLE')
                             title = ''
                         
                         # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
@@ -963,12 +974,10 @@ class RadioMonitor(xbmc.Monitor):
                             # Diese Infos als Fallback setzen
                             if title:
                                 self.set_property_safe('RadioMonitor.Title', title)
-                                # Artist Slideshow Kompatibilität
-                                self.set_property_safe('artistslideshow.trackname', title)
+                                self.set_property_safe('RADIODE_TITLE', title)
                             if artist:
                                 self.set_property_safe('RadioMonitor.Artist', artist)
-                                # Artist Slideshow Kompatibilität
-                                self.set_property_safe('artistslideshow.artistname', artist)
+                                self.set_property_safe('RADIODE_ARTIST', artist)
                             if album:
                                 self.set_property_safe('RadioMonitor.Album', album)
                             
@@ -1031,6 +1040,9 @@ class RadioMonitor(xbmc.Monitor):
                         
                         # ICY-Metadaten-Monitoring starten
                         self.start_metadata_monitoring(playing_file)
+                        
+                        # ArtistSlideshow External Call Modus aktivieren (einmalig)
+                        self.start_external_slideshow()
                         
                         xbmc.log(f"[{ADDON_NAME}] Stream erkannt: {playing_file}", xbmc.LOGINFO)
                 else:
