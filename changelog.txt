@@ -1,0 +1,17 @@
+v1.1.2 (2026-02-21)
+- Umbenannt zu "Audio Stream Monitor" (universeller Name)
+- Beschreibungen aktualisiert: Addon ist nicht auf Radio.de beschränkt
+- Unterstützt alle Addons, die HTTP/HTTPS Audio-Streams abspielen
+
+v1.1.1 (2026-02-19)
+- Korrigierte Titel/Artist Reihenfolge für radio.de API (Title - Artist)
+- Player InfoTag Update für Standard Kodi InfoLabels (MusicPlayer.Artist, MusicPlayer.Title)
+- Artist Slideshow Kompatibilität (artistslideshow.artistname/trackname)
+- Sender-spezifische Format-Erkennung (NDR, WDR, SWR, etc.)
+- Logo-Support aus verschiedenen Quellen (Player.Art(poster), Player.Icon, etc.)
+- Verbesserte Metadaten-Priorisierung (API-first für präzise Daten)
+
+v1.0.1 (Initial)
+- ICY-Metadaten Parsing
+- radio.de API Integration
+- Window Properties für Skins
