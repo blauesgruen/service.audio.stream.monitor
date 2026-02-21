@@ -1,14 +1,18 @@
-# Radio.de Light Monitor Service
+# Audio Stream Monitor
 
-Dieses Service-Addon überwacht Radio-Streams und liest die Metadaten (Titel, Interpret, etc.) korrekt aus.
+Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die Metadaten (Titel, Interpret, etc.) korrekt aus.
+
+**Funktioniert mit jedem Addon**, das Audio-Streams abspielt (Radio.de, TuneIn, Musik-Streaming, etc.).
 
 ## Features
 
-- ✅ Automatische Erkennung von Radio-Streams (HTTP/HTTPS)
-- ✅ Auslesen von ICY-Metadaten (Icecast)
+- ✅ Universelle Unterstützung für alle HTTP/HTTPS Audio-Streams
+- ✅ Automatische Erkennung von Radio- und Musik-Streams
+- ✅ Auslesen von ICY-Metadaten (Icecast/Shoutcast)
 - ✅ Trennung von Artist und Title
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
+- ✅ Spezielle Optimierungen für radio.de API
 
 ## Verfügbare Window Properties
 
