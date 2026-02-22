@@ -78,7 +78,14 @@ def _musicbrainz_recording_score(artist_name, recording_name):
         data = r.json()
         recordings = data.get("recordings", [])
         if recordings:
-            return int(recordings[0].get("score", 0))
+            # Rückgabe: Score, Artist, Title aus Recording
+            rec = recordings[0]
+            score = int(rec.get("score", 0))
+            rec_title = rec.get("title", "")
+            rec_artist = ""
+            if "artist-credit" in rec and rec["artist-credit"]:
+                rec_artist = rec["artist-credit"][0].get("name", "")
+            return score, rec_artist, rec_title
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: keine Treffer für '{artist_name}' / '{recording_name}'", xbmc.LOGDEBUG)
     except Exception as e:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Fehler - {e}", xbmc.LOGDEBUG)
@@ -125,28 +132,32 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Prüfe Artist-Score part2='{part2}'", xbmc.LOGDEBUG)
     score2 = _musicbrainz_artist_score(part2)
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Artist-Score part2 = {score2}", xbmc.LOGDEBUG)
-    if score1 == 1 and score2 == 1:
+    # Score >= 50 gilt als bekannt
+    known1 = score1 >= 50
+    known2 = score2 >= 50
+    if known1 and known2:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score 1, prüfe Recording-Kombination", xbmc.LOGDEBUG)
         rec_1_2 = _musicbrainz_recording_score(part1, part2)
         time.sleep(1)
         rec_2_1 = _musicbrainz_recording_score(part2, part1)
-        if rec_1_2 > 0:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title (Recording-Score part1/part2>0)", xbmc.LOGINFO)
-            return part1, part2, False
-        elif rec_2_1 > 0:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Zuordnung part2='{part2}' als Artist, part1='{part1}' als Title (Recording-Score part2/part1>0)", xbmc.LOGINFO)
-            return part2, part1, False
+        # rec_1_2 und rec_2_1 sind Tupel: (score, artist, title)
+        if rec_1_2[0] > 0:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}'", xbmc.LOGINFO)
+            return rec_1_2[1], rec_1_2[2], False
+        elif rec_2_1[0] > 0:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}'", xbmc.LOGINFO)
+            return rec_2_1[1], rec_2_1[2], False
         else:
             xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
             return part1, part2, True
-    elif score1 == 1:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part1 Score 1, Zuordnung part1='{part1}' als Artist", xbmc.LOGINFO)
+    elif known1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part1 Score >=50, Zuordnung part1='{part1}' als Artist", xbmc.LOGINFO)
         return part1, part2, False
-    elif score2 == 1:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part2 Score 1, Zuordnung part2='{part2}' als Artist", xbmc.LOGINFO)
+    elif known2:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part2 Score >=50, Zuordnung part2='{part2}' als Artist", xbmc.LOGINFO)
         return part2, part1, False
     else:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score 0, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score <50, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
         return part1, part2, True
     if rec_1_2 == 0 and rec_2_1 == 0:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
