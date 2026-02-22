@@ -28,6 +28,7 @@ DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)
 def _musicbrainz_artist_score(name):
     """Prüft ob name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt)."""
     if not name or not name.strip():
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Name leer", xbmc.LOGDEBUG)
         return 0
     url = "https://musicbrainz.org/ws/2/artist/"
     params = {"query": f'artist:"{name}"', "fmt": "json", "limit": 1}
@@ -37,8 +38,9 @@ def _musicbrainz_artist_score(name):
         artists = data.get("artists", [])
         if artists:
             return int(artists[0].get("score", 0))
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: keine Treffer für '{name}'", xbmc.LOGDEBUG)
     except Exception as e:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Check fehlgeschlagen: {e}", xbmc.LOGDEBUG)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Fehler - {e}", xbmc.LOGDEBUG)
     return 0
 
 
@@ -46,12 +48,11 @@ def _musicbrainz_recording_score(artist_name, recording_name):
     """
     Prüft ob es in MusicBrainz ein Recording mit diesem Künstler und diesem Titel gibt.
     Liefert Score des besten Treffers (0 = kein passendes Recording).
-    Entscheidend z.B. bei "Earth, Wind & Fire - September": nur (Artist, Title) passt.
     """
     if not artist_name or not recording_name:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Artist oder Titel leer", xbmc.LOGDEBUG)
         return 0
     url = "https://musicbrainz.org/ws/2/recording/"
-    # Query: artist:"..." AND recording:"..."
     params = {
         "query": f'artist:"{artist_name}" recording:"{recording_name}"',
         "fmt": "json",
@@ -63,8 +64,9 @@ def _musicbrainz_recording_score(artist_name, recording_name):
         recordings = data.get("recordings", [])
         if recordings:
             return int(recordings[0].get("score", 0))
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: keine Treffer für '{artist_name}' / '{recording_name}'", xbmc.LOGDEBUG)
     except Exception as e:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Check fehlgeschlagen: {e}", xbmc.LOGDEBUG)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Fehler - {e}", xbmc.LOGDEBUG)
     return 0
 
 
@@ -92,11 +94,12 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     """
     Ermittelt Artist/Title per MusicBrainz.
     1. Recording-Suche: Welche Zuordnung (part1=Artist, part2=Title) vs. (part2=Artist, part1=Title)
-       existiert als Song? Löst Fälle wie "Earth, Wind & Fire - September" (beide könnten Künstler sein).
-    2. Fallback: Artist-Score vergleichen, wenn keine Recording-Treffer.
+       existiert als Song? Löst Fälle wie "Earth, Wind & Fire - September".
+    2. Wenn beide Recording-Scores 0 sind (z.B. Timeout): Standard-Reihenfolge beibehalten (part1=Artist,
+       part2=Title), damit z.B. "Led Zeppelin - Whole Lotta Love" nicht fälschlich getauscht wird.
+    3. Nur bei Unentschieden mit positiven Recording-Scores: Artist-Score als Tie-Breaker.
     Returns: (artist, title, uncertain).
     """
-    # Zuerst Recording-Suche: welche Reihenfolge ist ein echter Song?
     rec_1_2 = _musicbrainz_recording_score(part1, part2)
     time.sleep(1)  # MusicBrainz Rate-Limit ~1 req/s
     rec_2_1 = _musicbrainz_recording_score(part2, part1)
@@ -104,7 +107,10 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
         return part1, part2, False
     if rec_2_1 > rec_1_2:
         return part2, part1, False
-    # Unentschieden oder beide 0: Fallback auf Artist-Score (welcher Teil ist der Künstler?)
+    # Beide 0 (kein Treffer/Timeout): Standard "Artist - Title" nicht tauschen
+    if rec_1_2 == 0 and rec_2_1 == 0:
+        return part1, part2, True
+    # Tie bei positiven Scores: Artist-Score als Tie-Breaker
     score1 = _musicbrainz_artist_score(part1)
     time.sleep(1)
     score2 = _musicbrainz_artist_score(part2)
