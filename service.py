@@ -38,29 +38,39 @@ def _musicbrainz_escape(s):
 
 
 def _musicbrainz_artist_score(name):
-    """Prüft ob name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt)."""
+    """
+    Prüft, ob der Name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt).
+    Rückgabe: Score (int)
+    Bei Verbindungsfehlern wird die Abfrage bis zu 2x wiederholt (Retry-Logik).
+    """
     if not name or not name.strip():
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Name leer", xbmc.LOGDEBUG)
         return 0
     url = "https://musicbrainz.org/ws/2/artist/"
     safe = _musicbrainz_escape(name)
     params = {"query": f'artist:"{safe}"', "fmt": "json", "limit": 1}
-    try:
-        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-        data = r.json()
-        artists = data.get("artists", [])
-        if artists:
-            return int(artists[0].get("score", 0))
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: keine Treffer für '{name}'", xbmc.LOGDEBUG)
-    except Exception as e:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Fehler - {e}", xbmc.LOGDEBUG)
+    retries = 2
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+            data = r.json()
+            artists = data.get("artists", [])
+            if artists:
+                return int(artists[0].get("score", 0))
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: keine Treffer für '{name}'", xbmc.LOGDEBUG)
+            break
+        except Exception as e:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score Fehler (Versuch {attempt+1}/{retries+1}): {e}", xbmc.LOGDEBUG)
+            if attempt < retries:
+                time.sleep(2)
     return 0
 
 
 def _musicbrainz_recording_score(artist_name, recording_name):
     """
-    Prüft ob es in MusicBrainz ein Recording mit diesem Künstler und diesem Titel gibt.
-    Liefert Score des besten Treffers (0 = kein passendes Recording).
+    Prüft, ob es in MusicBrainz ein Recording mit diesem Künstler und diesem Titel gibt.
+    Rückgabe: Tupel (score, artist, title, mbid, rec) – Score (int), Artist (str), Title (str), MBID (str), gesamtes Recording-Objekt (dict).
+    Bei Verbindungsfehlern wird die Abfrage bis zu 2x wiederholt (Retry-Logik).
     """
     if not artist_name or not recording_name:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Artist oder Titel leer", xbmc.LOGDEBUG)
@@ -73,22 +83,30 @@ def _musicbrainz_recording_score(artist_name, recording_name):
         "fmt": "json",
         "limit": 1,
     }
-    try:
-        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-        data = r.json()
-        recordings = data.get("recordings", [])
-        if recordings:
-            # Rückgabe: Score, Artist, Title aus Recording
-            rec = recordings[0]
-            score = int(rec.get("score", 0))
-            rec_title = rec.get("title", "")
-            rec_artist = ""
-            if "artist-credit" in rec and rec["artist-credit"]:
-                rec_artist = rec["artist-credit"][0].get("name", "")
-            return score, rec_artist, rec_title
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: keine Treffer für '{artist_name}' / '{recording_name}'", xbmc.LOGDEBUG)
-    except Exception as e:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Fehler - {e}", xbmc.LOGDEBUG)
+    retries = 2
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+            data = r.json()
+            recordings = data.get("recordings", [])
+            if recordings:
+                # Rückgabe: Score, Artist, Title, MBID, Recording-Objekt
+                rec = recordings[0]
+                score = int(rec.get("score", 0))
+                rec_title = rec.get("title", "")
+                rec_artist = ""
+                rec_mbid = rec.get("id", "")
+                if "artist-credit" in rec and rec["artist-credit"]:
+                    rec_artist = rec["artist-credit"][0].get("name", "")
+                # Logge alle relevanten Felder
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Ergebnis: Score={score}, Artist='{rec_artist}', Title='{rec_title}', MBID='{rec_mbid}', Recording={rec}", xbmc.LOGDEBUG)
+                return score, rec_artist, rec_title, rec_mbid, rec
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: keine Treffer für '{artist_name}' / '{recording_name}'", xbmc.LOGDEBUG)
+            break
+        except Exception as e:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score Fehler (Versuch {attempt+1}/{retries+1}): {e}", xbmc.LOGDEBUG)
+            if attempt < retries:
+                time.sleep(2)
     return 0
 
 
@@ -114,50 +132,27 @@ def _parse_radiode_api_title(full_title, station_name=None):
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
-    Ermittelt Artist/Title per MusicBrainz. Aufrufer hat part1/part2 bereits getrennt;
-    Sonderzeichen werden nur für die API-Query bereinigt (_musicbrainz_escape), Rückgabe
-    sind die originalen part1/part2.
-
-    Ablauf (wenig Traffic):
-    1. Eine Recording-Suche: part1=Artist, part2=Title. Bei Treffer (score>0) sofort return.
-    2. Nur wenn 0: zweite Recording-Suche (part2=Artist, part1=Title). Bei Treffer return.
+    Ermittelt Artist/Title per MusicBrainz ausschließlich über Recording-Abfragen.
+    Ablauf:
+    1. Recording-Abfrage: part1=Artist, part2=Title. Bei Treffer (score>0) sofort return.
+    2. Recording-Abfrage: part2=Artist, part1=Title. Bei Treffer return.
     3. Beide 0: Standard (part1=Artist, part2=Title), keine weiteren Requests.
-    4. Nur bei Gleichstand (beide Scores >0): zwei Artist-Suchen als Tie-Breaker.
-    Pro Titel also 1–2 Recording-Requests, ggf. +2 Artist-Requests. limit=1, timeout=5s.
+    Rückgabe: (Artist, Title, uncertain) – uncertain=True, wenn keine Recording-Treffer.
     """
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Prüfe Artist-Score part1='{part1}'", xbmc.LOGDEBUG)
-    score1 = _musicbrainz_artist_score(part1)
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Artist-Score part1 = {score1}", xbmc.LOGDEBUG)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part1/part2 und part2/part1", xbmc.LOGDEBUG)
+    rec_1_2 = _musicbrainz_recording_score(part1, part2)
     time.sleep(1)
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Prüfe Artist-Score part2='{part2}'", xbmc.LOGDEBUG)
-    score2 = _musicbrainz_artist_score(part2)
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Artist-Score part2 = {score2}", xbmc.LOGDEBUG)
-    # Score >= 50 gilt als bekannt
-    known1 = score1 >= 50
-    known2 = score2 >= 50
-    if known1 and known2:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score 1, prüfe Recording-Kombination", xbmc.LOGDEBUG)
-        rec_1_2 = _musicbrainz_recording_score(part1, part2)
-        time.sleep(1)
-        rec_2_1 = _musicbrainz_recording_score(part2, part1)
-        # rec_1_2 und rec_2_1 sind Tupel: (score, artist, title)
-        if rec_1_2[0] > 0:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}'", xbmc.LOGINFO)
-            return rec_1_2[1], rec_1_2[2], False
-        elif rec_2_1[0] > 0:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}'", xbmc.LOGINFO)
-            return rec_2_1[1], rec_2_1[2], False
-        else:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
-            return part1, part2, True
-    elif known1:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part1 Score >=50, Zuordnung part1='{part1}' als Artist", xbmc.LOGINFO)
-        return part1, part2, False
-    elif known2:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part2 Score >=50, Zuordnung part2='{part2}' als Artist", xbmc.LOGINFO)
-        return part2, part1, False
+    rec_2_1 = _musicbrainz_recording_score(part2, part1)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part1/part2: Score={rec_1_2[0]}, Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGDEBUG)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part2/part1: Score={rec_2_1[0]}, Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGDEBUG)
+    if rec_1_2[0] > 0:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
+        return rec_1_2[1], rec_1_2[2], False
+    elif rec_2_1[0] > 0:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
+        return rec_2_1[1], rec_2_1[2], False
     else:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score <50, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
         return part1, part2, True
     if rec_1_2 == 0 and rec_2_1 == 0:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
@@ -202,6 +197,10 @@ class PlayerMonitor(xbmc.Player):
 
 
 class RadioMonitor(xbmc.Monitor):
+    """
+    Hauptklasse für das Monitoring und die Verwaltung von Radio-Streams, Metadaten und Player-Events.
+    Verantwortlich für das Setzen und Löschen von Properties, das Aktualisieren von Metadaten und das Handling von API-Fallbacks.
+    """
     def __init__(self):
         super(RadioMonitor, self).__init__()
         self.player = xbmc.Player()
