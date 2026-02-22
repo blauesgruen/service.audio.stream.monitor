@@ -25,13 +25,26 @@ INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 
+def _musicbrainz_escape(s):
+    """
+    Für MusicBrainz-Query in Anführungszeichen: Doppelanführungen escapen,
+    Apostroph durch Leerzeichen ersetzen (vermeidet OSError 22 / Invalid argument unter macOS).
+    """
+    if not s:
+        return s
+    s = str(s).replace('\\', '\\\\').replace('"', '\\"')
+    s = s.replace("'", " ")  # Apostroph kann Request auf manchen Systemen kaputt machen
+    return s.strip() or " "
+
+
 def _musicbrainz_artist_score(name):
     """Prüft ob name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt)."""
     if not name or not name.strip():
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Name leer", xbmc.LOGDEBUG)
         return 0
     url = "https://musicbrainz.org/ws/2/artist/"
-    params = {"query": f'artist:"{name}"', "fmt": "json", "limit": 1}
+    safe = _musicbrainz_escape(name)
+    params = {"query": f'artist:"{safe}"', "fmt": "json", "limit": 1}
     try:
         r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
         data = r.json()
@@ -53,8 +66,10 @@ def _musicbrainz_recording_score(artist_name, recording_name):
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: Artist oder Titel leer", xbmc.LOGDEBUG)
         return 0
     url = "https://musicbrainz.org/ws/2/recording/"
+    safe_artist = _musicbrainz_escape(artist_name)
+    safe_recording = _musicbrainz_escape(recording_name)
     params = {
-        "query": f'artist:"{artist_name}" recording:"{recording_name}"',
+        "query": f'artist:"{safe_artist}" recording:"{safe_recording}"',
         "fmt": "json",
         "limit": 1,
     }
@@ -92,25 +107,26 @@ def _parse_radiode_api_title(full_title, station_name=None):
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
-    Ermittelt Artist/Title per MusicBrainz.
-    1. Recording-Suche: Welche Zuordnung (part1=Artist, part2=Title) vs. (part2=Artist, part1=Title)
-       existiert als Song? Löst Fälle wie "Earth, Wind & Fire - September".
-    2. Wenn beide Recording-Scores 0 sind (z.B. Timeout): Standard-Reihenfolge beibehalten (part1=Artist,
-       part2=Title), damit z.B. "Led Zeppelin - Whole Lotta Love" nicht fälschlich getauscht wird.
-    3. Nur bei Unentschieden mit positiven Recording-Scores: Artist-Score als Tie-Breaker.
-    Returns: (artist, title, uncertain).
+    Ermittelt Artist/Title per MusicBrainz. Aufrufer hat part1/part2 bereits getrennt;
+    Sonderzeichen werden nur für die API-Query bereinigt (_musicbrainz_escape), Rückgabe
+    sind die originalen part1/part2.
+
+    Ablauf (wenig Traffic):
+    1. Eine Recording-Suche: part1=Artist, part2=Title. Bei Treffer (score>0) sofort return.
+    2. Nur wenn 0: zweite Recording-Suche (part2=Artist, part1=Title). Bei Treffer return.
+    3. Beide 0: Standard (part1=Artist, part2=Title), keine weiteren Requests.
+    4. Nur bei Gleichstand (beide Scores >0): zwei Artist-Suchen als Tie-Breaker.
+    Pro Titel also 1–2 Recording-Requests, ggf. +2 Artist-Requests. limit=1, timeout=5s.
     """
     rec_1_2 = _musicbrainz_recording_score(part1, part2)
+    if rec_1_2 > 0:
+        return part1, part2, False
     time.sleep(1)  # MusicBrainz Rate-Limit ~1 req/s
     rec_2_1 = _musicbrainz_recording_score(part2, part1)
-    if rec_1_2 > rec_2_1:
-        return part1, part2, False
     if rec_2_1 > rec_1_2:
         return part2, part1, False
-    # Beide 0 (kein Treffer/Timeout): Standard "Artist - Title" nicht tauschen
     if rec_1_2 == 0 and rec_2_1 == 0:
         return part1, part2, True
-    # Tie bei positiven Scores: Artist-Score als Tie-Breaker
     score1 = _musicbrainz_artist_score(part1)
     time.sleep(1)
     score2 = _musicbrainz_artist_score(part2)
@@ -704,53 +720,26 @@ class RadioMonitor(xbmc.Monitor):
                     return api_artist, api_title
             return None, None
         
-        # Spezialformat: "Titel" von Interpret (öffentlich-rechtliche Sender)
-        # Beispiel: "Let's Talk About Sex" von Salt'n Pepa
+        # Eindeutiges Format: "Titel" von Interpret → immer Title vor, Artist nach "von"
         von_match = re.match(r'^"?(.+?)"?\s+von\s+(.+)$', stream_title, re.IGNORECASE)
         if von_match:
             title = von_match.group(1).strip()
             artist = von_match.group(2).strip()
-            xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Title='{title}', Artist='{artist}'", xbmc.LOGINFO)
+            xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Title='{title}', Artist='{artist}'", xbmc.LOGDEBUG)
             return artist, title
         
-        # Erkenne Format (Title - Artist vs Artist - Title) basierend auf Sender
-        title_first_senders = [
-            'ndr', 'wdr', 'swr', '.br.', 'mdr', 'rbb', 'hr',  # Öffentlich-rechtliche (.br. vermeidet Match auf 'bbradio')
-            'deutschlandfunk', 'dlf', 'radiobremen',
-            'icecast.ndr.de', 'wdr.de', 'swr.de'
-        ]
-        
-        # Prüfe ob der Sender "Title - Artist" Format nutzt
-        uses_title_first = False
-        if stream_url:
-            stream_url_lower = stream_url.lower()
-            for sender_pattern in title_first_senders:
-                if sender_pattern in stream_url_lower:
-                    uses_title_first = True
-                    xbmc.log(f"[{ADDON_NAME}] Sender nutzt 'Title - Artist' Format (erkannt: {sender_pattern})", xbmc.LOGDEBUG)
-                    break
-        
-        # Verschiedene Trennzeichen versuchen
+        # 1) Trennen: part1 / part2 (noch unbestimmt welches Artist/Title)
+        # 2) MusicBrainz: ermittelt welcher Part = Artist; Sonderzeichen werden dort nur für die API-Query bereinigt, Rückgabe sind Original-Strings
         separators = [' - ', ' – ', ' — ', ' | ', ': ']
-        
         for sep in separators:
             if sep in stream_title:
                 parts = stream_title.split(sep, 1)
                 if len(parts) == 2:
                     part1 = parts[0].strip()
                     part2 = parts[1].strip()
-                    
-                    # Zuordnung basierend auf Sender-Format oder MusicBrainz
-                    if uses_title_first:
-                        # Title - Artist Format (öffentlich-rechtliche Sender)
-                        title = part1
-                        artist = part2
-                    else:
-                        # Artist - Title: per MusicBrainz prüfen, welcher Teil der Künstler ist
-                        artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
-                        if uncertain:
-                            xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-                    
+                    artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
+                    if uncertain:
+                        xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
                     if artist in INVALID_METADATA_VALUES:
                         artist = None
                     if title in INVALID_METADATA_VALUES:
