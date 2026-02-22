@@ -1,3 +1,9 @@
+v1.1.3 (2026-02-22)
+- MusicBrainz-Recording-Abfrage ersetzt Artist-Score-Logik für bessere Zuordnung
+- Score-Retry bei Verbindungsfehlern (max. 2 Wiederholungen)
+- Logging aller Recording-Ergebnisse (Score, Artist, Title, MBID)
+- Kommentare und Docstrings aktualisiert
+
 v1.1.2 (2026-02-21)
 - Umbenannt zu "Audio Stream Monitor" (universeller Name)
 - Beschreibungen aktualisiert: Addon ist nicht auf Radio.de beschränkt
