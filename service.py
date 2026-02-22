@@ -118,22 +118,46 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     4. Nur bei Gleichstand (beide Scores >0): zwei Artist-Suchen als Tie-Breaker.
     Pro Titel also 1–2 Recording-Requests, ggf. +2 Artist-Requests. limit=1, timeout=5s.
     """
-    rec_1_2 = _musicbrainz_recording_score(part1, part2)
-    if rec_1_2 > 0:
-        return part1, part2, False
-    time.sleep(1)  # MusicBrainz Rate-Limit ~1 req/s
-    rec_2_1 = _musicbrainz_recording_score(part2, part1)
-    if rec_2_1 > rec_1_2:
-        return part2, part1, False
-    if rec_1_2 == 0 and rec_2_1 == 0:
-        return part1, part2, True
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Prüfe Artist-Score part1='{part1}'", xbmc.LOGDEBUG)
     score1 = _musicbrainz_artist_score(part1)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Artist-Score part1 = {score1}", xbmc.LOGDEBUG)
     time.sleep(1)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Prüfe Artist-Score part2='{part2}'", xbmc.LOGDEBUG)
     score2 = _musicbrainz_artist_score(part2)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Artist-Score part2 = {score2}", xbmc.LOGDEBUG)
+    if score1 == 1 and score2 == 1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score 1, prüfe Recording-Kombination", xbmc.LOGDEBUG)
+        rec_1_2 = _musicbrainz_recording_score(part1, part2)
+        time.sleep(1)
+        rec_2_1 = _musicbrainz_recording_score(part2, part1)
+        if rec_1_2 > 0:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title (Recording-Score part1/part2>0)", xbmc.LOGINFO)
+            return part1, part2, False
+        elif rec_2_1 > 0:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Zuordnung part2='{part2}' als Artist, part1='{part1}' als Title (Recording-Score part2/part1>0)", xbmc.LOGINFO)
+            return part2, part1, False
+        else:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+            return part1, part2, True
+    elif score1 == 1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part1 Score 1, Zuordnung part1='{part1}' als Artist", xbmc.LOGINFO)
+        return part1, part2, False
+    elif score2 == 1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Nur part2 Score 1, Zuordnung part2='{part2}' als Artist", xbmc.LOGINFO)
+        return part2, part1, False
+    else:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Parts Score 0, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+        return part1, part2, True
+    if rec_1_2 == 0 and rec_2_1 == 0:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+        return part1, part2, True
     if score1 > score2:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: part1='{part1}' als Artist, part2='{part2}' als Title (Artist-Score>part2)", xbmc.LOGINFO)
         return part1, part2, False
     if score2 > score1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: part2='{part2}' als Artist, part1='{part1}' als Title (Artist-Score>part1)", xbmc.LOGINFO)
         return part2, part1, False
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title (gleiches Artist-Score)", xbmc.LOGINFO)
     return part1, part2, True
 
 
@@ -737,12 +761,21 @@ class RadioMonitor(xbmc.Monitor):
                 if len(parts) == 2:
                     part1 = parts[0].strip()
                     part2 = parts[1].strip()
+                    invalid = INVALID_METADATA_VALUES + ['', station_name]
+                    if (part1 in invalid or part2 in invalid or re.match(r'^\d+$', part1) or re.match(r'^\d+$', part2)):
+                        xbmc.log(f"[{ADDON_NAME}] Plausibilitäts-Check: MusicBrainz übersprungen, nutze Standard: Artist='{part1}', Title='{part2}'", xbmc.LOGDEBUG)
+                        artist = part1 if part1 not in invalid else None
+                        title = part2 if part2 not in invalid else None
+                        if not artist and not title:
+                            return None, None
+                        return artist, title
+                    # Nur wenn beide plausible Musikdaten: MusicBrainz-Korrektur
                     artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
                     if uncertain:
                         xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-                    if artist in INVALID_METADATA_VALUES:
+                    if artist in invalid:
                         artist = None
-                    if title in INVALID_METADATA_VALUES:
+                    if title in invalid:
                         title = None
                     if not artist and not title:
                         return None, None
