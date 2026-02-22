@@ -145,11 +145,25 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     rec_2_1 = _musicbrainz_recording_score(part2, part1)
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part1/part2: Score={rec_1_2[0]}, Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGDEBUG)
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part2/part1: Score={rec_2_1[0]}, Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGDEBUG)
-    if rec_1_2[0] > 0:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
+    # Plausibilitätsprüfung: Wähle das Recording-Ergebnis, das am besten zu den Streamdaten passt
+    def is_match(rec_artist, rec_title, part_artist, part_title):
+        return (rec_artist.strip().lower() == part_artist.strip().lower() and rec_title.strip().lower() == part_title.strip().lower())
+
+    # Prüfe beide Varianten
+    match_1_2 = is_match(rec_1_2[1], rec_1_2[2], part1, part2)
+    match_2_1 = is_match(rec_2_1[1], rec_2_1[2], part2, part1)
+    if match_1_2:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Exakte Zuordnung part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
+        return rec_1_2[1], rec_1_2[2], False
+    elif match_2_1:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Exakte Zuordnung part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
+        return rec_2_1[1], rec_2_1[2], False
+    # Falls kein exakter Match, wähle das Ergebnis mit höchstem Score
+    if rec_1_2[0] >= rec_2_1[0] and rec_1_2[0] > 0:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2 (höchster Score): Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
         return rec_1_2[1], rec_1_2[2], False
     elif rec_2_1[0] > 0:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1 (höchster Score): Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
         return rec_2_1[1], rec_2_1[2], False
     else:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
