@@ -8,8 +8,8 @@
   <extension point="xbmc.addon.metadata">
     <summary lang="de_DE">Universeller Monitor für HTTP/HTTPS Audio-Streams</summary>
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
-    <description lang="de_DE">Überwacht alle HTTP/HTTPS Audio-Streams (Radio, Musik-Streaming, etc.) und zeigt Song-Informationen korrekt an. Unterstützt ICY-Metadaten, radio.de API, Artist Slideshow Integration und aktualisiert Kodi-Player InfoLabels. Funktioniert mit jedem Addon, das Audio-Streams abspielt.</description>
-    <description lang="en_GB">Monitors all HTTP/HTTPS audio streams (radio, music streaming, etc.) and displays song information correctly. Supports ICY metadata, radio.de API, Artist Slideshow integration and updates Kodi player InfoLabels. Works with any addon that plays audio streams.</description>
+    <description lang="de_DE">Überwacht alle HTTP/HTTPS Audio-Streams (Radio, Musik-Streaming, etc.) und zeigt Song-Informationen korrekt an. Unterstützt ICY-Metadaten, radio.de API, Artist Slideshow Integration und aktualisiert Kodi-Player InfoLabels. MusicBrainz-Integration für präzise Artist/Title-Erkennung (Recording-Abfrage, Score-Retry). Funktioniert mit jedem Addon, das Audio-Streams abspielt.</description>
+    <description lang="en_GB">Monitors all HTTP/HTTPS audio streams (radio, music streaming, etc.) and displays song information correctly. Supports ICY metadata, radio.de API, Artist Slideshow integration and updates Kodi player InfoLabels. MusicBrainz integration for precise artist/title detection (recording query, score retry). Works with any addon that plays audio streams.</description>
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
