@@ -11,6 +11,109 @@ from urllib.parse import urlparse
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
+ADDON_VERSION = ADDON.getAddonInfo('version')
+
+# MusicBrainz API: User-Agent erforderlich (Richtlinie), ~1 Request/Sekunde
+MUSICBRAINZ_HEADERS = {
+    "User-Agent": f"RadioMonitorLight/{ADDON_VERSION} (https://github.com; Kodi addon {ADDON_ID})"
+}
+
+# Ungültige Metadaten-Werte (StreamTitle/Artist/Title)
+INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
+
+# Standard HTTP-Header für externe APIs (radio.de etc.)
+DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+
+def _musicbrainz_artist_score(name):
+    """Prüft ob name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt)."""
+    if not name or not name.strip():
+        return 0
+    url = "https://musicbrainz.org/ws/2/artist/"
+    params = {"query": f'artist:"{name}"', "fmt": "json", "limit": 1}
+    try:
+        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        data = r.json()
+        artists = data.get("artists", [])
+        if artists:
+            return int(artists[0].get("score", 0))
+    except Exception as e:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Check fehlgeschlagen: {e}", xbmc.LOGDEBUG)
+    return 0
+
+
+def _musicbrainz_recording_score(artist_name, recording_name):
+    """
+    Prüft ob es in MusicBrainz ein Recording mit diesem Künstler und diesem Titel gibt.
+    Liefert Score des besten Treffers (0 = kein passendes Recording).
+    Entscheidend z.B. bei "Earth, Wind & Fire - September": nur (Artist, Title) passt.
+    """
+    if not artist_name or not recording_name:
+        return 0
+    url = "https://musicbrainz.org/ws/2/recording/"
+    # Query: artist:"..." AND recording:"..."
+    params = {
+        "query": f'artist:"{artist_name}" recording:"{recording_name}"',
+        "fmt": "json",
+        "limit": 1,
+    }
+    try:
+        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        data = r.json()
+        recordings = data.get("recordings", [])
+        if recordings:
+            return int(recordings[0].get("score", 0))
+    except Exception as e:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Check fehlgeschlagen: {e}", xbmc.LOGDEBUG)
+    return 0
+
+
+def _parse_radiode_api_title(full_title, station_name=None):
+    """
+    Parst radio.de API Format "TITLE - ARTIST". Gibt (artist, title) zurück;
+    ungültige Werte werden zu ''/None. station_name wird als ungültiger Title gefiltert.
+    """
+    invalid = INVALID_METADATA_VALUES + ['']
+    if not full_title or ' - ' not in full_title:
+        return None, None
+    parts = full_title.split(' - ', 1)
+    title = parts[0].strip()
+    artist = parts[1].strip()
+    if artist in invalid:
+        artist = ''
+    if title in invalid or (station_name and title == station_name):
+        title = ''
+    if title and re.match(r'^\d+\s*-\s*\d+$', title):
+        return None, None
+    return artist or None, title or None
+
+
+def _identify_artist_title_via_musicbrainz(part1, part2):
+    """
+    Ermittelt Artist/Title per MusicBrainz.
+    1. Recording-Suche: Welche Zuordnung (part1=Artist, part2=Title) vs. (part2=Artist, part1=Title)
+       existiert als Song? Löst Fälle wie "Earth, Wind & Fire - September" (beide könnten Künstler sein).
+    2. Fallback: Artist-Score vergleichen, wenn keine Recording-Treffer.
+    Returns: (artist, title, uncertain).
+    """
+    # Zuerst Recording-Suche: welche Reihenfolge ist ein echter Song?
+    rec_1_2 = _musicbrainz_recording_score(part1, part2)
+    time.sleep(1)  # MusicBrainz Rate-Limit ~1 req/s
+    rec_2_1 = _musicbrainz_recording_score(part2, part1)
+    if rec_1_2 > rec_2_1:
+        return part1, part2, False
+    if rec_2_1 > rec_1_2:
+        return part2, part1, False
+    # Unentschieden oder beide 0: Fallback auf Artist-Score (welcher Teil ist der Künstler?)
+    score1 = _musicbrainz_artist_score(part1)
+    time.sleep(1)
+    score2 = _musicbrainz_artist_score(part2)
+    if score1 > score2:
+        return part1, part2, False
+    if score2 > score1:
+        return part2, part1, False
+    return part1, part2, True
+
 
 # Window-Properties für die Skin
 WINDOW = xbmcgui.Window(10000)  # Home window
@@ -84,11 +187,11 @@ class RadioMonitor(xbmc.Monitor):
         if self.player.isPlayingAudio():
             try:
                 self.player.clearProperty('Artist')
-                self.player.clearProperty('Title') 
+                self.player.clearProperty('Title')
                 self.player.clearProperty('Album')
                 self.player.clearProperty('Genre')
                 self.player.clearProperty('StreamTitle')
-            except:
+            except Exception:
                 pass
         
         xbmc.log(f"[{ADDON_NAME}] Properties gelöscht", xbmc.LOGDEBUG)
@@ -156,9 +259,7 @@ class RadioMonitor(xbmc.Monitor):
             if 'radiode' in url.lower() or 'radio.de' in url.lower() or 'radio-de' in url.lower():
                 xbmc.log(f"[{ADDON_NAME}] radio.de Stream erkannt, versuche alternative Metadaten-Quelle", xbmc.LOGDEBUG)
                 
-                # Fallback: Verwende die Stream-URL Teile für Sender-Erkennung
-                # z.B. https://stream.berliner-rundfunk.de/brf-100prozent-deutsch/mp3-128/radiode/
-                import re
+                # Fallback: Stream-URL für Sender-Erkennung (z.B. stream.berliner-rundfunk.de/...)
                 match = re.search(r'stream\.([^/]+)\.de/([^/]+)', url)
                 if not match:
                     match = re.search(r'//([^/]+)/([^/]+)', url)
@@ -215,10 +316,7 @@ class RadioMonitor(xbmc.Monitor):
                 title = info_tag.getTitle()
                 artist = info_tag.getArtist()
                 
-                # Liste ungültiger Werte
-                invalid_values = ['Unknown', 'Radio Stream', 'Internet Radio', '', station_name]
-                
-                # Validierung: Nur nutzen wenn valide
+                invalid_values = INVALID_METADATA_VALUES + ['', station_name]
                 if title and title not in invalid_values:
                     # Filter Zahlen-IDs
                     if re.match(r'^\d+\s*-\s*\d+$', title):
@@ -316,14 +414,8 @@ class RadioMonitor(xbmc.Monitor):
             
             xbmc.log(f"[{ADDON_NAME}] Suche radio.de API mit: '{search_name}' (Original: '{station_name}')", xbmc.LOGDEBUG)
             
-            # SCHRITT 1: Finde die Station-ID über Search-API
             search_url = f"https://prod.radio-api.net/stations/search?query={search_name.replace(' ', '+')}&count=20"
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = requests.get(search_url, headers=headers, timeout=5)
+            response = requests.get(search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
             data = response.json()
             
             xbmc.log(f"[{ADDON_NAME}] Search API: {data.get('totalCount', 0)} Treffer", xbmc.LOGDEBUG)
@@ -387,8 +479,7 @@ class RadioMonitor(xbmc.Monitor):
                         
                         try:
                             nowplaying_url = f"https://api.radio.de/stations/now-playing?stationIds={station_id}"
-                            np_response = requests.get(nowplaying_url, headers=headers, timeout=5)
-                            
+                            np_response = requests.get(nowplaying_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                             if np_response.status_code == 200:
                                 np_data = np_response.json()
                                 xbmc.log(f"[{ADDON_NAME}] now-playing API Response: {np_data}", xbmc.LOGDEBUG)
@@ -401,30 +492,14 @@ class RadioMonitor(xbmc.Monitor):
                                     xbmc.log(f"[{ADDON_NAME}] Empfangener Titel: '{full_title}'", xbmc.LOGDEBUG)
                                     
                                     if full_title and ' - ' in full_title:
-                                        # Split "TITLE - ARTIST" (radio.de API Format)
-                                        parts = full_title.split(' - ', 1)
-                                        title = parts[0].strip()  # Erster Teil ist der Titel
-                                        artist = parts[1].strip()  # Zweiter Teil ist der Artist
-                                        
-                                        # Validierung
-                                        invalid_values = ['Unknown', 'Radio Stream', 'Internet Radio', '']
-                                        
-                                        if artist in invalid_values:
-                                            artist = ''
-                                        if title in invalid_values or title == station_name:
-                                            title = ''
-                                        
-                                        # Filter Zahlen-IDs
-                                        if title and re.match(r'^\d+\s*-\s*\d+$', title):
-                                            xbmc.log(f"[{ADDON_NAME}] API liefert Zahlen-ID: {title}", xbmc.LOGDEBUG)
-                                            title = ''
-                                        
-                                        if artist and title:
-                                            xbmc.log(f"[{ADDON_NAME}] ✓ now-playing API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
-                                            return artist, title
-                                        elif title:
-                                            xbmc.log(f"[{ADDON_NAME}] ✓ now-playing API erfolgreich (nur Title): {title}", xbmc.LOGINFO)
-                                            return None, title
+                                        artist, title = _parse_radiode_api_title(full_title, station_name)
+                                        if artist is not None or title is not None:
+                                            if artist and title:
+                                                xbmc.log(f"[{ADDON_NAME}] ✓ now-playing API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
+                                                return artist, title
+                                            if title:
+                                                xbmc.log(f"[{ADDON_NAME}] ✓ now-playing API erfolgreich (nur Title): {title}", xbmc.LOGINFO)
+                                                return None, title
                                     else:
                                         xbmc.log(f"[{ADDON_NAME}] ✗ Titel-Format unbekannt: '{full_title}'", xbmc.LOGDEBUG)
                                 else:
@@ -438,7 +513,7 @@ class RadioMonitor(xbmc.Monitor):
                                         
                                         # Suche nach der ENERGY-Variante
                                         alt_search_url = f"https://prod.radio-api.net/stations/search?query={alternative_name.replace(' ', '+')}&count=10"
-                                        alt_response = requests.get(alt_search_url, headers=headers, timeout=5)
+                                        alt_response = requests.get(alt_search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                                         alt_data = alt_response.json()
                                         
                                         if 'playables' in alt_data and len(alt_data['playables']) > 0:
@@ -449,7 +524,7 @@ class RadioMonitor(xbmc.Monitor):
                                             
                                             if alt_id:
                                                 alt_np_url = f"https://api.radio.de/stations/now-playing?stationIds={alt_id}"
-                                                alt_np_response = requests.get(alt_np_url, headers=headers, timeout=5)
+                                                alt_np_response = requests.get(alt_np_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                                                 
                                                 if alt_np_response.status_code == 200:
                                                     alt_np_data = alt_np_response.json()
@@ -458,20 +533,12 @@ class RadioMonitor(xbmc.Monitor):
                                                     if isinstance(alt_np_data, list) and len(alt_np_data) > 0:
                                                         alt_track = alt_np_data[0]
                                                         alt_full_title = alt_track.get('title', '')
-                                                        
-                                                        if alt_full_title and ' - ' in alt_full_title:
-                                                            # Split "TITLE - ARTIST" (radio.de API Format)
-                                                            parts = alt_full_title.split(' - ', 1)
-                                                            title = parts[0].strip()  # Erster Teil ist der Titel
-                                                            artist = parts[1].strip()  # Zweiter Teil ist der Artist
-                                                            
-                                                            invalid_values = ['Unknown', 'Radio Stream', 'Internet Radio', '']
-                                                            if artist not in invalid_values and title not in invalid_values:
-                                                                xbmc.log(f"[{ADDON_NAME}] ✓ Alternative API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
-                                                                return artist, title
+                                                        artist, title = _parse_radiode_api_title(alt_full_title, alt_name)
+                                                        if artist and title:
+                                                            xbmc.log(f"[{ADDON_NAME}] ✓ Alternative API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
+                                                            return artist, title
                             else:
                                 xbmc.log(f"[{ADDON_NAME}] ✗ now-playing API Fehler: {np_response.status_code}", xbmc.LOGDEBUG)
-                        
                         except Exception as e:
                             xbmc.log(f"[{ADDON_NAME}] Fehler bei now-playing API: {str(e)}", xbmc.LOGWARNING)
 
@@ -541,11 +608,7 @@ class RadioMonitor(xbmc.Monitor):
     def parse_icy_metadata(self, url):
         """Liest ICY-Metadaten aus dem Stream"""
         try:
-            headers = {
-                'Icy-MetaData': '1',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
+            headers = {'Icy-MetaData': '1', **DEFAULT_HTTP_HEADERS}
             response = requests.get(url, headers=headers, stream=True, timeout=5)
             
             # KOMPLETT LOGGEN: Alle ICY-Header
@@ -620,9 +683,7 @@ class RadioMonitor(xbmc.Monitor):
             xbmc.log(f"[{ADDON_NAME}] StreamTitle ist leer", xbmc.LOGDEBUG)
             return None, None
         
-        # FILTER: Ungültige Werte
-        invalid_values = ['Unknown', 'Radio Stream', 'Internet Radio']
-        if stream_title in invalid_values:
+        if stream_title in INVALID_METADATA_VALUES:
             xbmc.log(f"[{ADDON_NAME}] StreamTitle ist ungültig: '{stream_title}'", xbmc.LOGDEBUG)
             return None, None
         
@@ -673,31 +734,26 @@ class RadioMonitor(xbmc.Monitor):
                     part1 = parts[0].strip()
                     part2 = parts[1].strip()
                     
-                    # Zuordnung basierend auf Sender-Format
+                    # Zuordnung basierend auf Sender-Format oder MusicBrainz
                     if uses_title_first:
-                        # Title - Artist Format
+                        # Title - Artist Format (öffentlich-rechtliche Sender)
                         title = part1
                         artist = part2
                     else:
-                        # Artist - Title Format (Standard)
-                        artist = part1
-                        title = part2
+                        # Artist - Title: per MusicBrainz prüfen, welcher Teil der Künstler ist
+                        artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
+                        if uncertain:
+                            xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
                     
-                    # Validierung der einzelnen Teile
-                    if artist in invalid_values:
+                    if artist in INVALID_METADATA_VALUES:
                         artist = None
-                    if title in invalid_values:
+                    if title in INVALID_METADATA_VALUES:
                         title = None
-                    
-                    # Wenn beide ungültig, return None, None
                     if not artist and not title:
                         return None, None
-                    
                     return artist, title
         
-        # Kein Trennzeichen gefunden - alles als Titel
-        # Aber nur wenn nicht ungültig
-        if stream_title.strip() not in invalid_values:
+        if stream_title.strip() not in INVALID_METADATA_VALUES:
             return None, stream_title.strip()
         
         return None, None
@@ -717,10 +773,10 @@ class RadioMonitor(xbmc.Monitor):
         metaint = stream_info['metaint']
         response = stream_info['response']
         last_title = ""
-        
+        # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
+        # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
             while not self.stop_thread and self.is_playing:
-                # Audio-Daten überspringen
                 audio_data = response.raw.read(metaint)
                 if not audio_data:
                     break
@@ -776,10 +832,7 @@ class RadioMonitor(xbmc.Monitor):
                             WINDOW.clearProperty('RadioMonitor.StreamTitle')
                             continue
                         
-                        # Window-Properties NUR setzen wenn valide Werte vorhanden
-                        # StreamTitle nur setzen wenn es valide Daten enthält
-                        invalid_values = ['Unknown', 'Radio Stream', 'Internet Radio']
-                        if stream_title not in invalid_values:
+                        if stream_title not in INVALID_METADATA_VALUES:
                             self.set_property_safe('RadioMonitor.StreamTitle', stream_title)
                         
                         if artist:
@@ -866,7 +919,7 @@ class RadioMonitor(xbmc.Monitor):
         finally:
             try:
                 response.close()
-            except:
+            except Exception:
                 pass
             xbmc.log(f"[{ADDON_NAME}] Metadata Worker beendet", xbmc.LOGDEBUG)
             
@@ -957,7 +1010,7 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] Logo gesetzt: {self.station_logo}", xbmc.LOGINFO)
                             else:
                                 xbmc.log(f"[{ADDON_NAME}] Kein echtes Logo, nutze Kodi-Fallback", xbmc.LOGDEBUG)
-                        except:
+                        except Exception:
                             pass
                         
                         # Hole Logo von radio.de API (falls NDR/WDR/etc.) NUR wenn noch kein Logo vorhanden
@@ -970,9 +1023,7 @@ class RadioMonitor(xbmc.Monitor):
                                 search_name = search_name.strip()
                                 
                                 search_url = f"https://prod.radio-api.net/stations/search?query={search_name.replace(' ', '+')}&count=5"
-                                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                                
-                                response = requests.get(search_url, headers=headers, timeout=5)
+                                response = requests.get(search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                                 data = response.json()
                                 
                                 if 'playables' in data and len(data['playables']) > 0:
@@ -1004,7 +1055,7 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Artist = {info_tag.getArtist()}", xbmc.LOGINFO)
                                 xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Title = {info_tag.getTitle()}", xbmc.LOGINFO)
                                 xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Album = {info_tag.getAlbum()}", xbmc.LOGINFO)
-                        except:
+                        except Exception:
                             pass
                         xbmc.log(f"[{ADDON_NAME}] ========================================", xbmc.LOGDEBUG)
                         
