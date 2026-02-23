@@ -184,17 +184,6 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     else:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
         return part1, part2, True
-    if rec_1_2 == 0 and rec_2_1 == 0:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
-        return part1, part2, True
-    if score1 > score2:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: part1='{part1}' als Artist, part2='{part2}' als Title (Artist-Score>part2)", xbmc.LOGINFO)
-        return part1, part2, False
-    if score2 > score1:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: part2='{part2}' als Artist, part1='{part1}' als Title (Artist-Score>part1)", xbmc.LOGINFO)
-        return part2, part1, False
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Tie-Breaker: Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title (gleiches Artist-Score)", xbmc.LOGINFO)
-    return part1, part2, True
 
 
 # Window-Properties für die Skin
@@ -252,8 +241,6 @@ class RadioMonitor(xbmc.Monitor):
         # Reset Logo
         self.station_logo = None
 
-
-        
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
         WINDOW.clearProperty('RadioDE.StationName')
@@ -824,7 +811,7 @@ class RadioMonitor(xbmc.Monitor):
                 if len(parts) == 2:
                     part1 = parts[0].strip()
                     part2 = parts[1].strip()
-                    # Immer MusicBrainz prüfen, egal ob plausibel
+                    # Immer MusicBrainz prüfen, da bei Radio-Streams Artist/Title-Reihenfolge fast nie eindeutig ist
                     artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
                     if uncertain:
                         xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
@@ -1041,6 +1028,16 @@ class RadioMonitor(xbmc.Monitor):
         """Überprüft, was gerade abgespielt wird"""
         if self.player.isPlaying():
             try:
+                # Nur Audio-Streams überwachen, kein Video
+                if not self.player.isPlayingAudio():
+                    if self.is_playing:
+                        self.is_playing = False
+                        self.current_url = None
+                        self.stop_metadata_monitoring()
+                        self.clear_properties()
+                        xbmc.log(f"[{ADDON_NAME}] Video läuft - kein Radio-Monitoring", xbmc.LOGDEBUG)
+                    return
+
                 # URL des aktuellen Streams
                 playing_file = self.player.getPlayingFile()
                 
