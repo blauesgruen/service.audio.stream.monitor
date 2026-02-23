@@ -1,3 +1,10 @@
+v1.1.5 (2026-02-23)
+- Priorisierung der Metadaten-Quellen verbessert: API-Daten werden bevorzugt, MusicBrainz dient nur noch zur Validierung und überschreibt keine korrekten API-Ergebnisse mehr.
+- Fehlerhafte Artist/Title-Zuordnung bei ICY-Metadaten behoben (z.B. "Pretenders - Don't get me wrong" wird jetzt korrekt erkannt).
+- Logging erweitert: paralleles Logging von ICY- und API-Daten, detaillierte Ausgaben zu allen Metadaten-Quellen und Entscheidungen.
+- Robustheit erhöht: Fehlerbehandlung und Fallback-Logik für ungültige oder fehlende Metadaten optimiert.
+- Kommentare und Docstrings aktualisiert und präzisiert.
+
 v1.1.4 (2026-02-23)
 - Sofortiges Erfassen und Setzen des Logos beim Streamstart verbessert (onAVStarted prüft jetzt auch Video/Dateien, Logging erweitert)
 - Refactoring: Artist/Title-Erkennung in MusicBrainz-Queries optimiert, überflüssige Tie-Breaker entfernt, Kommentare präzisiert
