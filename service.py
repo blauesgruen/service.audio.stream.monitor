@@ -110,13 +110,26 @@ def _musicbrainz_recording_score(artist_name, recording_name):
                 rec = recordings[0]
                 score = int(rec.get("score", 0))
                 rec_title = rec.get("title", "")
-                rec_artist = ""
                 rec_mbid = rec.get("id", "")
+                rec_artist = ""
+                rec_artist_full = ""  # kompletter Artist-String inkl. aller credits + joinphrases
                 if "artist-credit" in rec and rec["artist-credit"]:
+                    # Erster credit als Basis (Fallback)
                     rec_artist = rec["artist-credit"][0].get("name", "")
+                    # Vollständigen Artist-String zusammenbauen:
+                    # z.B. [{"name":"Zucchero","joinphrase":" feat. "},{"name":"Paul Young","joinphrase":""}]
+                    # → "Zucchero feat. Paul Young"
+                    parts = []
+                    for credit in rec["artist-credit"]:
+                        if isinstance(credit, dict):
+                            parts.append(credit.get("name", ""))
+                            joinphrase = credit.get("joinphrase", "")
+                            if joinphrase:
+                                parts.append(joinphrase)
+                    rec_artist_full = "".join(parts).strip()
                 # Logge alle relevanten Felder
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Ergebnis: Score={score}, Artist='{rec_artist}', Title='{rec_title}', MBID='{rec_mbid}', Recording={rec}", xbmc.LOGDEBUG)
-                return score, rec_artist, rec_title, rec_mbid, rec
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Ergebnis: Score={score}, Artist='{rec_artist}', ArtistFull='{rec_artist_full}', Title='{rec_title}', MBID='{rec_mbid}'", xbmc.LOGDEBUG)
+                return score, rec_artist_full or rec_artist, rec_title, rec_mbid, rec
             xbmc.log(f"[{ADDON_NAME}] MusicBrainz Recording-Score 0: keine Treffer für '{artist_name}' / '{recording_name}'", xbmc.LOGDEBUG)
             break
         except Exception as e:
@@ -814,61 +827,46 @@ class RadioMonitor(xbmc.Monitor):
         return None
         
     def parse_stream_title(self, stream_title, station_name=None, stream_url=None):
-        """Trennt Artist und Title"""
-        
-        # Bei leerem, ungültigem oder Zahlen-StreamTitle → immer ICY prüfen, dann API, dann MusicBrainz
+        """
+        Trennt Artist und Title aus dem ICY-StreamTitle.
+        Priorität:
+        1. Stationsname → immer aus ICY (wird hier nicht geändert)
+        2. 'von'-Format → eindeutig, MusicBrainz zur Bestätigung
+        3. Trennzeichen → part1/part2:
+           a. API prüfen (nur wenn artist UND title gefüllt)
+           b. Kreuz-Validierung API gegen ICY-Parts
+           c. MusicBrainz immer zur Bestätigung/Korrektur
+        4. Fallback: nur ICY + MusicBrainz
+        """
         invalid = INVALID_METADATA_VALUES + ["", station_name]
-        needs_fallback = (
-            not stream_title or stream_title in INVALID_METADATA_VALUES or re.match(r'^\d+\s*-\s*\d+$', stream_title)
-        )
-        if needs_fallback:
-            xbmc.log(f"[{ADDON_NAME}] StreamTitle ist leer/ungültig/Zahlen: '{stream_title}'", xbmc.LOGDEBUG)
-            # Versuche ICY-Daten zu extrahieren
-            icy_artist, icy_title = None, None
-            if stream_title and not re.match(r'^\d+\s*-\s*\d+$', stream_title):
-                # Versuche einfache Trennung
-                icy_artist, icy_title = self.parse_stream_title_simple(stream_title)
-            # Wenn keine brauchbaren ICY-Daten, nutze API
-            if (not icy_artist or not icy_title or icy_artist in invalid or icy_title in invalid):
-                if station_name and stream_url:
-                    api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
-                    if api_artist and api_title:
-                        xbmc.log(f"[{ADDON_NAME}] API lieferte Metadaten (Fallback): {api_artist} - {api_title}", xbmc.LOGINFO)
-                        icy_artist, icy_title = api_artist, api_title
-            # Wenn jetzt plausible Daten vorhanden, MusicBrainz prüfen
-            if icy_artist and icy_title and icy_artist not in invalid and icy_title not in invalid:
-                artist, title, uncertain = _identify_artist_title_via_musicbrainz(icy_artist, icy_title)
-                if uncertain:
-                    xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-                if artist in invalid:
-                    artist = None
-                if title in invalid:
-                    title = None
-                if not artist and not title:
-                    return None, None
-                return artist, title
+
+        # --- StreamTitle Grundvalidierung ---
+        if not stream_title or stream_title in INVALID_METADATA_VALUES or re.match(r'^\d+\s*-\s*\d+$', stream_title):
+            xbmc.log(f"[{ADDON_NAME}] StreamTitle leer/ungültig: '{stream_title}'", xbmc.LOGDEBUG)
+            # Kein ICY-Titel → nur API als letzte Chance (beide Felder müssen gefüllt sein)
+            if station_name and stream_url:
+                api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
+                if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
+                    xbmc.log(f"[{ADDON_NAME}] API-Fallback (kein ICY): Artist='{api_artist}', Title='{api_title}'", xbmc.LOGINFO)
+                    return api_artist, api_title
             return None, None
-        
-        # Eindeutiges Format: "Titel" von Interpret → immer Title vor, Artist nach "von"
-        von_match = re.match(r'^"?(.+?)"?\s+von\s+(.+)$', stream_title, re.IGNORECASE)
+
+        # --- 'von'-Format → nur wenn Title in Anführungszeichen (sonst Programm-Ansage) ---
+        von_match = re.match(r'^"(.+?)"\s+von\s+(.+)$', stream_title, re.IGNORECASE)
         if von_match:
-            title = von_match.group(1).strip()
+            title  = von_match.group(1).strip()
             artist = von_match.group(2).strip()
-            xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Title='{title}', Artist='{artist}'", xbmc.LOGDEBUG)
-            # MusicBrainz-Korrektur
+            xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
             mb_artist, mb_title, uncertain = _identify_artist_title_via_musicbrainz(artist, title)
             if uncertain:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGDEBUG)
-            if mb_artist in invalid:
-                mb_artist = None
-            if mb_title in invalid:
-                mb_title = None
-            if not mb_artist and not mb_title:
-                return None, None
-            return mb_artist, mb_title
-        
-        # 1) Trennen: part1 / part2 (noch unbestimmt welches Artist/Title)
-        # 2) MusicBrainz: ermittelt welcher Part = Artist; Sonderzeichen werden dort nur für die API-Query bereinigt, Rückgabe sind Original-Strings
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze 'von'-Ergebnis: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
+                mb_artist, mb_title = artist, title
+            if mb_artist in invalid: mb_artist = None
+            if mb_title in invalid:  mb_title  = None
+            return mb_artist or None, mb_title or None
+
+        # --- Trennzeichen → part1 / part2 ---
+        part1, part2 = None, None
         separators = [' - ', ' – ', ' — ', ' | ', ': ']
         for sep in separators:
             if sep in stream_title:
@@ -876,21 +874,64 @@ class RadioMonitor(xbmc.Monitor):
                 if len(parts) == 2:
                     part1 = parts[0].strip()
                     part2 = parts[1].strip()
-                    # Immer MusicBrainz prüfen, da bei Radio-Streams Artist/Title-Reihenfolge fast nie eindeutig ist
-                    artist, title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
-                    if uncertain:
-                        xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze Standard: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-                    if artist in invalid:
-                        artist = None
-                    if title in invalid:
-                        title = None
-                    if not artist and not title:
-                        return None, None
-                    return artist, title
-        
-        if stream_title.strip() not in INVALID_METADATA_VALUES:
-            return None, stream_title.strip()
-        return None, None
+                    break
+
+        if not part1 or not part2:
+            # Kein Trennzeichen → ganzer String ist vermutlich nur Title
+            if stream_title.strip() not in INVALID_METADATA_VALUES:
+                return None, stream_title.strip()
+            return None, None
+
+        # Stationsname in part1 oder part2 → kein Song sondern Sender-Info
+        station_lower = (station_name or '').lower().strip()
+        if station_lower and (
+            _mb_similarity(part1.lower(), station_lower) >= 0.8 or
+            _mb_similarity(part2.lower(), station_lower) >= 0.8
+        ):
+            xbmc.log(f"[{ADDON_NAME}] Stationsname in ICY-Parts erkannt → kein Song: '{stream_title}'", xbmc.LOGDEBUG)
+            return None, None
+
+        # --- API prüfen ---
+        api_artist, api_title = None, None
+        if station_name and stream_url:
+            raw_artist, raw_title = self.get_nowplaying_from_apis(station_name, stream_url)
+
+            # Beide Felder müssen gefüllt sein
+            if raw_artist and raw_title and raw_artist not in invalid and raw_title not in invalid:
+
+                # Kreuz-Validierung: API-Parts müssen den ICY-Parts ähneln
+                a_matches_p1 = _mb_similarity(raw_artist, part1) >= 0.8
+                a_matches_p2 = _mb_similarity(raw_artist, part2) >= 0.8
+                t_matches_p1 = _mb_similarity(raw_title,  part1) >= 0.8
+                t_matches_p2 = _mb_similarity(raw_title,  part2) >= 0.8
+
+                if (a_matches_p2 and t_matches_p1) or (a_matches_p1 and t_matches_p2):
+                    xbmc.log(f"[{ADDON_NAME}] API gegen ICY validiert: Artist='{raw_artist}', Title='{raw_title}'", xbmc.LOGINFO)
+                    api_artist, api_title = raw_artist, raw_title
+                else:
+                    xbmc.log(f"[{ADDON_NAME}] API-Daten passen nicht zu ICY-Parts → ignoriert", xbmc.LOGDEBUG)
+            else:
+                xbmc.log(f"[{ADDON_NAME}] API: ein oder beide Felder leer → ignoriert", xbmc.LOGDEBUG)
+
+        # --- MusicBrainz zur Bestätigung/Korrektur ---
+        # Wenn API validiert: MB bekommt API-Artist/Title zur Bestätigung
+        # Wenn keine API:     MB bekommt ICY-Parts zur Ermittlung der Reihenfolge
+        if api_artist and api_title:
+            mb_artist, mb_title, uncertain = _identify_artist_title_via_musicbrainz(api_artist, api_title)
+            if uncertain:
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze API-Ergebnis: Artist='{api_artist}', Title='{api_title}'", xbmc.LOGDEBUG)
+                mb_artist, mb_title = api_artist, api_title
+        else:
+            mb_artist, mb_title, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
+            if uncertain:
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze ICY-Standard: Artist='{part1}', Title='{part2}'", xbmc.LOGDEBUG)
+                mb_artist, mb_title = part1, part2
+
+        if mb_artist in invalid: mb_artist = None
+        if mb_title in invalid:  mb_title  = None
+        if not mb_artist and not mb_title:
+            return None, None
+        return mb_artist, mb_title
         
     def metadata_worker(self, url):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
@@ -911,156 +952,150 @@ class RadioMonitor(xbmc.Monitor):
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
             while not self.stop_thread and self.is_playing:
-                audio_data = response.raw.read(metaint)
-                if not audio_data:
-                    break
-                    
-                # Metadaten-Länge lesen (1 Byte * 16)
-                meta_length_byte = response.raw.read(1)
-                if not meta_length_byte:
-                    break
-                    
-                meta_length = ord(meta_length_byte) * 16
-                
-                if meta_length > 0:
-                    # Metadaten lesen
-                    metadata = response.raw.read(meta_length)
-                    metadata_str = metadata.decode('utf-8', errors='ignore').strip('\x00')
-                    
-                    # KOMPLETT LOGGEN: Rohe ICY-Metadaten
-                    if metadata_str:
-                        xbmc.log(f"[{ADDON_NAME}] === ICY METADATA (ROH) ===", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] {metadata_str}", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] =========================", xbmc.LOGDEBUG)
-                    
-                    stream_title = self.extract_stream_title(metadata_str)
-                    
-                    # Prüfe ob sich etwas geändert hat (auch leerer Titel zählt)
-                    if stream_title != last_title:
-                        last_title = stream_title
+                try:
+                    audio_data = response.raw.read(metaint)
+                    if not audio_data:
+                        break
                         
-                        xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
+                    # Metadaten-Länge lesen (1 Byte * 16)
+                    meta_length_byte = response.raw.read(1)
+                    if not meta_length_byte:
+                        break
                         
-                        # Hole den korrekten Stationsnamen vom MusicPlayer (vom Addon, nicht vom Stream)
-                        # Der ICY-Stream-Name ist oft falsch (z.B. "NRJ CLUBBIN" statt "ENERGY Clubbin'")
-                        station_name = stream_info.get('station', '')  # Fallback: ICY-Name
-                        try:
-                            if self.player.isPlayingAudio():
-                                info_tag = self.player.getMusicInfoTag()
-                                album_name = info_tag.getAlbum()
-                                if album_name and album_name.strip():
-                                    station_name = album_name.strip()
-                                    xbmc.log(f"[{ADDON_NAME}] Verwende MusicPlayer.Album als Stationsname: '{station_name}'", xbmc.LOGDEBUG)
-                        except Exception as e:
-                            xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen von MusicPlayer.Album: {str(e)}", xbmc.LOGDEBUG)
+                    meta_length = ord(meta_length_byte) * 16
+                    
+                    if meta_length > 0:
+                        # Metadaten lesen
+                        metadata = response.raw.read(meta_length)
+                        metadata_str = metadata.decode('utf-8', errors='ignore').strip('\x00')
                         
-                        # --- ICY und API immer zuerst lesen und loggen ---
-                        icy_data = {
-                            'station': station_name,
-                            'stream_title': stream_title
-                        }
-                        api_artist, api_title = self.get_nowplaying_from_apis(station_name, url)
-                        api_data = {
-                            'artist': api_artist,
-                            'title': api_title
-                        }
-                        log_stream_info(icy_data, api_data)
-                        # --- Ende parallele Log-Ausgabe ---
-
-                        # Artist und Title trennen (mit Station Name und URL für API-Fallback)
-                        artist, title = self.parse_stream_title(stream_title, station_name, url)
-
-                        # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
-                        if artist is None and title is None:
-                            xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten für '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
-                            # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
-                            WINDOW.clearProperty('RadioMonitor.Artist')
-                            WINDOW.clearProperty('RadioMonitor.Title')
-                            WINDOW.clearProperty('RadioMonitor.StreamTitle')
-                            continue
+                        # KOMPLETT LOGGEN: Rohe ICY-Metadaten
+                        if metadata_str:
+                            xbmc.log(f"[{ADDON_NAME}] === ICY METADATA (ROH) ===", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] {metadata_str}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] =========================", xbmc.LOGDEBUG)
                         
-                        if stream_title not in INVALID_METADATA_VALUES:
-                            self.set_property_safe('RadioMonitor.StreamTitle', stream_title)
+                        stream_title = self.extract_stream_title(metadata_str)
                         
-                        if artist:
-                            self.set_property_safe('RadioMonitor.Artist', artist)
-                            xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
-                        else:
-                            WINDOW.clearProperty('RadioMonitor.Artist')
-                            artist = ''
+                        # Prüfe ob sich etwas geändert hat (auch leerer Titel zählt)
+                        if stream_title != last_title:
+                            last_title = stream_title
                             
-                        if title:
-                            self.set_property_safe('RadioMonitor.Title', title)
-                            xbmc.log(f"[{ADDON_NAME}] Title: {title}", xbmc.LOGDEBUG)
-                        else:
-                            WINDOW.clearProperty('RadioMonitor.Title')
-                            title = ''
-                        
-                        # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
-                        self.set_logo_safe()
-                        
-                        # DEBUG: Zeige alle gesetzten Properties
-                        xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty('RadioMonitor.Playing')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGINFO)
-                        
-                        # Aktualisiere Kodi Player Metadaten (für Standard InfoLabels)
-                        logo = WINDOW.getProperty('RadioMonitor.Logo')
-                        self.update_player_metadata(artist if artist else None, 
-                                                    title if title else None, 
-                                                    station_name if station_name else None,
-                                                    logo if logo else None)
-                        
-                        # DEBUG: Zeige was Kodi Player hat
-                        try:
-                            if self.player.isPlayingAudio():
-                                info_tag = self.player.getMusicInfoTag()
-                                xbmc.log(f"[{ADDON_NAME}] === KODI PLAYER INFOTAGS ===", xbmc.LOGDEBUG)
-                                xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Artist = {info_tag.getArtist()}", xbmc.LOGDEBUG)
-                                xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Title = {info_tag.getTitle()}", xbmc.LOGDEBUG)
-                                xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Album = {info_tag.getAlbum()}", xbmc.LOGDEBUG)
-                        except Exception as e:
-                            xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen Player InfoTags: {str(e)}", xbmc.LOGDEBUG)
-                        
-                        xbmc.log(f"[{ADDON_NAME}] ========================", xbmc.LOGDEBUG)
-                        
-                        # Versuche die MusicPlayer InfoLabels zu überschreiben
-                        # indem wir die JSON-RPC API nutzen
-                        try:
-                            json_query = {
-                                "jsonrpc": "2.0",
-                                "method": "JSONRPC.NotifyAll",
-                                "params": {
-                                    "sender": "service.monitor.radio_de_light",
-                                    "message": "UpdateMusicInfo",
-                                    "data": {
-                                        "artist": artist,
-                                        "title": title,
-                                        "streamtitle": stream_title
-                                    }
-                                },
-                                "id": 1
-                            }
-                            xbmc.executeJSONRPC(json.dumps(json_query))
-                        except Exception as e:
-                            xbmc.log(f"[{ADDON_NAME}] Fehler bei JSON-RPC Notify: {str(e)}", xbmc.LOGDEBUG)
-                        
-                        xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'})", xbmc.LOGINFO)
-                        
-                        # Notification anzeigen (optional)
-                        if artist and title:
-                            notification_text = f"{artist} - {title}"
-                        else:
-                            notification_text = stream_title
+                            xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
                             
-                        # Nur Notification zeigen, wenn in den Settings aktiviert
-                        # xbmc.executebuiltin(f'Notification({stream_info.get("station", "Radio")}, {notification_text}, 5000)')
+                            # Hole den korrekten Stationsnamen vom MusicPlayer
+                            station_name = stream_info.get('station', '')  # Fallback: ICY-Name
+                            try:
+                                if self.player.isPlayingAudio():
+                                    info_tag = self.player.getMusicInfoTag()
+                                    album_name = info_tag.getAlbum()
+                                    if album_name and album_name.strip():
+                                        station_name = album_name.strip()
+                                        xbmc.log(f"[{ADDON_NAME}] Verwende MusicPlayer.Album als Stationsname: '{station_name}'", xbmc.LOGDEBUG)
+                            except Exception as e:
+                                xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen von MusicPlayer.Album: {str(e)}", xbmc.LOGDEBUG)
+                            
+                            xbmc.log(f"[{ADDON_NAME}] ICY-Daten: station='{station_name}', stream_title='{stream_title}'", xbmc.LOGINFO)
+
+                            # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
+                            artist, title = self.parse_stream_title(stream_title, station_name, url)
+
+                            # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
+                            if artist is None and title is None:
+                                xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten für '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
+                                # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
+                                WINDOW.clearProperty('RadioMonitor.Artist')
+                                WINDOW.clearProperty('RadioMonitor.Title')
+                                WINDOW.clearProperty('RadioMonitor.StreamTitle')
+                                continue
+                            
+                            if stream_title not in INVALID_METADATA_VALUES:
+                                self.set_property_safe('RadioMonitor.StreamTitle', stream_title)
+                            
+                            if artist:
+                                self.set_property_safe('RadioMonitor.Artist', artist)
+                                xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.Artist')
+                                artist = ''
+                                
+                            if title:
+                                self.set_property_safe('RadioMonitor.Title', title)
+                                xbmc.log(f"[{ADDON_NAME}] Title: {title}", xbmc.LOGDEBUG)
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.Title')
+                                title = ''
+                            
+                            # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
+                            self.set_logo_safe()
+                            
+                            # DEBUG: Zeige alle gesetzten Properties
+                            xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty('RadioMonitor.Playing')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGINFO)
+                            
+                            # Aktualisiere Kodi Player Metadaten (für Standard InfoLabels)
+                            logo = WINDOW.getProperty('RadioMonitor.Logo')
+                            self.update_player_metadata(artist if artist else None, 
+                                                        title if title else None, 
+                                                        station_name if station_name else None,
+                                                        logo if logo else None)
+                            
+                            # DEBUG: Zeige was Kodi Player hat
+                            try:
+                                if self.player.isPlayingAudio():
+                                    info_tag = self.player.getMusicInfoTag()
+                                    xbmc.log(f"[{ADDON_NAME}] === KODI PLAYER INFOTAGS ===", xbmc.LOGDEBUG)
+                                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Artist = {info_tag.getArtist()}", xbmc.LOGDEBUG)
+                                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Title = {info_tag.getTitle()}", xbmc.LOGDEBUG)
+                                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer.Album = {info_tag.getAlbum()}", xbmc.LOGDEBUG)
+                            except Exception as e:
+                                xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen Player InfoTags: {str(e)}", xbmc.LOGDEBUG)
+                            
+                            xbmc.log(f"[{ADDON_NAME}] ========================", xbmc.LOGDEBUG)
+                            
+                            # Versuche die MusicPlayer InfoLabels zu überschreiben
+                            # indem wir die JSON-RPC API nutzen
+                            try:
+                                json_query = {
+                                    "jsonrpc": "2.0",
+                                    "method": "JSONRPC.NotifyAll",
+                                    "params": {
+                                        "sender": "service.monitor.radio_de_light",
+                                        "message": "UpdateMusicInfo",
+                                        "data": {
+                                            "artist": artist,
+                                            "title": title,
+                                            "streamtitle": stream_title
+                                        }
+                                    },
+                                    "id": 1
+                                }
+                                xbmc.executeJSONRPC(json.dumps(json_query))
+                            except Exception as e:
+                                xbmc.log(f"[{ADDON_NAME}] Fehler bei JSON-RPC Notify: {str(e)}", xbmc.LOGDEBUG)
+                            
+                            xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'})", xbmc.LOGINFO)
+                            
+                            # Notification anzeigen (optional)
+                            if artist and title:
+                                notification_text = f"{artist} - {title}"
+                            else:
+                                notification_text = stream_title
+                                
+                            # Nur Notification zeigen, wenn in den Settings aktiviert
+                            # xbmc.executebuiltin(f'Notification({stream_info.get("station", "Radio")}, {notification_text}, 5000)')
                         
+                except Exception as e:
+                    xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata-Loop (Thread läuft weiter): {str(e)}", xbmc.LOGERROR)
+                    time.sleep(1)
+                    continue
+
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata Worker: {str(e)}", xbmc.LOGERROR)
         finally:
