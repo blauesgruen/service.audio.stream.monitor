@@ -146,43 +146,93 @@ def _parse_radiode_api_title(full_title, station_name=None):
     return artist or None, title or None
 
 
+def _mb_similarity(a, b):
+    """Ähnlichkeit zweier Strings (0.0 - 1.0), case-insensitive."""
+    from difflib import SequenceMatcher
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+
+def _mb_result_plausible(mb_artist, mb_title, part_artist, part_title, threshold=0.8):
+    """
+    Prüft ob ein MusicBrainz-Ergebnis plausibel zu den Stream-Parts passt.
+    Zwei Bedingungen müssen erfüllt sein:
+    1. MB-Titel ähnelt part_title (Ähnlichkeit >= threshold)
+    2. MB-Artist ähnelt einem der beiden Parts (er muss aus dem Stream stammen)
+    """
+    title_ok  = _mb_similarity(mb_title, part_title) >= threshold
+    artist_ok = (
+        _mb_similarity(mb_artist, part_artist) >= threshold or
+        _mb_similarity(mb_artist, part_title)  >= threshold
+    )
+    return title_ok and artist_ok
+
+
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
-    Ermittelt Artist/Title per MusicBrainz ausschließlich über Recording-Abfragen.
-    Ablauf:
-    1. Recording-Abfrage: part1=Artist, part2=Title. Bei Treffer (score>0) sofort return.
-    2. Recording-Abfrage: part2=Artist, part1=Title. Bei Treffer return.
-    3. Beide 0: Standard (part1=Artist, part2=Title), keine weiteren Requests.
-    Rückgabe: (Artist, Title, uncertain) – uncertain=True, wenn keine Recording-Treffer.
+    Ermittelt Artist/Title per MusicBrainz über Recording-Abfragen.
+    Ziel: herausfinden ob part1=Artist+part2=Title oder part2=Artist+part1=Title.
+    Der Artist-Name wird aus dem MusicBrainz-Ergebnis übernommen (korrekte Schreibweise).
+    Rückgabe: (Artist, Title, uncertain) – uncertain=True wenn kein verlässlicher Treffer.
     """
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part1/part2 und part2/part1", xbmc.LOGDEBUG)
-    rec_1_2 = _musicbrainz_recording_score(part1, part2)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Suche Recording für '{part1}' / '{part2}'", xbmc.LOGDEBUG)
+    rec_1_2 = _musicbrainz_recording_score(part1, part2)  # part1=Artist, part2=Title
     time.sleep(1)
-    rec_2_1 = _musicbrainz_recording_score(part2, part1)
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part1/part2: Score={rec_1_2[0]}, Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGDEBUG)
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Abfrage part2/part1: Score={rec_2_1[0]}, Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGDEBUG)
-    # Plausibilitätsprüfung: Wähle das Recording-Ergebnis, das am besten zu den Streamdaten passt
-    def is_match(rec_artist, rec_title, part_artist, part_title):
-        return (rec_artist.strip().lower() == part_artist.strip().lower() and rec_title.strip().lower() == part_title.strip().lower())
+    rec_2_1 = _musicbrainz_recording_score(part2, part1)  # part2=Artist, part1=Title
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist Score={rec_1_2[0]}, Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}'", xbmc.LOGDEBUG)
+    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist Score={rec_2_1[0]}, Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}'", xbmc.LOGDEBUG)
 
-    # Prüfe beide Varianten
-    match_1_2 = is_match(rec_1_2[1], rec_1_2[2], part1, part2)
-    match_2_1 = is_match(rec_2_1[1], rec_2_1[2], part2, part1)
-    if match_1_2:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Exakte Zuordnung part1/part2: Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
-        return rec_1_2[1], rec_1_2[2], False
-    elif match_2_1:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Exakte Zuordnung part2/part1: Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
-        return rec_2_1[1], rec_2_1[2], False
-    # Falls kein exakter Match, wähle das Ergebnis mit höchstem Score
-    if rec_1_2[0] >= rec_2_1[0] and rec_1_2[0] > 0:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part1/part2 (höchster Score): Artist='{rec_1_2[1]}', Title='{rec_1_2[2]}', MBID='{rec_1_2[3]}'", xbmc.LOGINFO)
-        return rec_1_2[1], rec_1_2[2], False
-    elif rec_2_1[0] > 0:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Recording-Treffer part2/part1 (höchster Score): Artist='{rec_2_1[1]}', Title='{rec_2_1[2]}', MBID='{rec_2_1[3]}'", xbmc.LOGINFO)
-        return rec_2_1[1], rec_2_1[2], False
+    score_1_2 = rec_1_2[0]
+    score_2_1 = rec_2_1[0]
+
+    # Mindest-Score und Mindest-Abstand für einen verlässlichen Treffer
+    MIN_SCORE = 85
+    MIN_DIFF  = 10
+
+    # Beide Scores zu niedrig → unsicher
+    if score_1_2 < MIN_SCORE and score_2_1 < MIN_SCORE:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Scores zu niedrig ({score_1_2}/{score_2_1}), behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
+        return part1, part2, True
+
+    # Beide Scores ähnlich hoch → Plausibilitäts-Check entscheidet
+    if abs(score_1_2 - score_2_1) < MIN_DIFF:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score-Unterschied zu gering ({score_1_2} vs {score_2_1}), prüfe Plausibilität", xbmc.LOGDEBUG)
+        plausible_1_2 = _mb_result_plausible(rec_1_2[1], rec_1_2[2], part1, part2)
+        plausible_2_1 = _mb_result_plausible(rec_2_1[1], rec_2_1[2], part2, part1)
+        if plausible_2_1 and not plausible_1_2:
+            mb_artist = rec_2_1[1] or part2
+            mb_title  = rec_2_1[2] or part1
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität entschied part2=Artist: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+            return mb_artist, mb_title, False
+        elif plausible_1_2 and not plausible_2_1:
+            mb_artist = rec_1_2[1] or part1
+            mb_title  = rec_1_2[2] or part2
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität entschied part1=Artist: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+            return mb_artist, mb_title, False
+        else:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität konnte nicht entscheiden, behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
+            return part1, part2, True
+
+    # part1 ist Score-Gewinner → Plausibilität prüfen
+    if score_1_2 > score_2_1:
+        mb_artist = rec_1_2[1]
+        mb_title  = rec_1_2[2]
+        if _mb_result_plausible(mb_artist, mb_title, part1, part2):
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist bestätigt (Score {score_1_2} vs {score_2_1}): Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+            return mb_artist or part1, mb_title or part2, False
+        else:
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist Score gewonnen aber Plausibilität fehlgeschlagen (MB: '{mb_artist}' / '{mb_title}'), behalte Original", xbmc.LOGINFO)
+            return part1, part2, True
+
+    # part2 ist Score-Gewinner → Plausibilität prüfen
+    mb_artist = rec_2_1[1]
+    mb_title  = rec_2_1[2]
+    if _mb_result_plausible(mb_artist, mb_title, part2, part1):
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist bestätigt (Score {score_2_1} vs {score_1_2}): Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+        return mb_artist or part2, mb_title or part1, False
     else:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Keine Recording-Treffer, Standard-Zuordnung part1='{part1}' als Artist, part2='{part2}' als Title", xbmc.LOGINFO)
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist Score gewonnen aber Plausibilität fehlgeschlagen (MB: '{mb_artist}' / '{mb_title}'), behalte Original", xbmc.LOGINFO)
         return part1, part2, True
 
 
