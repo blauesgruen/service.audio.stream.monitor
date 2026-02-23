@@ -198,19 +198,34 @@ class PlayerMonitor(xbmc.Player):
     def onAVStarted(self):
         """Wird aufgerufen SOFORT wenn Stream startet - ListItem.Icon ist noch verfügbar!"""
         try:
+            if self.isPlayingVideo():
+                # Video gestartet → Radio-Properties sofort löschen
+                xbmc.log(f"[{ADDON_NAME}] Video gestartet - lösche Radio-Properties sofort", xbmc.LOGINFO)
+                self.radio_monitor.is_playing = False
+                self.radio_monitor.current_url = None
+                self.radio_monitor.stop_metadata_monitoring()
+                self.radio_monitor.clear_properties()
+                return
+
             if self.isPlayingAudio():
                 playing_file = self.getPlayingFile()
-                
-                # Nur bei HTTP/HTTPS Streams
-                if playing_file.startswith('http://') or playing_file.startswith('https://'):
-                    # SOFORT Logo vom ListItem lesen (bevor Kodi es überschreibt!)
-                    listitem_icon = xbmc.getInfoLabel('ListItem.Icon')
-                    
-                    if listitem_icon and self.radio_monitor.is_real_logo(listitem_icon):
-                        self.radio_monitor.station_logo = listitem_icon
-                        xbmc.log(f"[{ADDON_NAME}] ⚡ Logo SOFORT beim Start erfasst: {listitem_icon}", xbmc.LOGINFO)
-                    else:
-                        xbmc.log(f"[{ADDON_NAME}] ⚠ ListItem.Icon beim Start: {listitem_icon}", xbmc.LOGDEBUG)
+
+                # Lokale Datei → Radio-Properties sofort löschen
+                if not (playing_file.startswith('http://') or playing_file.startswith('https://')):
+                    xbmc.log(f"[{ADDON_NAME}] Lokale Datei gestartet - lösche Radio-Properties sofort", xbmc.LOGINFO)
+                    self.radio_monitor.is_playing = False
+                    self.radio_monitor.current_url = None
+                    self.radio_monitor.stop_metadata_monitoring()
+                    self.radio_monitor.clear_properties()
+                    return
+
+                # HTTP/HTTPS Audio-Stream → SOFORT Logo vom ListItem lesen
+                listitem_icon = xbmc.getInfoLabel('ListItem.Icon')
+                if listitem_icon and self.radio_monitor.is_real_logo(listitem_icon):
+                    self.radio_monitor.station_logo = listitem_icon
+                    xbmc.log(f"[{ADDON_NAME}] ⚡ Logo SOFORT beim Start erfasst: {listitem_icon}", xbmc.LOGINFO)
+                else:
+                    xbmc.log(f"[{ADDON_NAME}] ⚠ ListItem.Icon beim Start: {listitem_icon}", xbmc.LOGDEBUG)
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler in onAVStarted: {str(e)}", xbmc.LOGERROR)
 
@@ -1021,7 +1036,7 @@ class RadioMonitor(xbmc.Monitor):
         """Stoppt das Metadata-Monitoring"""
         if self.metadata_thread and self.metadata_thread.is_alive():
             self.stop_thread = True
-            self.metadata_thread.join(timeout=2)
+            self.metadata_thread.join(timeout=0.5)  # kurz warten, Thread bricht selbst ab da is_playing=False
             self.metadata_thread = None
             
     def check_playing(self):
