@@ -43,13 +43,14 @@ def log_stream_info(icy_data, api_data):
 
 def _musicbrainz_escape(s):
     """
-    Für MusicBrainz-Query in Anführungszeichen: Doppelanführungen escapen,
-    Apostroph durch Leerzeichen ersetzen (vermeidet OSError 22 / Invalid argument unter macOS).
+    Für MusicBrainz-Query in Anführungszeichen: Sonderzeichen escapen.
+    Apostroph wird als \' escaped (nicht entfernt) damit z.B. "I Can't Stand the Rain"
+    korrekt gefunden wird.
     """
     if not s:
         return s
     s = str(s).replace('\\', '\\\\').replace('"', '\\"')
-    s = s.replace("'", " ")  # Apostroph kann Request auf manchen Systemen kaputt machen
+    s = s.replace("'", "\\'")  # Apostroph escapen, nicht entfernen
     return s.strip() or " "
 
 
@@ -211,6 +212,24 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     # Beide Scores ähnlich hoch → Plausibilitäts-Check entscheidet
     if abs(score_1_2 - score_2_1) < MIN_DIFF:
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score-Unterschied zu gering ({score_1_2} vs {score_2_1}), prüfe Plausibilität", xbmc.LOGDEBUG)
+
+        # Sonderfall: beide Queries liefern dasselbe Recording (gleiche MBID)
+        # → MB ignoriert Reihenfolge, direkt anhand MB-Artist entscheiden
+        if rec_1_2[3] and rec_1_2[3] == rec_2_1[3]:
+            mb_artist = rec_1_2[1]
+            mb_title  = rec_1_2[2]
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Queries → gleiches Recording (MBID={rec_1_2[3]})", xbmc.LOGDEBUG)
+            # Prüfe welcher ICY-Part dem MB-Artist ähnelt
+            if _mb_similarity(mb_artist, part1) >= 0.8:
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu part1: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+                return mb_artist, mb_title, False
+            elif _mb_similarity(mb_artist, part2) >= 0.8:
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu part2: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
+                return mb_artist, mb_title, False
+            else:
+                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu keinem Part, behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
+                return part1, part2, True
+
         plausible_1_2 = _mb_result_plausible(rec_1_2[1], rec_1_2[2], part1, part2)
         plausible_2_1 = _mb_result_plausible(rec_2_1[1], rec_2_1[2], part2, part1)
         if plausible_2_1 and not plausible_1_2:
@@ -567,6 +586,9 @@ class RadioMonitor(xbmc.Monitor):
             
             search_url = f"https://prod.radio-api.net/stations/search?query={search_name.replace(' ', '+')}&count=20"
             response = requests.get(search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+            if response.status_code != 200 or not response.content:
+                xbmc.log(f"[{ADDON_NAME}] radio.de API: ungültige Antwort (Status {response.status_code})", xbmc.LOGDEBUG)
+                return None, None
             data = response.json()
             
             xbmc.log(f"[{ADDON_NAME}] Search API: {data.get('totalCount', 0)} Treffer", xbmc.LOGDEBUG)
