@@ -54,50 +54,34 @@ def _musicbrainz_escape(s):
     return s.strip() or " "
 
 
-def _musicbrainz_artist_score(name):
-    """
-    Prüft, ob der Name ein bekannter Artist in MusicBrainz ist; liefert Score (0 = unbekannt).
-    Rückgabe: Score (int)
-    Bei Verbindungsfehlern wird die Abfrage bis zu 2x wiederholt (Retry-Logik).
-    """
-    if not name or not name.strip():
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: Name leer", xbmc.LOGDEBUG)
-        return 0
-    url = "https://musicbrainz.org/ws/2/artist/"
-    safe = _musicbrainz_escape(name)
-    params = {"query": f'artist:"{safe}"', "fmt": "json", "limit": 1}
-    retries = 2
-    for attempt in range(retries + 1):
-        try:
-            r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-            data = r.json()
-            artists = data.get("artists", [])
-            if artists:
-                return int(artists[0].get("score", 0))
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score 0: keine Treffer für '{name}'", xbmc.LOGDEBUG)
-            break
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Artist-Score Fehler (Versuch {attempt+1}/{retries+1}): {e}", xbmc.LOGDEBUG)
-            if attempt < retries:
-                time.sleep(2)
-    return 0
+
+def _musicbrainz_extract_artist(rec):
+    """Extrahiert den vollständigen Artist-String aus einem MB-Recording-Dict."""
+    if "artist-credit" not in rec or not rec["artist-credit"]:
+        return ""
+    parts = []
+    for credit in rec["artist-credit"]:
+        if isinstance(credit, dict):
+            parts.append(credit.get("name", ""))
+            joinphrase = credit.get("joinphrase", "")
+            if joinphrase:
+                parts.append(joinphrase)
+    full = "".join(parts).strip()
+    return full or rec["artist-credit"][0].get("name", "")
 
 
-def _musicbrainz_find_recording(part1, part2):
+def _musicbrainz_query_recording(title_part, artist_part):
     """
-    Sucht ein MusicBrainz-Recording anhand zweier Parts (Artist/Title in unbekannter Reihenfolge).
-    Kombinierte Query ohne Feldangabe – MB findet das Recording wo beide Begriffe vorkommen.
-    Nur zur Reihenfolgebestimmung: der zurückgegebene MB-Artist zeigt welcher Part der Artist ist.
-    Rückgabe: (score, mb_artist, mb_title)
+    Führt eine einzelne MusicBrainz-Recording-Query mit expliziten Feldangaben durch.
+    Nutzt recording: und artistname: für präzises Matching (kein Stopword-Problem).
+    Rückgabe: (score, mb_artist, mb_title) oder (0, '', '') bei Fehler/kein Treffer.
     """
-    if not part1 or not part2:
-        return 0, '', ''
     url = "https://musicbrainz.org/ws/2/recording/"
-    safe1 = _musicbrainz_escape(part1)
-    safe2 = _musicbrainz_escape(part2)
+    safe_title  = _musicbrainz_escape(title_part)
+    safe_artist = _musicbrainz_escape(artist_part)
     params = {
-        "query": f'"{safe1}" "{safe2}"',
-        "fmt": "json",
+        "query": f'recording:"{safe_title}" AND artistname:"{safe_artist}"',
+        "fmt":   "json",
         "limit": 1,
     }
     retries = 2
@@ -107,26 +91,21 @@ def _musicbrainz_find_recording(part1, part2):
             data = r.json()
             recordings = data.get("recordings", [])
             if recordings:
-                rec = recordings[0]
+                rec   = recordings[0]
                 score = int(rec.get("score", 0))
-                rec_title = rec.get("title", "")
-                rec_artist = ""
-                rec_artist_full = ""
-                if "artist-credit" in rec and rec["artist-credit"]:
-                    rec_artist = rec["artist-credit"][0].get("name", "")
-                    parts = []
-                    for credit in rec["artist-credit"]:
-                        if isinstance(credit, dict):
-                            parts.append(credit.get("name", ""))
-                            joinphrase = credit.get("joinphrase", "")
-                            if joinphrase:
-                                parts.append(joinphrase)
-                    rec_artist_full = "".join(parts).strip()
-                mb_artist = rec_artist_full or rec_artist
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score={score}, Artist='{mb_artist}', Title='{rec_title}'", xbmc.LOGDEBUG)
-                return score, mb_artist, rec_title
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: kein Treffer für '{part1}' / '{part2}'", xbmc.LOGDEBUG)
-            break
+                mb_title  = rec.get("title", "")
+                mb_artist = _musicbrainz_extract_artist(rec)
+                xbmc.log(
+                    f"[{ADDON_NAME}] MusicBrainz Query (title='{title_part}', artist='{artist_part}'): "
+                    f"Score={score}, MB-Artist='{mb_artist}', MB-Title='{mb_title}'",
+                    xbmc.LOGDEBUG
+                )
+                return score, mb_artist, mb_title
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz: kein Treffer für recording:'{title_part}' artistname:'{artist_part}'",
+                xbmc.LOGDEBUG
+            )
+            return 0, '', ''
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] MusicBrainz Fehler (Versuch {attempt+1}/{retries+1}): {e}", xbmc.LOGDEBUG)
             if attempt < retries:
@@ -162,116 +141,132 @@ def _mb_similarity(a, b):
     return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
 
 
-def _mb_result_plausible(mb_artist, mb_title, part_artist, part_title, threshold=0.8):
-    """
-    Prüft ob ein MusicBrainz-Ergebnis plausibel zu den Stream-Parts passt.
-    Zwei Bedingungen müssen erfüllt sein:
-    1. MB-Titel ähnelt part_title (Ähnlichkeit >= threshold)
-    2. MB-Artist ähnelt einem der beiden Parts (er muss aus dem Stream stammen)
-    """
-    title_ok  = _mb_similarity(mb_title, part_title) >= threshold
-    artist_ok = (
-        _mb_similarity(mb_artist, part_artist) >= threshold or
-        _mb_similarity(mb_artist, part_title)  >= threshold
-    )
-    return title_ok and artist_ok
-
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
-    Ermittelt welcher der beiden ICY-Parts der Artist ist.
-    Nutzt eine kombinierte MusicBrainz-Query ("part1" "part2") – zuverlässiger als
-    zwei getrennte Queries mit artist/recording-Feldern.
+    Ermittelt welcher der beiden ICY-Parts der Artist ist, via max. 2 MusicBrainz-Queries.
+
+    Strategie:
+      Query 1: recording:"part1" AND artistname:"part2"  → Normalfall (part1=Title, part2=Artist)
+      Query 2: recording:"part2" AND artistname:"part1"  → Fallback  (part2=Title, part1=Artist)
+
+    Durch explizite Feldangabe (recording: / artistname:) umgehen wir das Lucene-Stopword-
+    Problem (z.B. "the" in "Heal the World") und erhalten präzisere Scores.
+
     Rückgabe: (artist, title, uncertain)
-    - uncertain=True: kein verlässlicher Treffer, Original behalten
-    - Es werden immer die originalen ICY-Parts zurückgegeben (nie MB-Daten als Anzeige)
+      uncertain=True  → kein verlässlicher Treffer, ICY-Standard behalten (part1=Artist, part2=Title)
+      uncertain=False → Reihenfolge sicher bestimmt
     """
+    MIN_SCORE = 85
+    THRESHOLD = 0.7  # Ähnlichkeitsschwelle MB-Artist ↔ ICY-Part
+
+    if not part1 or not part2:
+        return part1, part2, True
+
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Suche Recording für '{part1}' / '{part2}'", xbmc.LOGDEBUG)
 
-    MIN_SCORE = 85
+    # --- Query 1: part1=Title, part2=Artist ---
+    score_1, mb_artist_1, mb_title_1 = _musicbrainz_query_recording(
+        title_part=part1, artist_part=part2
+    )
 
-    score, mb_artist, mb_title = _musicbrainz_find_recording(part1, part2)
+    # --- Query 2: part2=Title, part1=Artist (nur wenn Q1 kein gutes Ergebnis) ---
+    score_2, mb_artist_2, mb_title_2 = 0, '', ''
+    if score_1 < MIN_SCORE:
+        time.sleep(1)  # MusicBrainz Rate-Limit: ~1 req/s
+        score_2, mb_artist_2, mb_title_2 = _musicbrainz_query_recording(
+            title_part=part2, artist_part=part1
+        )
 
-    if score < MIN_SCORE or not mb_artist:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score zu niedrig ({score}) oder kein Artist, behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
+    xbmc.log(
+        f"[{ADDON_NAME}] MusicBrainz Scores: "
+        f"Q1(title='{part1}', artist='{part2}')={score_1} | "
+        f"Q2(title='{part2}', artist='{part1}')={score_2}",
+        xbmc.LOGINFO
+    )
+
+    # Beide Queries unter Schwelle → uncertain
+    if score_1 < MIN_SCORE and score_2 < MIN_SCORE:
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz: beide Scores zu niedrig ({score_1}/{score_2}), "
+            f"behalte ICY-Original: Artist='{part1}', Title='{part2}'",
+            xbmc.LOGINFO
+        )
         return part1, part2, True
 
-    # MB-Artist mit beiden Parts vergleichen um Reihenfolge zu bestimmen
-    sim_to_part1 = _mb_similarity(mb_artist, part1)
-    sim_to_part2 = _mb_similarity(mb_artist, part2)
+    # Nur Q1 trifft → part1=Title, part2=Artist
+    if score_1 >= MIN_SCORE and score_2 < MIN_SCORE:
+        sim_p2 = _mb_similarity(mb_artist_1, part2)
+        sim_p1 = _mb_similarity(mb_artist_1, part1)
+        if sim_p2 >= THRESHOLD:
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Q1: Artist='{part2}', Title='{part1}' "
+                f"(MB-Artist='{mb_artist_1}', sim={sim_p2:.2f})",
+                xbmc.LOGINFO
+            )
+            return part2, part1, False
+        if sim_p1 >= THRESHOLD:
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Q1: Artist='{part1}', Title='{part2}' "
+                f"(MB-Artist='{mb_artist_1}', sim={sim_p1:.2f})",
+                xbmc.LOGINFO
+            )
+            return part1, part2, False
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz Q1 trifft (Score={score_1}), "
+            f"aber MB-Artist '{mb_artist_1}' passt zu keinem Part "
+            f"(sim_p1={sim_p1:.2f}, sim_p2={sim_p2:.2f}), behalte Original",
+            xbmc.LOGINFO
+        )
+        return part1, part2, True
 
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score={score}, MB-Artist='{mb_artist}', Ähnlichkeit part1={sim_to_part1:.2f}, part2={sim_to_part2:.2f}", xbmc.LOGDEBUG)
+    # Nur Q2 trifft → part2=Title, part1=Artist
+    if score_2 >= MIN_SCORE and score_1 < MIN_SCORE:
+        sim_p1 = _mb_similarity(mb_artist_2, part1)
+        sim_p2 = _mb_similarity(mb_artist_2, part2)
+        if sim_p1 >= THRESHOLD:
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Q2: Artist='{part1}', Title='{part2}' "
+                f"(MB-Artist='{mb_artist_2}', sim={sim_p1:.2f})",
+                xbmc.LOGINFO
+            )
+            return part1, part2, False
+        if sim_p2 >= THRESHOLD:
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Q2: Artist='{part2}', Title='{part1}' "
+                f"(MB-Artist='{mb_artist_2}', sim={sim_p2:.2f})",
+                xbmc.LOGINFO
+            )
+            return part2, part1, False
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz Q2 trifft (Score={score_2}), "
+            f"aber MB-Artist '{mb_artist_2}' passt zu keinem Part "
+            f"(sim_p1={sim_p1:.2f}, sim_p2={sim_p2:.2f}), behalte Original",
+            xbmc.LOGINFO
+        )
+        return part1, part2, True
 
-    THRESHOLD = 0.8
-
-    if sim_to_part1 >= THRESHOLD and sim_to_part2 < THRESHOLD:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist ('{part1}'), part2=Title ('{part2}')", xbmc.LOGINFO)
-        return part1, part2, False
-
-    if sim_to_part2 >= THRESHOLD and sim_to_part1 < THRESHOLD:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist ('{part2}'), part1=Title ('{part1}')", xbmc.LOGINFO)
-        return part2, part1, False
-
-    xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Reihenfolge unklar (part1={sim_to_part1:.2f}, part2={sim_to_part2:.2f}), behalte Original", xbmc.LOGINFO)
-    return part1, part2, True
-
-    # Beide Scores ähnlich hoch → Plausibilitäts-Check entscheidet
-    if abs(score_1_2 - score_2_1) < MIN_DIFF:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Score-Unterschied zu gering ({score_1_2} vs {score_2_1}), prüfe Plausibilität", xbmc.LOGDEBUG)
-
-        # Sonderfall: beide Queries liefern dasselbe Recording (gleiche MBID)
-        # → MB ignoriert Reihenfolge, direkt anhand MB-Artist entscheiden
-        if rec_1_2[3] and rec_1_2[3] == rec_2_1[3]:
-            mb_artist = rec_1_2[1]
-            mb_title  = rec_1_2[2]
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Beide Queries → gleiches Recording (MBID={rec_1_2[3]})", xbmc.LOGDEBUG)
-            # Prüfe welcher ICY-Part dem MB-Artist ähnelt
-            if _mb_similarity(mb_artist, part1) >= 0.8:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu part1: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-                return mb_artist, mb_title, False
-            elif _mb_similarity(mb_artist, part2) >= 0.8:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu part2: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-                return mb_artist, mb_title, False
-            else:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz: MB-Artist passt zu keinem Part, behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
-                return part1, part2, True
-
-        plausible_1_2 = _mb_result_plausible(rec_1_2[1], rec_1_2[2], part1, part2)
-        plausible_2_1 = _mb_result_plausible(rec_2_1[1], rec_2_1[2], part2, part1)
-        if plausible_2_1 and not plausible_1_2:
-            mb_artist = rec_2_1[1] or part2
-            mb_title  = rec_2_1[2] or part1
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität entschied part2=Artist: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-            return mb_artist, mb_title, False
-        elif plausible_1_2 and not plausible_2_1:
-            mb_artist = rec_1_2[1] or part1
-            mb_title  = rec_1_2[2] or part2
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität entschied part1=Artist: Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-            return mb_artist, mb_title, False
-        else:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Plausibilität konnte nicht entscheiden, behalte Original: Artist='{part1}', Title='{part2}'", xbmc.LOGINFO)
-            return part1, part2, True
-
-    # part1 ist Score-Gewinner → Plausibilität prüfen
-    if score_1_2 > score_2_1:
-        mb_artist = rec_1_2[1]
-        mb_title  = rec_1_2[2]
-        if _mb_result_plausible(mb_artist, mb_title, part1, part2):
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist bestätigt (Score {score_1_2} vs {score_2_1}): Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-            return mb_artist or part1, mb_title or part2, False
-        else:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part1=Artist Score gewonnen aber Plausibilität fehlgeschlagen (MB: '{mb_artist}' / '{mb_title}'), behalte Original", xbmc.LOGINFO)
-            return part1, part2, True
-
-    # part2 ist Score-Gewinner → Plausibilität prüfen
-    mb_artist = rec_2_1[1]
-    mb_title  = rec_2_1[2]
-    if _mb_result_plausible(mb_artist, mb_title, part2, part1):
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist bestätigt (Score {score_2_1} vs {score_1_2}): Artist='{mb_artist}', Title='{mb_title}'", xbmc.LOGINFO)
-        return mb_artist or part2, mb_title or part1, False
+    # Beide Queries treffen → höherer Score gewinnt, bei Gleichstand Q1 (ICY-Standard)
+    if score_1 >= score_2:
+        sim_p2 = _mb_similarity(mb_artist_1, part2)
+        sim_p1 = _mb_similarity(mb_artist_1, part1)
+        artist, title = (part2, part1) if sim_p2 >= sim_p1 else (part1, part2)
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz: Q1 gewinnt ({score_1} vs {score_2}) "
+            f"→ Artist='{artist}', Title='{title}'",
+            xbmc.LOGINFO
+        )
+        return artist, title, False
     else:
-        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: part2=Artist Score gewonnen aber Plausibilität fehlgeschlagen (MB: '{mb_artist}' / '{mb_title}'), behalte Original", xbmc.LOGINFO)
-        return part1, part2, True
+        sim_p1 = _mb_similarity(mb_artist_2, part1)
+        sim_p2 = _mb_similarity(mb_artist_2, part2)
+        artist, title = (part1, part2) if sim_p1 >= sim_p2 else (part2, part1)
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz: Q2 gewinnt ({score_2} vs {score_1}) "
+            f"→ Artist='{artist}', Title='{title}'",
+            xbmc.LOGINFO
+        )
+        return artist, title, False
 
 
 # Window-Properties für die Skin
