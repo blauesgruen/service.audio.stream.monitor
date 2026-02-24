@@ -1,3 +1,10 @@
+v1.1.7 (2026-02-24)
+- MusicBrainz-Suche grundlegend überarbeitet: Statt kombinierter Freitextsuche werden jetzt zwei gezielte Queries mit expliziten Feldangaben (recording: / artistname:) ausgeführt – behebt Fehlgriffe durch Lucene-Stopwords (z.B. "the" in "Heal the World").
+- Beide Queries werden jetzt immer ausgeführt. Bisher wurde Query 2 übersprungen, wenn Query 1 einen hohen Score lieferte – auch wenn der gefundene Artist komplett falsch war (z.B. "SITER SKAIN" statt "Earth, Wind & Fire").
+- Entscheidungslogik auf combined-Score (MB-Score × Artist-Ähnlichkeit) umgestellt: Ein Fehlgriff mit Score 100 aber falschen Artist wird damit zuverlässig erkannt und verworfen.
+- Trefferauswertung von limit=1 auf limit=5 erweitert: Aus allen Kandidaten wird der beste anhand von Score und Artist-Ähnlichkeit gewählt.
+- Nicht mehr benötigte Funktionen _musicbrainz_artist_score(), _mb_result_plausible() und _musicbrainz_find_recording() entfernt; toter Code unterhalb eines frühen return beseitigt.
+
 v1.1.6 (2026-02-24)
 - parsing bei Musicbrainz verfeinert
 
