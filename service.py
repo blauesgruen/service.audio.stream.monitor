@@ -906,9 +906,14 @@ class RadioMonitor(xbmc.Monitor):
 
         if not part1 or not part2:
             # Kein Trennzeichen → ganzer String ist vermutlich nur Title
-            if stream_title.strip() not in INVALID_METADATA_VALUES:
-                return None, stream_title.strip()
-            return None, None
+            # Stationsname als Titel ausschließen
+            clean = stream_title.strip()
+            if clean in INVALID_METADATA_VALUES:
+                return None, None
+            if station_name and _mb_similarity(clean.lower(), station_name.lower()) >= 0.8:
+                xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String ähnelt Stationsname → ignoriert: '{clean}'", xbmc.LOGDEBUG)
+                return None, None
+            return None, clean
 
         # Stationsname in part1 oder part2 → kein Song sondern Sender-Info
         station_lower = (station_name or '').lower().strip()
