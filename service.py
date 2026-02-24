@@ -136,15 +136,15 @@ def _musicbrainz_find_recording(part1, part2):
 
 def _parse_radiode_api_title(full_title, station_name=None):
     """
-    Parst radio.de API Format "TITLE - ARTIST". Gibt (artist, title) zurück;
+    Parst radio.de API Format "ARTIST - TITLE". Gibt (artist, title) zurück;
     ungültige Werte werden zu ''/None. station_name wird als ungültiger Title gefiltert.
     """
     invalid = INVALID_METADATA_VALUES + ['']
     if not full_title or ' - ' not in full_title:
         return None, None
     parts = full_title.split(' - ', 1)
-    title = parts[0].strip()
-    artist = parts[1].strip()
+    artist = parts[0].strip()
+    title = parts[1].strip()
     if artist in invalid:
         artist = ''
     if title in invalid or (station_name and title == station_name):
@@ -906,14 +906,9 @@ class RadioMonitor(xbmc.Monitor):
 
         if not part1 or not part2:
             # Kein Trennzeichen → ganzer String ist vermutlich nur Title
-            # Stationsname als Titel ausschließen
-            clean = stream_title.strip()
-            if clean in INVALID_METADATA_VALUES:
-                return None, None
-            if station_name and _mb_similarity(clean.lower(), station_name.lower()) >= 0.8:
-                xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String ähnelt Stationsname → ignoriert: '{clean}'", xbmc.LOGDEBUG)
-                return None, None
-            return None, clean
+            if stream_title.strip() not in INVALID_METADATA_VALUES:
+                return None, stream_title.strip()
+            return None, None
 
         # Stationsname in part1 oder part2 → kein Song sondern Sender-Info
         station_lower = (station_name or '').lower().strip()
