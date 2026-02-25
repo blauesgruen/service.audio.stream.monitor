@@ -1,4 +1,3 @@
-
 import xbmc
 import xbmcaddon
 import xbmcgui
@@ -8,7 +7,6 @@ import time
 import threading
 import json
 from difflib import SequenceMatcher
-from urllib.parse import urlparse
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
@@ -38,8 +36,6 @@ def _musicbrainz_escape(s):
     s = str(s).replace('\\', '\\\\').replace('"', '\\"')
     return s.strip() or " "
 
-
-
 def _musicbrainz_extract_artist(rec):
     """Extrahiert den vollständigen Artist-String aus einem MB-Recording-Dict."""
     if "artist-credit" not in rec or not rec["artist-credit"]:
@@ -53,7 +49,6 @@ def _musicbrainz_extract_artist(rec):
                 parts.append(joinphrase)
     full = "".join(parts).strip()
     return full or rec["artist-credit"][0].get("name", "")
-
 
 def _musicbrainz_query_recording(title_part, artist_part):
     """
@@ -125,7 +120,6 @@ def _musicbrainz_query_recording(title_part, artist_part):
                 time.sleep(2)
     return 0, '', ''
 
-
 def _parse_radiode_api_title(full_title, station_name=None):
     """
     Parst radio.de API Format "ARTIST - TITLE". Gibt (artist, title) zurück;
@@ -145,14 +139,11 @@ def _parse_radiode_api_title(full_title, station_name=None):
         return None, None
     return artist or None, title or None
 
-
 def _mb_similarity(a, b):
     """Ähnlichkeit zweier Strings (0.0 - 1.0), case-insensitive."""
     if not a or not b:
         return 0.0
     return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
-
-
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
@@ -268,7 +259,6 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     )
     return part1, part2, True
 
-
 # Window-Properties für die Skin
 WINDOW = xbmcgui.Window(10000)  # Home window
 
@@ -311,7 +301,6 @@ class PlayerMonitor(xbmc.Player):
                     xbmc.log(f"[{ADDON_NAME}] ⚠ ListItem.Icon beim Start: {listitem_icon}", xbmc.LOGDEBUG)
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler in onAVStarted: {str(e)}", xbmc.LOGERROR)
-
 
 class RadioMonitor(xbmc.Monitor):
     """
@@ -369,8 +358,8 @@ class RadioMonitor(xbmc.Monitor):
         xbmc.log(f"[{ADDON_NAME}] Properties gelöscht", xbmc.LOGDEBUG)
         
     def set_property_safe(self, key, value):
-        """Setzt Property nur wenn Wert vorhanden"""
-        if value and value != "":
+        """Setzt eine Window-Property nur wenn der Wert nicht leer ist."""
+        if value:
             WINDOW.setProperty(key, str(value))
     
     def is_real_logo(self, url):
@@ -423,38 +412,37 @@ class RadioMonitor(xbmc.Monitor):
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler beim Aktualisieren der Player Metadaten: {str(e)}", xbmc.LOGDEBUG)
             
-    def get_radiode_nowplaying(self, url):
-        """Holt aktuelle Song-Info von radio.de API wenn im Stream-Parameter"""
+    def _setup_api_fallback_from_url(self, url):
+        """
+        Versucht den Stationsnamen aus der Stream-URL zu extrahieren und setzt
+        das API-Fallback-Flag, wenn kein icy-metaint Header verfügbar ist.
+        Wird aufgerufen wenn der Stream keine ICY-Metadaten liefert.
+        """
         try:
-            # radio.de Streams haben oft einen Parameter im URL
-            # Versuche die Station-ID zu extrahieren
             if 'radiode' in url.lower() or 'radio.de' in url.lower() or 'radio-de' in url.lower():
-                xbmc.log(f"[{ADDON_NAME}] radio.de Stream erkannt, versuche alternative Metadaten-Quelle", xbmc.LOGDEBUG)
-                
-                # Fallback: Stream-URL für Sender-Erkennung (z.B. stream.berliner-rundfunk.de/...)
+                xbmc.log(f"[{ADDON_NAME}] radio.de Stream erkannt, versuche Stationsnamen aus URL", xbmc.LOGDEBUG)
+
                 match = re.search(r'stream\.([^/]+)\.de/([^/]+)', url)
                 if not match:
                     match = re.search(r'//([^/]+)/([^/]+)', url)
-                
+
                 if match:
-                    domain = match.group(1)
                     station_slug = match.group(2)
                     station_name = station_slug.replace('-', ' ').replace('_', ' ').title()
-                    
-                    # Bereinige den Namen
+
+                    # Bekannte Sonderfälle normalisieren
                     station_name = station_name.replace('Brf ', 'Berliner Rundfunk ')
                     station_name = station_name.replace('100prozent', '100%')
-                    
+
                     self.set_property_safe('RadioMonitor.Station', station_name)
                     xbmc.log(f"[{ADDON_NAME}] Station aus URL erkannt: {station_name}", xbmc.LOGDEBUG)
-                    
-                    # Setze Flag für API-Fallback
+
                     self.use_api_fallback = True
                     self.station_slug = station_slug
-                    
+
                     return station_name
         except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler bei radio.de Metadaten-Extraktion: {str(e)}", xbmc.LOGDEBUG)
+            xbmc.log(f"[{ADDON_NAME}] Fehler bei URL-Analyse für API-Fallback: {str(e)}", xbmc.LOGDEBUG)
         return None
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
@@ -555,7 +543,7 @@ class RadioMonitor(xbmc.Monitor):
             
             xbmc.log(f"[{ADDON_NAME}] Search API: {data.get('totalCount', 0)} Treffer", xbmc.LOGDEBUG)
             
-            # SCHRITT 2: Finde beste Übereinstimmung
+            # Schritt 1: Stationsname bereinigen und radio.de API durchsuchen
             if 'playables' in data and len(data['playables']) > 0:
                 # Suche die beste Übereinstimmung
                 best_match = None
@@ -608,7 +596,7 @@ class RadioMonitor(xbmc.Monitor):
                     
                     xbmc.log(f"[{ADDON_NAME}] Beste Übereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
                     
-                    # SCHRITT 2: Nutze die gefundene Station-ID für now-playing API
+                    # Schritt 2: Station-ID für now-playing API verwenden
                     if station_id:
                         xbmc.log(f"[{ADDON_NAME}] Hole Now-Playing von: https://api.radio.de/stations/now-playing?stationIds={station_id}", xbmc.LOGDEBUG)
                         
@@ -723,7 +711,6 @@ class RadioMonitor(xbmc.Monitor):
             # ICY-Metadaten aus den Headers
             icy_name = response.headers.get('icy-name', '')
             icy_genre = response.headers.get('icy-genre', '')
-            icy_url = response.headers.get('icy-url', '')
             
             # Hole den korrekten Stationsnamen (bevorzuge MusicPlayer.Album vom Addon)
             station_name = icy_name  # Fallback
@@ -749,8 +736,7 @@ class RadioMonitor(xbmc.Monitor):
             metaint = response.headers.get('icy-metaint')
             if not metaint:
                 xbmc.log(f"[{ADDON_NAME}] Kein icy-metaint Header gefunden - Stream sendet keine ICY-Metadaten", xbmc.LOGWARNING)
-                # Versuche alternative Metadaten-Quelle
-                self.get_radiode_nowplaying(url)
+                self._setup_api_fallback_from_url(url)
                 response.close()
                 return None
                 
@@ -761,8 +747,7 @@ class RadioMonitor(xbmc.Monitor):
             
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler beim Abrufen der ICY-Metadaten: {str(e)}", xbmc.LOGERROR)
-            # Versuche trotzdem Sender-Info zu extrahieren
-            self.get_radiode_nowplaying(url)
+            self._setup_api_fallback_from_url(url)
             return None
             
     def extract_stream_title(self, metadata_raw):
@@ -1037,16 +1022,7 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] Fehler bei JSON-RPC Notify: {str(e)}", xbmc.LOGDEBUG)
                             
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'})", xbmc.LOGINFO)
-                            
-                            # Notification anzeigen (optional)
-                            if artist and title:
-                                notification_text = f"{artist} - {title}"
-                            else:
-                                notification_text = stream_title
-                                
-                            # Nur Notification zeigen, wenn in den Settings aktiviert
-                            # xbmc.executebuiltin(f'Notification({stream_info.get("station", "Radio")}, {notification_text}, 5000)')
-                        
+
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata-Loop (Thread läuft weiter): {str(e)}", xbmc.LOGERROR)
                     time.sleep(1)
@@ -1139,10 +1115,9 @@ class RadioMonitor(xbmc.Monitor):
                                         self.station_logo = logo
                                         xbmc.log(f"[{ADDON_NAME}] Logo von {source}: {logo}", xbmc.LOGINFO)
                                         break
-                            
-                            # 4. Fallback: API-Logo (falls alle anderen leer sind)
+
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
-                                xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo verfügbar, hole von API", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird später von API geholt", xbmc.LOGDEBUG)
                             
                             # Diese Infos als Fallback setzen
                             if title:
