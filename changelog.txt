@@ -1,3 +1,7 @@
+v1.1.8 (2026-02-25)
+- Suche bei Musicbrainz verfeinert
+- Code bereinigt
+
 v1.1.7 (2026-02-24)
 - MusicBrainz-Suche grundlegend überarbeitet: Statt kombinierter Freitextsuche werden jetzt zwei gezielte Queries mit expliziten Feldangaben (recording: / artistname:) ausgeführt – behebt Fehlgriffe durch Lucene-Stopwords (z.B. "the" in "Heal the World").
 - Beide Queries werden jetzt immer ausgeführt. Bisher wurde Query 2 übersprungen, wenn Query 1 einen hohen Score lieferte – auch wenn der gefundene Artist komplett falsch war (z.B. "SITER SKAIN" statt "Earth, Wind & Fire").
