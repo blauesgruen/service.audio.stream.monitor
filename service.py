@@ -1099,6 +1099,9 @@ class RadioMonitor(xbmc.Monitor):
                     if playing_file != self.current_url:
                         self.current_url = playing_file
                         self.is_playing = True
+                        title = None
+                        artist = None
+                        album = None
                         
                         # Basis-Informationen aus dem Player
                         try:
