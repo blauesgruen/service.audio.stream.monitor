@@ -7,6 +7,7 @@ import re
 import time
 import threading
 import json
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
 ADDON = xbmcaddon.Addon()
@@ -25,32 +26,16 @@ INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 # Standard HTTP-Header für externe APIs (radio.de etc.)
 DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-# Funktion für paralleles Logging von ICY- und API-Daten
-def log_stream_info(icy_data, api_data):
-    """
-    Gibt ICY- und API-Daten parallel im Kodi-Log aus.
-    """
-    log_msg = (
-        f"[Audio Stream Monitor] ICY-Daten: {icy_data}\n"
-        f"[Audio Stream Monitor] API-Daten: {api_data}"
-    )
-    xbmc.log(log_msg, xbmc.LOGINFO)
-
-# Beispiel: Nach dem Einlesen beider Datenquellen
-# icy_data = ...
-# api_data = ...
-# log_stream_info(icy_data, api_data)
-
 def _musicbrainz_escape(s):
     """
-    Für MusicBrainz-Query in Anführungszeichen: Sonderzeichen escapen.
-    Apostroph wird als \' escaped (nicht entfernt) damit z.B. "I Can't Stand the Rain"
-    korrekt gefunden wird.
+    Für MusicBrainz-Query in Anführungszeichen: nur Backslash und Anführungszeichen escapen.
+    Apostroph ist in Lucene Phrase-Queries ein normales Zeichen und darf NICHT escaped werden –
+    das Escape \' ist in Lucene ungültig und bricht die Query (liefert 0 Treffer).
+    Beispiel: Israel "Iz" Kamakawiwo'ole → artistname:"Israel \"Iz\" Kamakawiwo'ole" ✓
     """
     if not s:
         return s
     s = str(s).replace('\\', '\\\\').replace('"', '\\"')
-    s = s.replace("'", "\\'")  # Apostroph escapen, nicht entfernen
     return s.strip() or " "
 
 
@@ -163,7 +148,6 @@ def _parse_radiode_api_title(full_title, station_name=None):
 
 def _mb_similarity(a, b):
     """Ähnlichkeit zweier Strings (0.0 - 1.0), case-insensitive."""
-    from difflib import SequenceMatcher
     if not a or not b:
         return 0.0
     return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
@@ -341,8 +325,9 @@ class RadioMonitor(xbmc.Monitor):
         self.current_url = None
         self.metadata_thread = None
         self.stop_thread = False
-        self.station_id = None  # radio.de Station ID
+        self.station_id = None    # radio.de Station ID
         self.station_logo = None  # Logo URL von radio.de API
+        self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
         self.use_api_fallback = False  # Flag für API-Fallback
         
         # Event-Handler für Player-Events
@@ -474,29 +459,15 @@ class RadioMonitor(xbmc.Monitor):
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
         """Versucht nowPlaying von verschiedenen APIs zu holen"""
-        
         xbmc.log(f"[{ADDON_NAME}] API-Fallback gestartet für Station: '{station_name}'", xbmc.LOGDEBUG)
-        
-        # 1. Versuche radio.de API
+
+        # 1. Versuche radio.de API (sender-unabhängig, funktioniert für alle Stationen)
         artist, title = self.get_radiode_api_nowplaying(station_name)
         if artist or title:
             xbmc.log(f"[{ADDON_NAME}] ✓ radio.de API: {artist} - {title}", xbmc.LOGINFO)
             return artist, title
-        
-        # 2. Versuch: Sender-spezifische APIs basierend auf URL/Name
-        # NRJ Sender
-        if 'nrj' in stream_url.lower() or 'nrj' in station_name.lower():
-            xbmc.log(f"[{ADDON_NAME}] Versuche NRJ-spezifische API", xbmc.LOGDEBUG)
-            artist, title = self.get_nrj_nowplaying(station_name)
-            if artist or title:
-                return artist, title
-        
-        # Energy Sender
-        if 'energy' in stream_url.lower() or 'energy' in station_name.lower():
-            # Energy hat meist gute ICY-Metadaten, daher kein extra API nötig
-            pass
-        
-        # 3. Versuch: Kodi Player InfoTags als letzter Ausweg
+
+        # 2. Fallback: Kodi Player InfoTags
         try:
             if self.player.isPlayingAudio():
                 info_tag = self.player.getMusicInfoTag()
@@ -555,32 +526,6 @@ class RadioMonitor(xbmc.Monitor):
                     return artist, title
         
         return None, stream_title.strip()
-    
-    def get_nrj_nowplaying(self, station_name):
-        """Versucht nowPlaying von NRJ-Sendern zu holen"""
-        try:
-            # NRJ hat verschiedene Webradios, versuche die generische API
-            # Format kann variieren, hier ein Ansatz basierend auf öffentlichen Endpoints
-            
-            # Suche nach NRJ-spezifischen Stream-IDs oder Namen
-            # Dies ist ein Platzhalter - müsste für jeden NRJ-Sender angepasst werden
-            
-            xbmc.log(f"[{ADDON_NAME}] Versuche NRJ-spezifische Metadaten für '{station_name}'", xbmc.LOGDEBUG)
-            
-            # NRJ-Sender werden über radio.de API + NRJ→ENERGY Fallback abgedeckt (siehe get_radiode_api_nowplaying())
-            # Diese Funktion bleibt als Platzhalter falls zukünftig direkte NRJ-API gefunden wird
-            
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler bei NRJ API: {str(e)}", xbmc.LOGDEBUG)
-        
-        return None, None
-    
-    def get_radiobrowser_api_nowplaying(self, station_name):
-        """Radio-Browser API hat keine nowPlaying Daten - nur für zukünftige Erweiterungen"""
-        # Radio-Browser ist eine Stations-Datenbank, keine Live-Metadaten-Quelle
-        # Diese Funktion bleibt als Platzhalter für zukünftige Erweiterungen
-        # (z.B. um Station-Homepage zu finden und dann dort zu scrapen)
-        return None, None
     
     def get_radiode_api_nowplaying(self, station_name):
         """Holt aktuelle Song-Info direkt von der radio.de API"""
@@ -694,39 +639,6 @@ class RadioMonitor(xbmc.Monitor):
                                         xbmc.log(f"[{ADDON_NAME}] ✗ Titel-Format unbekannt: '{full_title}'", xbmc.LOGDEBUG)
                                 else:
                                     xbmc.log(f"[{ADDON_NAME}] ✗ Leere now-playing Response", xbmc.LOGDEBUG)
-                                    
-                                    # FALLBACK: NRJ-Sender nutzen oft denselben Stream wie ENERGY-Sender
-                                    # Versuche "NRJ" durch "ENERGY" zu ersetzen und nochmal zu suchen
-                                    if 'NRJ' in station_found.upper():
-                                        xbmc.log(f"[{ADDON_NAME}] Versuche NRJ→ENERGY Fallback für '{station_found}'", xbmc.LOGDEBUG)
-                                        alternative_name = station_found.replace('NRJ', 'ENERGY').replace('nrj', 'ENERGY')
-                                        
-                                        # Suche nach der ENERGY-Variante
-                                        alt_search_url = f"https://prod.radio-api.net/stations/search?query={alternative_name.replace(' ', '+')}&count=10"
-                                        alt_response = requests.get(alt_search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
-                                        alt_data = alt_response.json()
-                                        
-                                        if 'playables' in alt_data and len(alt_data['playables']) > 0:
-                                            alt_station = alt_data['playables'][0]
-                                            alt_id = alt_station.get('id', '')
-                                            alt_name = alt_station.get('name', '')
-                                            xbmc.log(f"[{ADDON_NAME}] Alternative Station gefunden: '{alt_name}' (ID: {alt_id})", xbmc.LOGDEBUG)
-                                            
-                                            if alt_id:
-                                                alt_np_url = f"https://api.radio.de/stations/now-playing?stationIds={alt_id}"
-                                                alt_np_response = requests.get(alt_np_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
-                                                
-                                                if alt_np_response.status_code == 200:
-                                                    alt_np_data = alt_np_response.json()
-                                                    xbmc.log(f"[{ADDON_NAME}] Alternative now-playing Response: {alt_np_data}", xbmc.LOGDEBUG)
-                                                    
-                                                    if isinstance(alt_np_data, list) and len(alt_np_data) > 0:
-                                                        alt_track = alt_np_data[0]
-                                                        alt_full_title = alt_track.get('title', '')
-                                                        artist, title = _parse_radiode_api_title(alt_full_title, alt_name)
-                                                        if artist and title:
-                                                            xbmc.log(f"[{ADDON_NAME}] ✓ Alternative API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
-                                                            return artist, title
                             else:
                                 xbmc.log(f"[{ADDON_NAME}] ✗ now-playing API Fehler: {np_response.status_code}", xbmc.LOGDEBUG)
                         except Exception as e:
