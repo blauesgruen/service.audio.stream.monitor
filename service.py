@@ -314,6 +314,7 @@ class RadioMonitor(xbmc.Monitor):
         self.current_url = None
         self.metadata_thread = None
         self.stop_thread = False
+        self.metadata_generation = 0  # invalidates stale workers on restart
         self.station_id = None    # radio.de Station ID
         self.station_logo = None  # Logo URL von radio.de API
         self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
@@ -644,7 +645,7 @@ class RadioMonitor(xbmc.Monitor):
         
         return None, None
     
-    def api_metadata_worker(self):
+    def api_metadata_worker(self, generation):
         """Fallback: Pollt verschiedene APIs wenn keine ICY-Metadaten verfügbar"""
         xbmc.log(f"[{ADDON_NAME}] API Metadata Worker gestartet (Fallback-Modus)", xbmc.LOGDEBUG)
         
@@ -654,7 +655,12 @@ class RadioMonitor(xbmc.Monitor):
         stream_url = self.current_url or ''
         
         try:
-            while not self.stop_thread and self.is_playing and self.use_api_fallback:
+            while (
+                not self.stop_thread
+                and self.is_playing
+                and self.use_api_fallback
+                and generation == self.metadata_generation
+            ):
                 # Versuche verschiedene APIs
                 if station_name:
                     artist, title = self.get_nowplaying_from_apis(station_name, stream_url)
@@ -686,7 +692,11 @@ class RadioMonitor(xbmc.Monitor):
                 
                 # Warte vor nächster Abfrage
                 for _ in range(poll_interval * 2):  # 10 Sekunden in 0.5s Schritten
-                    if self.stop_thread or not self.is_playing:
+                    if (
+                        self.stop_thread
+                        or not self.is_playing
+                        or generation != self.metadata_generation
+                    ):
                         break
                     time.sleep(0.5)
                 
@@ -874,7 +884,7 @@ class RadioMonitor(xbmc.Monitor):
             return None, None
         return mb_artist, mb_title
         
-    def metadata_worker(self, url):
+    def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
         xbmc.log(f"[{ADDON_NAME}] Metadata Worker gestartet", xbmc.LOGDEBUG)
         
@@ -882,8 +892,8 @@ class RadioMonitor(xbmc.Monitor):
         if not stream_info:
             xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfügbar - wechsle zu API-Fallback", xbmc.LOGWARNING)
             # Starte API-Fallback Worker
-            if self.use_api_fallback:
-                self.api_metadata_worker()
+            if self.use_api_fallback and generation == self.metadata_generation:
+                self.api_metadata_worker(generation)
             return
             
         metaint = stream_info['metaint']
@@ -892,7 +902,11 @@ class RadioMonitor(xbmc.Monitor):
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
-            while not self.stop_thread and self.is_playing:
+            while (
+                not self.stop_thread
+                and self.is_playing
+                and generation == self.metadata_generation
+            ):
                 try:
                     audio_data = response.raw.read(metaint)
                     if not audio_data:
@@ -908,6 +922,8 @@ class RadioMonitor(xbmc.Monitor):
                     if meta_length > 0:
                         # Metadaten lesen
                         metadata = response.raw.read(meta_length)
+                        if generation != self.metadata_generation:
+                            break
                         metadata_str = metadata.decode('utf-8', errors='ignore').strip('\x00')
                         
                         # KOMPLETT LOGGEN: Rohe ICY-Metadaten
@@ -1044,8 +1060,10 @@ class RadioMonitor(xbmc.Monitor):
         # Reset flags
         self.use_api_fallback = False
         self.stop_thread = False
+        self.metadata_generation += 1
+        generation = self.metadata_generation
         
-        self.metadata_thread = threading.Thread(target=self.metadata_worker, args=(url,))
+        self.metadata_thread = threading.Thread(target=self.metadata_worker, args=(url, generation))
         self.metadata_thread.daemon = True
         self.metadata_thread.start()
         
@@ -1053,8 +1071,10 @@ class RadioMonitor(xbmc.Monitor):
         """Stoppt das Metadata-Monitoring"""
         if self.metadata_thread and self.metadata_thread.is_alive():
             self.stop_thread = True
+            self.metadata_generation += 1
             self.metadata_thread.join(timeout=0.5)  # kurz warten, Thread bricht selbst ab da is_playing=False
-            self.metadata_thread = None
+            if not self.metadata_thread.is_alive():
+                self.metadata_thread = None
             
     def check_playing(self):
         """Überprüft, was gerade abgespielt wird"""
