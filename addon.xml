@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.8">
+<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.9">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
     <import addon="script.module.requests" />
@@ -13,17 +13,14 @@
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
-    <news>v1.1.0 (2026-02-19)
-- Korrigierte Titel/Artist Reihenfolge für radio.de API (Title - Artist)
-- Player InfoTag Update für Standard Kodi InfoLabels (MusicPlayer.Artist, MusicPlayer.Title)
-- Artist Slideshow Kompatibilität (artistslideshow.artistname/trackname)
-- Sender-spezifische Format-Erkennung (NDR, WDR, SWR, etc.)
-- Logo-Support aus verschiedenen Quellen (Player.Art(poster), Player.Icon, etc.)
-- Verbesserte Metadaten-Priorisierung (API-first für präzise Daten)
-v1.0.1 (Initial)
-- ICY-Metadaten Parsing
-- radio.de API Integration
-- Window Properties für Skins</news>
+    <news>v1.1.9 (2026-02-26)
+- MusicBrainz-MBID wird bei der Ermittlung von Artist/Title mitgeführt.
+- Neue Property RadioMonitor.MBID wird bei Songwechsel gesetzt bzw. aktiv gelöscht.
+- MBID-Übergabe an Player-Metadaten (Best-Effort je nach Kodi API-Version).
+- Logging für MBID-Pfade erweitert.
+v1.1.8 (2026-02-25)
+- Suche bei MusicBrainz verfeinert.
+- Code bereinigt.</news>
     <assets>
         <icon>icon.png</icon>
         <fanart>fanart.jpg</fanart>

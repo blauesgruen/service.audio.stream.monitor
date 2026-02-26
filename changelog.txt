@@ -1,3 +1,9 @@
+v1.1.9 (2026-02-26)
+- MusicBrainz-MBID wird bei der Ermittlung von Artist/Title mitgeführt und im Service weiterverarbeitet.
+- Neue Property `RadioMonitor.MBID` wird bei Songwechsel gesetzt bzw. bei unklaren/ungültigen Treffern aktiv geleert.
+- Übergabe der MBID an das Player-Metadaten-Update erweitert (Best-Effort je nach Kodi API-Version).
+- Logging um MBID-Werte in den relevanten Metadaten-Pfaden ergänzt.
+
 v1.1.8 (2026-02-25)
 - Suche bei Musicbrainz verfeinert
 - Code bereinigt
