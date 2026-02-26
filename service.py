@@ -217,11 +217,81 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     time.sleep(2)
                 else:
                     break
+    # --- Q4: Fuzzy-Fallback ohne Anführungszeichen ---
+    # Greift nur wenn alle Phrase-Varianten Score=0 lieferten.
+    # Ohne Quotes nutzt MB seinen eigenen Fuzzy-Index, der Compound-Schreibweisen
+    # wie 'Every time' vs 'Everytime' automatisch auflöst – sprachunabhängig,
+    # ohne Whitelist. Stopword-Problem ist hier akzeptabel da letzter Fallback.
     xbmc.log(
-        f"[{ADDON_NAME}] MusicBrainz: keine Variante lieferte Treffer "
-        f"fuer recording:'{title_part}' artist:'{artist_part}'",
-        xbmc.LOGDEBUG
+        f"[{ADDON_NAME}] MusicBrainz: alle Phrase-Varianten ohne Treffer – "
+        f"versuche Fuzzy-Query ohne Quotes für recording='{title_part}', "
+        f"artistname='{artist_part}'",
+        xbmc.LOGINFO
     )
+    try:
+        time.sleep(1)
+        params = {
+            "query": f'recording:{_musicbrainz_escape(title_part)} AND artistname:{_musicbrainz_escape(artist_part)}',
+            "fmt":   "json",
+            "limit": 5,
+        }
+        r = requests.get(MUSICBRAINZ_API_URL, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        data = r.json()
+        recordings = data.get("recordings", [])
+        if recordings:
+            best_combined = -1
+            best_score, best_artist, best_title, best_mbid = 0, '', '', ''
+            for rec in recordings:
+                score      = int(rec.get("score", 0))
+                mb_title   = rec.get("title", "")
+                mb_artist  = _musicbrainz_extract_artist(rec)
+                mb_mbid    = _musicbrainz_extract_artist_mbid(rec)
+                artist_sim = _mb_similarity(mb_artist, artist_part)
+                combined   = score * artist_sim
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB Fuzzy-Kandidat: Artist='{mb_artist}', "
+                    f"Title='{mb_title}', Score={score}, "
+                    f"artist_sim={artist_sim:.2f}, combined={combined:.1f}",
+                    xbmc.LOGDEBUG
+                )
+                if combined > best_combined:
+                    best_combined = combined
+                    best_score    = score
+                    best_artist   = mb_artist
+                    best_title    = mb_title
+                    best_mbid     = mb_mbid
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fuzzy-Query Best-Match: "
+                f"Score={best_score}, MB-Artist='{best_artist}', "
+                f"MB-Title='{best_title}', MBID='{best_mbid}', "
+                f"combined={best_combined:.1f}",
+                xbmc.LOGINFO
+            )
+            # Guard: MB-Titel muss dem gesuchten Titel ähneln.
+            # Ohne Quotes können Stopwords ignoriert werden, sodass MB einen
+            # komplett anderen Song zurückgibt (z.B. recording:In → beliebiger
+            # Song weil 'In' Stopword ist). Titel-Ähnlichkeit < 0.6 → verwerfen.
+            FUZZY_TITLE_MIN_SIM = 0.6
+            title_sim = _mb_similarity(best_title, title_part)
+            if title_sim < FUZZY_TITLE_MIN_SIM:
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB Fuzzy-Query verworfen: Titel-Ähnlichkeit "
+                    f"zu niedrig (sim={title_sim:.2f} < {FUZZY_TITLE_MIN_SIM}) – "
+                    f"MB-Title='{best_title}' vs. gesuchter Title='{title_part}'",
+                    xbmc.LOGINFO
+                )
+                return 0, '', '', ''
+            return best_score, best_artist, best_title, best_mbid
+        xbmc.log(
+            f"[{ADDON_NAME}] MB Fuzzy-Query: kein Treffer für "
+            f"recording='{title_part}' artistname='{artist_part}'",
+            xbmc.LOGDEBUG
+        )
+    except Exception as e:
+        xbmc.log(
+            f"[{ADDON_NAME}] MB Fuzzy-Query Fehler: {e}",
+            xbmc.LOGDEBUG
+        )
     return 0, '', '', ''
 
 def _parse_radiode_api_title(full_title, station_name=None):
