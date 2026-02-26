@@ -13,16 +13,19 @@ ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
 ADDON_VERSION = ADDON.getAddonInfo('version')
 
-# MusicBrainz API: User-Agent erforderlich (Richtlinie), ~1 Request/Sekunde
+# --- Konstanten ---
+
+# API Endpunkte
+MUSICBRAINZ_API_URL = "https://musicbrainz.org/ws/2/recording/"
+RADIODE_SEARCH_API_URL = "https://prod.radio-api.net/stations/search"
+RADIODE_NOWPLAYING_API_URL = "https://api.radio.de/stations/now-playing"
+
+# Header für API-Anfragen
 MUSICBRAINZ_HEADERS = {
     "User-Agent": f"RadioMonitorLight/{ADDON_VERSION} (https://github.com; Kodi addon {ADDON_ID})"
 }
-
-# Ungültige Metadaten-Werte (StreamTitle/Artist/Title)
-INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
-
-# Standard HTTP-Header für externe APIs (radio.de etc.)
 DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 
 def _musicbrainz_escape(s):
     """
@@ -108,6 +111,14 @@ def _musicbrainz_artist_variants(artist_part):
         add_variant("comma-swapped+apostrophe-normalized", normalize_apostrophes(comma_swapped))
         add_variant("comma-swapped+apostrophe-removed", remove_apostrophes(normalize_apostrophes(comma_swapped)))
 
+    # Erster Künstler vor & / feat. / ft. / with
+    # Beispiel: "Rihanna & Mikky Ekko" → "Rihanna"
+    # MB indexiert Multi-Artist-Songs oft nur unter dem Hauptkünstler.
+    first_artist = re.split(r'\s*(?:&|feat\.?|ft\.?|with)\s+', original, maxsplit=1)[0].strip()
+    if first_artist != original:
+        add_variant("first-artist", first_artist)
+        add_variant("first-artist+apostrophe-normalized", normalize_apostrophes(first_artist))
+
     return variants
 
 def _musicbrainz_query_recording(title_part, artist_part):
@@ -122,7 +133,6 @@ def _musicbrainz_query_recording(title_part, artist_part):
     Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
     oder (0, '', '', '') bei Fehler/kein Treffer.
     """
-    url = "https://musicbrainz.org/ws/2/recording/"
     safe_title = _musicbrainz_escape(title_part)
     artist_variants = _musicbrainz_artist_variants(artist_part)
     retries = 2
@@ -140,7 +150,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
         )
         for attempt in range(retries + 1):
             try:
-                r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+                r = requests.get(MUSICBRAINZ_API_URL, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
                 data = r.json()
                 recordings = data.get("recordings", [])
                 if not recordings:
@@ -268,7 +278,6 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
     oder (0, '', '', '') bei Fehler/kein Treffer.
     """
-    url = "https://musicbrainz.org/ws/2/recording/"
     safe_title = _musicbrainz_escape(title_part)
     params = {
         "query": f'recording:"{safe_title}"',
@@ -276,7 +285,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
         "limit": 5,
     }
     try:
-        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        r = requests.get(MUSICBRAINZ_API_URL, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
         data = r.json()
         recordings = data.get("recordings", [])
         if not recordings:
@@ -348,20 +357,48 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     if not part1 or not part2:
         return part1, part2, '', True
 
+    # --- Bereinigung der Titel-Parts für die MusicBrainz-Suche ---
+    # Entfernt häufige, störende Suffixe in Klammern, die die MB-Suche stören,
+    # z.B. "(Radio Edit)", "(feat. ...)", "(The official... song)".
+    def clean_title_part(part):
+        """
+        Bereinigt einen Titel-Part für die MusicBrainz-Suche.
+
+        Schritt 1: Bekannte Klammer-Keywords entfernen (Radio Edit, feat., Remix ...)
+        Schritt 2: Alle verbleibenden abschließenden Klammerausdrücke entfernen
+                   (z.B. "(Love theme)", "(Remastered 2011)", "(Original Soundtrack)")
+                   Nur am Ende – führende Klammern wie "(I've Had) The Time of My Life"
+                   bleiben unberührt.
+        """
+        keywords = [
+            'Official', 'Radio', 'Original', 'Live', 'Remix', 'Edit',
+            'Version', 'Mix', 'Acoustic', 'feat', 'ft', 'with', 'TM'
+        ]
+        keyword_pattern = r'\s*[\(\[][^\)\]]*(' + '|'.join(keywords) + r')[^\)\]]*[\)\]]'
+        cleaned = re.sub(keyword_pattern, '', part, flags=re.IGNORECASE).strip()
+        # Iterativ alle restlichen abschließenden Klammerausdrücke entfernen
+        prev = None
+        while prev != cleaned:
+            prev = cleaned
+            cleaned = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', cleaned).strip()
+        return cleaned
+
+    p1_cleaned = clean_title_part(part1)
+    p2_cleaned = clean_title_part(part2)
+
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Suche Recording für '{part1}' / '{part2}'", xbmc.LOGDEBUG)
+    if p1_cleaned != part1 or p2_cleaned != part2:
+        xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Bereinigte Parts für Titel-Suche: '{p1_cleaned}' / '{p2_cleaned}'", xbmc.LOGDEBUG)
 
     # --- Q1: part1=Title, part2=Artist ---
     score_1, mb_artist_1, mb_title_1, mbid_1 = _musicbrainz_query_recording(
-        title_part=part1, artist_part=part2
+        title_part=p1_cleaned, artist_part=part2
     )
 
     # --- Q2: part2=Title, part1=Artist ---
-    # Wird immer ausgeführt (nicht nur als Fallback), weil Q1 einen hohen Score
-    # mit komplett falschem Artist liefern kann. Erst der Vergleich beider Queries
-    # anhand Artist-Ähnlichkeit ermöglicht eine sichere Entscheidung.
     time.sleep(1)  # MusicBrainz Rate-Limit: ~1 req/s
     score_2, mb_artist_2, mb_title_2, mbid_2 = _musicbrainz_query_recording(
-        title_part=part2, artist_part=part1
+        title_part=p2_cleaned, artist_part=part1
     )
 
     # --- Entscheidung anhand combined-Score (MB-Score × Artist-Ähnlichkeit) ---
@@ -389,7 +426,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
         )
         time.sleep(1)
         score_f, mb_artist_f, mb_title_f, mbid_f = _musicbrainz_query_title_only(
-            part1, artist_hints=[part1, part2]
+            p1_cleaned, artist_hints=[part1, part2]
         )
 
         if score_f >= MIN_SCORE:
@@ -785,8 +822,8 @@ class RadioMonitor(xbmc.Monitor):
             
             xbmc.log(f"[{ADDON_NAME}] Suche radio.de API mit: '{search_name}' (Original: '{station_name}')", xbmc.LOGDEBUG)
             
-            search_url = f"https://prod.radio-api.net/stations/search?query={search_name.replace(' ', '+')}&count=20"
-            response = requests.get(search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+            params = {'query': search_name, 'count': 20}
+            response = requests.get(RADIODE_SEARCH_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
             if response.status_code != 200 or not response.content:
                 xbmc.log(f"[{ADDON_NAME}] radio.de API: ungültige Antwort (Status {response.status_code})", xbmc.LOGDEBUG)
                 return None, None
@@ -849,11 +886,11 @@ class RadioMonitor(xbmc.Monitor):
                     
                     # Schritt 2: Station-ID für now-playing API verwenden
                     if station_id:
-                        xbmc.log(f"[{ADDON_NAME}] Hole Now-Playing von: https://api.radio.de/stations/now-playing?stationIds={station_id}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] Hole Now-Playing von: {RADIODE_NOWPLAYING_API_URL}?stationIds={station_id}", xbmc.LOGDEBUG)
                         
                         try:
-                            nowplaying_url = f"https://api.radio.de/stations/now-playing?stationIds={station_id}"
-                            np_response = requests.get(nowplaying_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                            params = {'stationIds': station_id}
+                            np_response = requests.get(RADIODE_NOWPLAYING_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                             if np_response.status_code == 200:
                                 np_data = np_response.json()
                                 xbmc.log(f"[{ADDON_NAME}] now-playing API Response: {np_data}", xbmc.LOGDEBUG)
@@ -1141,12 +1178,14 @@ class RadioMonitor(xbmc.Monitor):
         else:
             mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
             if uncertain:
+                # ICY-Standard beibehalten: part1=Artist, part2=Title
+                # (nicht stream_title als Ganzes – das verliert die Trennung)
                 xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz unentschieden, keine erzwungene Zuordnung "
-                    f"(part1='{part1}', part2='{part2}')",
+                    f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze ICY-Standard: "
+                    f"Artist='{part1}', Title='{part2}'",
                     xbmc.LOGDEBUG
                 )
-                mb_artist, mb_title = None, stream_title.strip()
+                mb_artist, mb_title = part1, part2
                 mbid = ''
 
         if mb_artist in invalid: mb_artist = None
@@ -1449,8 +1488,8 @@ class RadioMonitor(xbmc.Monitor):
                                 search_name = re.sub(r'\s*(inter\d+|mp3|aac|low|high|128|64|256).*$', '', search_name, flags=re.IGNORECASE)
                                 search_name = search_name.strip()
                                 
-                                search_url = f"https://prod.radio-api.net/stations/search?query={search_name.replace(' ', '+')}&count=5"
-                                response = requests.get(search_url, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                                params = {'query': search_name, 'count': 5}
+                                response = requests.get(RADIODE_SEARCH_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
                                 data = response.json()
                                 
                                 if 'playables' in data and len(data['playables']) > 0:
