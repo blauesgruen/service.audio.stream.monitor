@@ -140,24 +140,97 @@ def _parse_radiode_api_title(full_title, station_name=None):
     return artist or None, title or None
 
 def _mb_similarity(a, b):
-    """Ähnlichkeit zweier Strings (0.0 - 1.0), case-insensitive."""
+    """
+    Ähnlichkeit zweier Strings (0.0 - 1.0), case-insensitive.
+
+    Kombiniert drei Methoden und gibt das Maximum zurück, um typische
+    ICY-Schreibweisabweichungen robust zu erkennen:
+      - raw:        direkter Zeichenvergleich (SequenceMatcher)
+      - normalized: Punkte und Sonderzeichen entfernt (R. Kelly → r kelly)
+      - token_sort: Wörter sortiert verglichen (Ray jr Parker → Ray Parker Jr.)
+    """
     if not a or not b:
         return 0.0
-    return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+    def normalize(s):
+        s = s.lower().replace('.', '')
+        s = re.sub(r'[^\w\s]', ' ', s)
+        return re.sub(r'\s+', ' ', s).strip()
+
+    def token_sort(s):
+        return ' '.join(sorted(normalize(s).split()))
+
+    a_norm, b_norm = normalize(a), normalize(b)
+    return max(
+        SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio(),
+        SequenceMatcher(None, a_norm, b_norm).ratio(),
+        SequenceMatcher(None, token_sort(a), token_sort(b)).ratio(),
+    )
+
+def _musicbrainz_query_title_only(title_part):
+    """
+    Sucht in MusicBrainz nur nach dem Titel, ohne artistname-Filter.
+
+    Wird als Fallback genutzt wenn Q1+Q2 beide Score=0 liefern – was passiert wenn
+    der ICY-Artistname so abweicht dass MB ihn nicht als Phrase findet
+    (z.B. "Chris DeBurgh" statt "Chris de Burgh").
+
+    MB gibt seinen eigenen, korrekten Artistnamen zurück. Dieser wird dann per
+    Ähnlichkeitsvergleich gegen beide ICY-Parts geprüft um die Reihenfolge zu bestimmen.
+
+    Rückgabe: (score, mb_artist, mb_title) oder (0, '', '') bei Fehler/kein Treffer.
+    """
+    url = "https://musicbrainz.org/ws/2/recording/"
+    safe_title = _musicbrainz_escape(title_part)
+    params = {
+        "query": f'recording:"{safe_title}"',
+        "fmt":   "json",
+        "limit": 5,
+    }
+    try:
+        r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        data = r.json()
+        recordings = data.get("recordings", [])
+        if not recordings:
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fallback-Query: kein Treffer für recording:'{title_part}'",
+                xbmc.LOGDEBUG
+            )
+            return 0, '', ''
+
+        # Besten Treffer nach MB-Score wählen (kein artist_part zum Vergleichen)
+        best = max(recordings, key=lambda r: int(r.get("score", 0)))
+        score     = int(best.get("score", 0))
+        mb_title  = best.get("title", "")
+        mb_artist = _musicbrainz_extract_artist(best)
+        xbmc.log(
+            f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
+            f"Score={score}, Artist='{mb_artist}', Title='{mb_title}'",
+            xbmc.LOGDEBUG
+        )
+        return score, mb_artist, mb_title
+
+    except Exception as e:
+        xbmc.log(f"[{ADDON_NAME}] MB Fallback-Query Fehler: {e}", xbmc.LOGDEBUG)
+        return 0, '', ''
+
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
     """
-    Ermittelt welcher der beiden ICY-Parts der Artist ist, via max. 2 MusicBrainz-Queries.
+    Ermittelt welcher der beiden ICY-Parts der Artist ist, via MusicBrainz.
 
     Strategie:
-      Query 1: recording:"part1" AND artistname:"part2"  → Normalfall (part1=Title, part2=Artist)
-      Query 2: recording:"part2" AND artistname:"part1"  → Fallback  (part2=Title, part1=Artist)
+      Q1: recording:"part1" AND artistname:"part2"  → Normalfall (part1=Title, part2=Artist)
+      Q2: recording:"part2" AND artistname:"part1"  → Umgekehrt  (part2=Title, part1=Artist)
+      Q3: recording:"part1" (nur Titel, kein Artist-Filter) → Fallback wenn Q1+Q2 Score=0
 
-    Durch explizite Feldangabe (recording: / artistname:) umgehen wir das Lucene-Stopword-
-    Problem (z.B. "the" in "Heal the World") und erhalten präzisere Scores.
+    Q3 greift wenn der ICY-Artistname so von MB abweicht, dass die Phrase-Query
+    keinen Treffer liefert (z.B. "Chris DeBurgh" vs. MB "Chris de Burgh").
+    MB gibt dann seinen korrekten Artistnamen zurück; der Ähnlichkeitsvergleich
+    gegen beide ICY-Parts bestimmt die Reihenfolge.
 
     Rückgabe: (artist, title, uncertain)
-      uncertain=True  → kein verlässlicher Treffer, ICY-Standard behalten (part1=Artist, part2=Title)
+      uncertain=True  → kein verlässlicher Treffer, ICY-Standard behalten
       uncertain=False → Reihenfolge sicher bestimmt
     """
     MIN_SCORE = 85
@@ -168,15 +241,14 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
 
     xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Suche Recording für '{part1}' / '{part2}'", xbmc.LOGDEBUG)
 
-    # --- Query 1: part1=Title, part2=Artist ---
+    # --- Q1: part1=Title, part2=Artist ---
     score_1, mb_artist_1, mb_title_1 = _musicbrainz_query_recording(
         title_part=part1, artist_part=part2
     )
 
-    # --- Query 2: part2=Title, part1=Artist ---
-    # Wird IMMER ausgeführt (nicht nur als Fallback), weil Q1 einen hohen Score
-    # mit komplett falschem Artist liefern kann (z.B. "Earth Wind" von "SITER SKAIN"
-    # statt "September" von "Earth, Wind & Fire"). Erst der Vergleich beider Queries
+    # --- Q2: part2=Title, part1=Artist ---
+    # Wird immer ausgeführt (nicht nur als Fallback), weil Q1 einen hohen Score
+    # mit komplett falschem Artist liefern kann. Erst der Vergleich beider Queries
     # anhand Artist-Ähnlichkeit ermöglicht eine sichere Entscheidung.
     time.sleep(1)  # MusicBrainz Rate-Limit: ~1 req/s
     score_2, mb_artist_2, mb_title_2 = _musicbrainz_query_recording(
@@ -184,12 +256,10 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     )
 
     # --- Entscheidung anhand combined-Score (MB-Score × Artist-Ähnlichkeit) ---
-    # Der combined-Score verhindert, dass ein Treffer mit hohem MB-Score aber
-    # komplett falschem Artist gewinnt (z.B. "SITER SKAIN" statt "Earth, Wind & Fire").
     sim_1_p2 = _mb_similarity(mb_artist_1, part2)  # Q1: MB-Artist sollte part2 ähneln
     sim_2_p1 = _mb_similarity(mb_artist_2, part1)  # Q2: MB-Artist sollte part1 ähneln
-    combined_1 = score_1 * sim_1_p2  # Q1-Güte: part1=Title, part2=Artist
-    combined_2 = score_2 * sim_2_p1  # Q2-Güte: part2=Title, part1=Artist
+    combined_1 = score_1 * sim_1_p2
+    combined_2 = score_2 * sim_2_p1
 
     xbmc.log(
         f"[{ADDON_NAME}] MusicBrainz Entscheidung: "
@@ -197,6 +267,56 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
         f"Q2(score={score_2}, artist_sim={sim_2_p1:.2f}, combined={combined_2:.1f})",
         xbmc.LOGINFO
     )
+
+    # --- Q3: Fallback wenn beide Scores 0 (Schreibweisabweichung im Artistnamen) ---
+    # Beispiel: ICY "Chris DeBurgh" → MB findet "Chris de Burgh" nicht per Phrase-Query.
+    # Q3 sucht nur nach dem Titel, MB liefert seinen eigenen Artistnamen zurück,
+    # der Ähnlichkeitsvergleich gegen part1/part2 bestimmt dann die Reihenfolge.
+    if score_1 == 0 and score_2 == 0:
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz Q1+Q2 ohne Treffer – versuche Fallback-Query "
+            f"ohne artistname-Filter für '{part1}'",
+            xbmc.LOGINFO
+        )
+        time.sleep(1)
+        score_f, mb_artist_f, mb_title_f = _musicbrainz_query_title_only(part1)
+
+        if score_f >= MIN_SCORE:
+            sim_f_p1 = _mb_similarity(mb_artist_f, part1)
+            sim_f_p2 = _mb_similarity(mb_artist_f, part2)
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fallback-Query: Score={score_f}, "
+                f"MB-Artist='{mb_artist_f}', "
+                f"sim_p1={sim_f_p1:.2f}, sim_p2={sim_f_p2:.2f}",
+                xbmc.LOGINFO
+            )
+            # MB-Artist ähnelt part2 → part2 ist Artist, part1 ist Title
+            if sim_f_p2 >= THRESHOLD and sim_f_p2 > sim_f_p1:
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB Fallback: Artist='{part2}', Title='{part1}' "
+                    f"(MB-Artist='{mb_artist_f}', sim_p2={sim_f_p2:.2f})",
+                    xbmc.LOGINFO
+                )
+                return part2, part1, False
+            # MB-Artist ähnelt part1 → part1 ist Artist, part2 ist Title (ICY-Standard stimmt)
+            if sim_f_p1 >= THRESHOLD and sim_f_p1 > sim_f_p2:
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB Fallback: Artist='{part1}', Title='{part2}' "
+                    f"(MB-Artist='{mb_artist_f}', sim_p1={sim_f_p1:.2f})",
+                    xbmc.LOGINFO
+                )
+                return part1, part2, False
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fallback: Artist-Ähnlichkeit zu niedrig "
+                f"(sim_p1={sim_f_p1:.2f}, sim_p2={sim_f_p2:.2f}), behalte ICY-Original",
+                xbmc.LOGINFO
+            )
+        else:
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fallback-Query Score zu niedrig ({score_f}), behalte ICY-Original",
+                xbmc.LOGINFO
+            )
+        return part1, part2, True
 
     # Beide combined-Scores zu niedrig → uncertain
     if combined_1 < MIN_SCORE * THRESHOLD and combined_2 < MIN_SCORE * THRESHOLD:
