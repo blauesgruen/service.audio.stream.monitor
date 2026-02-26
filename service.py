@@ -62,6 +62,54 @@ def _musicbrainz_extract_artist_mbid(rec):
                     return mbid
     return ""
 
+def _musicbrainz_artist_variants(artist_part):
+    """
+    Liefert Artist-Varianten für MB-Fallback innerhalb derselben Query-Logik.
+    Reihenfolge: Original zuerst, danach nur zusätzliche Normalisierungen.
+    """
+    original = (artist_part or "").strip()
+    if not original:
+        return [("original", original)]
+
+    variants = []
+    seen = set()
+
+    def add_variant(label, value):
+        candidate = (value or "").strip()
+        if not candidate:
+            return
+        key = candidate.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append((label, candidate))
+
+    def normalize_apostrophes(value):
+        return value.replace("’", "'").replace("`", "'")
+
+    def remove_apostrophes(value):
+        return value.replace("'", "").replace("’", "")
+
+    def swap_comma_name(value):
+        match = re.match(r"^\s*([^,]+),\s*(.+)\s*$", value)
+        if not match:
+            return value
+        last_name = match.group(1).strip()
+        first_name = match.group(2).strip()
+        return f"{first_name} {last_name}".strip()
+
+    add_variant("original", original)
+    add_variant("apostrophe-normalized", normalize_apostrophes(original))
+    add_variant("apostrophe-removed", remove_apostrophes(normalize_apostrophes(original)))
+
+    comma_swapped = swap_comma_name(original)
+    if comma_swapped != original:
+        add_variant("comma-swapped", comma_swapped)
+        add_variant("comma-swapped+apostrophe-normalized", normalize_apostrophes(comma_swapped))
+        add_variant("comma-swapped+apostrophe-removed", remove_apostrophes(normalize_apostrophes(comma_swapped)))
+
+    return variants
+
 def _musicbrainz_query_recording(title_part, artist_part):
     """
     Führt eine MusicBrainz-Recording-Query mit expliziten Feldangaben durch.
@@ -75,64 +123,88 @@ def _musicbrainz_query_recording(title_part, artist_part):
     oder (0, '', '', '') bei Fehler/kein Treffer.
     """
     url = "https://musicbrainz.org/ws/2/recording/"
-    safe_title  = _musicbrainz_escape(title_part)
-    safe_artist = _musicbrainz_escape(artist_part)
-    params = {
-        "query": f'recording:"{safe_title}" AND artistname:"{safe_artist}"',
-        "fmt":   "json",
-        "limit": 5,
-    }
+    safe_title = _musicbrainz_escape(title_part)
+    artist_variants = _musicbrainz_artist_variants(artist_part)
     retries = 2
-    for attempt in range(retries + 1):
-        try:
-            r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-            data = r.json()
-            recordings = data.get("recordings", [])
-            if not recordings:
+    for variant_label, variant_artist in artist_variants:
+        safe_artist = _musicbrainz_escape(variant_artist)
+        params = {
+            "query": f'recording:"{safe_title}" AND artistname:"{safe_artist}"',
+            "fmt":   "json",
+            "limit": 5,
+        }
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicBrainz Query-Variante: recording='{title_part}', "
+            f"artistname='{variant_artist}' ({variant_label})",
+            xbmc.LOGDEBUG
+        )
+        for attempt in range(retries + 1):
+            try:
+                r = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+                data = r.json()
+                recordings = data.get("recordings", [])
+                if not recordings:
+                    xbmc.log(
+                        f"[{ADDON_NAME}] MusicBrainz: kein Treffer für Variante '{variant_label}' "
+                        f"(recording:'{title_part}' artistname:'{variant_artist}')",
+                        xbmc.LOGDEBUG
+                    )
+                    break
+
                 xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz: kein Treffer für "
-                    f"recording:'{title_part}' artistname:'{artist_part}'",
+                    f"[{ADDON_NAME}] MusicBrainz: Treffer mit Variante '{variant_label}' "
+                    f"(count={len(recordings)})",
                     xbmc.LOGDEBUG
                 )
-                return 0, '', '', ''
 
-            # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen
-            best_combined = -1
-            best_score, best_artist, best_title, best_mbid = 0, '', '', ''
+                # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen
+                best_combined = -1
+                best_score, best_artist, best_title, best_mbid = 0, '', '', ''
 
-            for rec in recordings:
-                score     = int(rec.get("score", 0))
-                mb_title  = rec.get("title", "")
-                mb_artist = _musicbrainz_extract_artist(rec)
-                mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
-                # Ähnlichkeit des MB-Artists zum erwarteten artist_part
-                artist_sim = _mb_similarity(mb_artist, artist_part)
-                combined   = score * artist_sim
+                for rec in recordings:
+                    score     = int(rec.get("score", 0))
+                    mb_title  = rec.get("title", "")
+                    mb_artist = _musicbrainz_extract_artist(rec)
+                    mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
+                    # Ähnlichkeit gegen den Original-Artistpart für stabile Entscheidung
+                    artist_sim = _mb_similarity(mb_artist, artist_part)
+                    combined   = score * artist_sim
+                    xbmc.log(
+                        f"[{ADDON_NAME}] MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
+                        f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
+                        xbmc.LOGDEBUG
+                    )
+                    if combined > best_combined:
+                        best_combined = combined
+                        best_score    = score
+                        best_artist   = mb_artist
+                        best_title    = mb_title
+                        best_mbid     = mb_mbid
+
                 xbmc.log(
-                    f"[{ADDON_NAME}] MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
-                    f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
+                    f"[{ADDON_NAME}] MusicBrainz Best-Match "
+                    f"(title='{title_part}', artist='{artist_part}', variante='{variant_label}'): "
+                    f"Score={best_score}, MB-Artist='{best_artist}', MB-Title='{best_title}', "
+                    f"MBID='{best_mbid}', combined={best_combined:.1f}",
                     xbmc.LOGDEBUG
                 )
-                if combined > best_combined:
-                    best_combined = combined
-                    best_score    = score
-                    best_artist   = mb_artist
-                    best_title    = mb_title
-                    best_mbid     = mb_mbid
+                return best_score, best_artist, best_title, best_mbid
 
-            xbmc.log(
-                f"[{ADDON_NAME}] MusicBrainz Best-Match "
-                f"(title='{title_part}', artist='{artist_part}'): "
-                f"Score={best_score}, MB-Artist='{best_artist}', MB-Title='{best_title}', "
-                f"MBID='{best_mbid}', combined={best_combined:.1f}",
-                xbmc.LOGDEBUG
-            )
-            return best_score, best_artist, best_title, best_mbid
-
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] MusicBrainz Fehler (Versuch {attempt+1}/{retries+1}): {e}", xbmc.LOGDEBUG)
-            if attempt < retries:
-                time.sleep(2)
+            except Exception as e:
+                xbmc.log(
+                    f"[{ADDON_NAME}] MusicBrainz Fehler Variante '{variant_label}' "
+                    f"(Versuch {attempt+1}/{retries+1}): {e}",
+                    xbmc.LOGDEBUG
+                )
+                if attempt < retries:
+                    time.sleep(2)
+                else:
+                    break
+    xbmc.log(
+        f"[{ADDON_NAME}] MusicBrainz: keine Variante lieferte Treffer "
+        f"fÃ¼r recording:'{title_part}' artist:'{artist_part}'",
+        xbmc.LOGDEBUG
+    )
     return 0, '', '', ''
 
 def _parse_radiode_api_title(full_title, station_name=None):
@@ -1047,8 +1119,12 @@ class RadioMonitor(xbmc.Monitor):
         else:
             mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
             if uncertain:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze ICY-Standard: Artist='{part1}', Title='{part2}'", xbmc.LOGDEBUG)
-                mb_artist, mb_title = part1, part2
+                xbmc.log(
+                    f"[{ADDON_NAME}] MusicBrainz unentschieden, keine erzwungene Zuordnung "
+                    f"(part1='{part1}', part2='{part2}')",
+                    xbmc.LOGDEBUG
+                )
+                mb_artist, mb_title = None, stream_title.strip()
                 mbid = ''
 
         if mb_artist in invalid: mb_artist = None
