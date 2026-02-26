@@ -254,7 +254,7 @@ def _mb_similarity(a, b):
         SequenceMatcher(None, token_sort(a), token_sort(b)).ratio(),
     )
 
-def _musicbrainz_query_title_only(title_part):
+def _musicbrainz_query_title_only(title_part, artist_hints=None):
     """
     Sucht in MusicBrainz nur nach dem Titel, ohne artistname-Filter.
 
@@ -286,15 +286,35 @@ def _musicbrainz_query_title_only(title_part):
             )
             return 0, '', '', ''
 
-        # Besten Treffer nach MB-Score wählen (kein artist_part zum Vergleichen)
-        best = max(recordings, key=lambda r: int(r.get("score", 0)))
+        hints = [h for h in (artist_hints or []) if h]
+        best = None
+        best_combined = -1.0
+        best_hint_sim = 0.0
+
+        for rec in recordings:
+            score = int(rec.get("score", 0))
+            mb_title = rec.get("title", "")
+            mb_artist = _musicbrainz_extract_artist(rec)
+            hint_sim = max([_mb_similarity(mb_artist, h) for h in hints], default=0.0)
+            combined = score * hint_sim if hints else float(score)
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Fallback-Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
+                f"Score={score}, hint_sim={hint_sim:.2f}, combined={combined:.1f}",
+                xbmc.LOGDEBUG
+            )
+            if combined > best_combined or (combined == best_combined and hint_sim > best_hint_sim):
+                best = rec
+                best_combined = combined
+                best_hint_sim = hint_sim
+
         score     = int(best.get("score", 0))
         mb_title  = best.get("title", "")
         mb_artist = _musicbrainz_extract_artist(best)
         mb_mbid   = _musicbrainz_extract_artist_mbid(best)
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
-            f"Score={score}, Artist='{mb_artist}', Title='{mb_title}', MBID='{mb_mbid}'",
+            f"Score={score}, Artist='{mb_artist}', Title='{mb_title}', MBID='{mb_mbid}', "
+            f"hint_sim={best_hint_sim:.2f}, combined={best_combined:.1f}",
             xbmc.LOGDEBUG
         )
         return score, mb_artist, mb_title, mb_mbid
@@ -368,7 +388,9 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
             xbmc.LOGINFO
         )
         time.sleep(1)
-        score_f, mb_artist_f, mb_title_f, mbid_f = _musicbrainz_query_title_only(part1)
+        score_f, mb_artist_f, mb_title_f, mbid_f = _musicbrainz_query_title_only(
+            part1, artist_hints=[part1, part2]
+        )
 
         if score_f >= MIN_SCORE:
             sim_f_p1 = _mb_similarity(mb_artist_f, part1)
