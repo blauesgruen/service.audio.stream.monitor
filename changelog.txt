@@ -1,3 +1,8 @@
+v1.1.10 (2026-02-26)
+- MusicBrainz Artist-Fallback erweitert: Apostroph-Varianten und Komma-Namen (Nachname, Vorname -> Vorname Nachname) werden bei 0 Treffern als Varianten getestet.
+- Logging erweitert: pro Variante wird geloggt, welche Artist-Form getestet wurde und welche Variante Treffer liefert.
+- Unsicheren MusicBrainz-Fallback entschärft: keine erzwungene Artist/Title-Umkehr mehr bei unklarem Ergebnis.
+
 v1.1.9 (2026-02-26)
 - MusicBrainz-MBID wird bei der Ermittlung von Artist/Title mitgeführt und im Service weiterverarbeitet.
 - Neue Property `RadioMonitor.MBID` wird bei Songwechsel gesetzt bzw. bei unklaren/ungültigen Treffern aktiv geleert.
