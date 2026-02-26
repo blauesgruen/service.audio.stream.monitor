@@ -202,7 +202,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     break
     xbmc.log(
         f"[{ADDON_NAME}] MusicBrainz: keine Variante lieferte Treffer "
-        f"fÃ¼r recording:'{title_part}' artist:'{artist_part}'",
+        f"fuer recording:'{title_part}' artist:'{artist_part}'",
         xbmc.LOGDEBUG
     )
     return 0, '', '', ''
@@ -693,7 +693,7 @@ class RadioMonitor(xbmc.Monitor):
 
                     return station_name
         except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler bei URL-Analyse für API-Fallback: {str(e)}", xbmc.LOGDEBUG)
+            xbmc.log(f"[{ADDON_NAME}] Fehler bei URL-Analyse fuer API-Fallback: {str(e)}", xbmc.LOGDEBUG)
         return None
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
@@ -832,7 +832,7 @@ class RadioMonitor(xbmc.Monitor):
                         if score > best_match_score:
                             best_match = station
                             best_match_score = score
-                            xbmc.log(f"[{ADDON_NAME}] Wort-Match: '{station_found}' - Score: {score} (Wörter: {matching_words})", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] Wort-Match: '{station_found}' - Score: {score} (Woerter: {matching_words})", xbmc.LOGDEBUG)
                 
                 if best_match and best_match_score > 0:
                     station_found = best_match.get('name', '')
@@ -845,7 +845,7 @@ class RadioMonitor(xbmc.Monitor):
                         self.set_property_safe('RadioMonitor.Logo', station_logo)
                         xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
                     
-                    xbmc.log(f"[{ADDON_NAME}] Beste Übereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
+                    xbmc.log(f"[{ADDON_NAME}] Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
                     
                     # Schritt 2: Station-ID für now-playing API verwenden
                     if station_id:
@@ -1014,7 +1014,7 @@ class RadioMonitor(xbmc.Monitor):
                 self._setup_api_fallback_from_url(url)
                 response.close()
                 return None
-                
+
             metaint = int(metaint)
             xbmc.log(f"[{ADDON_NAME}] MetaInt: {metaint}", xbmc.LOGDEBUG)
             
@@ -1053,7 +1053,7 @@ class RadioMonitor(xbmc.Monitor):
 
         # --- StreamTitle Grundvalidierung ---
         if not stream_title or stream_title in INVALID_METADATA_VALUES or re.match(r'^\d+\s*-\s*\d+$', stream_title):
-            xbmc.log(f"[{ADDON_NAME}] StreamTitle leer/ungültig: '{stream_title}'", xbmc.LOGDEBUG)
+            xbmc.log(f"[{ADDON_NAME}] StreamTitle leer/ungueltig: '{stream_title}'", xbmc.LOGDEBUG)
             # Kein ICY-Titel → nur API als letzte Chance (beide Felder müssen gefüllt sein)
             if station_name and stream_url:
                 api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
@@ -1094,7 +1094,7 @@ class RadioMonitor(xbmc.Monitor):
             if clean in INVALID_METADATA_VALUES:
                 return None, None, ''
             if station_name and _mb_similarity(clean.lower(), station_name.lower()) >= 0.8:
-                xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String ähnelt Stationsname → ignoriert: '{clean}'", xbmc.LOGDEBUG)
+                xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String aehnelt Stationsname -> ignoriert: '{clean}'", xbmc.LOGDEBUG)
                 return None, None, ''
             return None, clean, ''
 
@@ -1161,7 +1161,7 @@ class RadioMonitor(xbmc.Monitor):
         
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
-            xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfügbar - wechsle zu API-Fallback", xbmc.LOGWARNING)
+            xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu API-Fallback", xbmc.LOGWARNING)
             # Starte API-Fallback Worker
             if self.use_api_fallback and generation == self.metadata_generation:
                 self.api_metadata_worker(generation)
@@ -1230,7 +1230,7 @@ class RadioMonitor(xbmc.Monitor):
 
                             # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
                             if artist is None and title is None:
-                                xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten für '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten fuer '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
                                 # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
                                 WINDOW.clearProperty('RadioMonitor.Artist')
                                 WINDOW.clearProperty('RadioMonitor.Title')
@@ -1421,7 +1421,7 @@ class RadioMonitor(xbmc.Monitor):
                                         break
 
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
-                                xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird später von API geholt", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird spaeter von API geholt", xbmc.LOGDEBUG)
                             
                             # Diese Infos als Fallback setzen
                             if title:
