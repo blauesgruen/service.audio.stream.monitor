@@ -102,12 +102,19 @@ def _musicbrainz_artist_variants(artist_part):
         return f"{first_name} {last_name}".strip()
 
     add_variant("original", original)
+    # Variante mit 'and' statt '&' (häufige Abweichung bei Kollaborationen)
+    if ' & ' in original:
+        add_variant("and-for-ampersand", original.replace(' & ', ' and '))
+
     add_variant("apostrophe-normalized", normalize_apostrophes(original))
     add_variant("apostrophe-removed", remove_apostrophes(normalize_apostrophes(original)))
 
     comma_swapped = swap_comma_name(original)
     if comma_swapped != original:
         add_variant("comma-swapped", comma_swapped)
+        # Auch bei der Komma-Variante '&' ersetzen
+        if ' & ' in comma_swapped:
+            add_variant("comma-swapped+and-for-ampersand", comma_swapped.replace(' & ', ' and '))
         add_variant("comma-swapped+apostrophe-normalized", normalize_apostrophes(comma_swapped))
         add_variant("comma-swapped+apostrophe-removed", remove_apostrophes(normalize_apostrophes(comma_swapped)))
 
