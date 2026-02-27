@@ -976,13 +976,17 @@ class RadioMonitor(xbmc.Monitor):
                                 mbid = ''
                         
                         if artist:
-                            self.set_property_safe('RadioMonitor.Artist', artist)
+                            # Reihenfolge: MBID und Title vor Artist setzen.
+                            # AS lauscht auf RadioMonitor.Artist als Trigger und liest
+                            # danach sofort RadioMonitor.MBID – daher muss MBID bereits
+                            # gesetzt sein wenn Artist den Trigger auslöst.
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', f"{artist} - {title}")
                             if mbid:
                                 self.set_property_safe('RadioMonitor.MBID', mbid)
                             else:
                                 WINDOW.clearProperty('RadioMonitor.MBID')
+                            self.set_property_safe('RadioMonitor.Artist', artist)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
                              
                             # Aktualisiere Kodi Player Metadaten
@@ -1325,13 +1329,10 @@ class RadioMonitor(xbmc.Monitor):
                             if stream_title not in INVALID_METADATA_VALUES:
                                 self.set_property_safe('RadioMonitor.StreamTitle', stream_title)
                             
-                            if artist:
-                                self.set_property_safe('RadioMonitor.Artist', artist)
-                                xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
-                            else:
-                                WINDOW.clearProperty('RadioMonitor.Artist')
-                                artist = ''
-                                
+                            # Reihenfolge: Title und MBID vor Artist setzen.
+                            # AS lauscht auf RadioMonitor.Artist als Trigger und liest
+                            # danach sofort RadioMonitor.MBID – daher muss MBID bereits
+                            # gesetzt sein wenn Artist den Trigger auslöst.
                             if title:
                                 self.set_property_safe('RadioMonitor.Title', title)
                                 xbmc.log(f"[{ADDON_NAME}] Title: {title}", xbmc.LOGDEBUG)
@@ -1343,6 +1344,12 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] MBID: {mbid}", xbmc.LOGDEBUG)
                             else:
                                 WINDOW.clearProperty('RadioMonitor.MBID')
+                            if artist:
+                                self.set_property_safe('RadioMonitor.Artist', artist)
+                                xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.Artist')
+                                artist = ''
                             
                             # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                             self.set_logo_safe()
@@ -1507,11 +1514,13 @@ class RadioMonitor(xbmc.Monitor):
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
                                 xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird spaeter von API geholt", xbmc.LOGDEBUG)
                             
-                            # Diese Infos als Fallback setzen
+                            # Nur Title und Album als vorläufige Info setzen.
+                            # RadioMonitor.Artist wird bewusst NICHT gesetzt – Artist
+                            # ist der Trigger für AS, und ohne MBID (die erst nach
+                            # MB-Query bekannt ist) würde AS mit falschen Daten starten.
+                            # Artist + MBID werden zusammen vom Metadata-Worker gesetzt.
                             if title:
                                 self.set_property_safe('RadioMonitor.Title', title)
-                            if artist:
-                                self.set_property_safe('RadioMonitor.Artist', artist)
                             if album:
                                 self.set_property_safe('RadioMonitor.Album', album)
                             
