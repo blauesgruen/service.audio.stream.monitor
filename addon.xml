@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.10">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
@@ -8,8 +8,8 @@
   <extension point="xbmc.addon.metadata">
     <summary lang="de_DE">Universeller Monitor für HTTP/HTTPS Audio-Streams</summary>
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
-    <description lang="de_DE">Überwacht alle HTTP/HTTPS Audio-Streams (Radio, Musik-Streaming, etc.) und zeigt Song-Informationen korrekt an. Unterstützt ICY-Metadaten, radio.de API, Artist Slideshow Integration und aktualisiert Kodi-Player InfoLabels. MusicBrainz-Integration für präzise Artist/Title-Erkennung (Recording-Abfrage, Score-Retry). Funktioniert mit jedem Addon, das Audio-Streams abspielt.</description>
-    <description lang="en_GB">Monitors all HTTP/HTTPS audio streams (radio, music streaming, etc.) and displays song information correctly. Supports ICY metadata, radio.de API, Artist Slideshow integration and updates Kodi player InfoLabels. MusicBrainz integration for precise artist/title detection (recording query, score retry). Works with any addon that plays audio streams.</description>
+    <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
+    <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>

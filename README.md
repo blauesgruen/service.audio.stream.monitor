@@ -24,10 +24,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.Station` | Name des Radiosenders | "Bayern 3" |
 | `RadioMonitor.Title` | Aktueller Song-Titel | "Bohemian Rhapsody" |
 | `RadioMonitor.Artist` | Aktueller Interpret | "Queen" |
+| `RadioMonitor.MBID` | MusicBrainz Artist ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.Genre` | Genre des Senders | "Pop" |
 | `RadioMonitor.Album` | Album (falls verfügbar) | "A Night at the Opera" |
-| `RadioMonitor.Logo` | Logo URL (zukünftig) | - |
+| `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 
 ## Verwendung in Skins
 
@@ -56,16 +57,21 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 
 ## Installation
 
-1. Kopiere den Ordner `service.monitor.radio_de_light` nach:
+### Empfohlene Methode: Kodinerds Repository
+
+1. Füge die Kodinerds Repo-Quelle in Kodi hinzu: `https://repo.kodinerds.net`
+2. Installiere das "Kodinerds Addon Repo" aus der ZIP-Datei.
+3. Gehe zu "Aus Repository installieren" → "Kodinerds Addon Repo" → "Dienste".
+4. Wähle "Audio Stream Monitor" und installiere es.
+
+### Manuelle Installation
+
+1. Kopiere den Ordner `service.monitor.radio_de_light` in dein Kodi Addon-Verzeichnis:
    - Windows: `%APPDATA%\Kodi\addons\`
    - Linux: `~/.kodi/addons/`
    - Portable: `<Kodi-Ordner>\portable_data\addons\`
 
-2. Starte Kodi neu oder gehe zu:
-   - Einstellungen → Addons → Meine Addons → Dienste
-   - Aktiviere "Radio.de Light Monitor Service"
-
-3. Das Service startet automatisch und läuft im Hintergrund
+2. Starte Kodi neu. Das Service wird automatisch aktiviert und läuft im Hintergrund.
 
 ## Technische Details
 
@@ -109,6 +115,6 @@ Aktiviere Debug-Logging in Kodi:
 
 MIT License - siehe LICENSE.txt
 
-## Credits
+## Danksagung
 
-Entwickelt für das "Radio.de light" Addon von Publish3r
+Dieses Addon wurde ursprünglich für das "Radio.de light" Addon von Publish3r entwickelt und zu einem universellen Service für alle Audio-Streams erweitert.
