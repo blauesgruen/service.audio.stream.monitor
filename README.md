@@ -93,11 +93,11 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 
 ## Debugging
 
-Aktiviere Debug-Logging in Kodi:
-1. Einstellungen → System → Logging
-2. "Debug-Logging aktivieren"
-3. Log-Datei ansehen: `kodi.log`
-4. Suche nach `[Radio.de Light Monitor Service]`
+Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die `kodi.log`. Für eine detaillierte Analyse, insbesondere bei Problemen mit der Titelerkennung, sollte das Debug-Logging in Kodi aktiviert werden.
+
+1. **Log-Datei ansehen:** Die `kodi.log` befindet sich im `temp`-Ordner deines Kodi-Benutzerdatenverzeichnisses.
+2. **Suche nach:** `[Audio Stream Monitor]`
+3. **Für detaillierte Logs:** Aktiviere "Debug-Logging" in Kodi unter `Einstellungen → System → Logging`.
 
 ## Kompatibilität
 
