@@ -65,6 +65,18 @@ def _musicbrainz_extract_artist_mbid(rec):
                     return mbid
     return ""
 
+def _musicbrainz_extract_album(rec):
+    """Extrahiert den Albumtitel aus einem MB-Recording-Dict."""
+    releases = rec.get("releases", [])
+    if releases and isinstance(releases, list):
+        # Nimm das erste Release (oft das Originalalbum)
+        first_release = releases[0]
+        if isinstance(first_release, dict):
+            album_title = first_release.get("title", "")
+            if album_title:
+                return album_title
+    return ""
+
 def _musicbrainz_artist_variants(artist_part):
     """
     Liefert Artist-Varianten für MB-Fallback innerhalb derselben Query-Logik.
@@ -138,7 +150,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
     der erste Treffer zwar hohen Score hat aber einen komplett anderen Artist.
 
     Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
-    oder (0, '', '', '') bei Fehler/kein Treffer.
+    oder (0, '', '', '', '') bei Fehler/kein Treffer.
     """
     safe_title = _musicbrainz_escape(title_part)
     artist_variants = _musicbrainz_artist_variants(artist_part)
@@ -176,13 +188,14 @@ def _musicbrainz_query_recording(title_part, artist_part):
 
                 # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen
                 best_combined = -1
-                best_score, best_artist, best_title, best_mbid = 0, '', '', ''
+                best_score, best_artist, best_title, best_mbid, best_album = 0, '', '', '', ''
 
                 for rec in recordings:
                     score     = int(rec.get("score", 0))
                     mb_title  = rec.get("title", "")
                     mb_artist = _musicbrainz_extract_artist(rec)
                     mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
+                    mb_album  = _musicbrainz_extract_album(rec)
                     # Ähnlichkeit gegen den Original-Artistpart für stabile Entscheidung
                     artist_sim = _mb_similarity(mb_artist, artist_part)
                     combined   = score * artist_sim
@@ -197,21 +210,22 @@ def _musicbrainz_query_recording(title_part, artist_part):
                         best_artist   = mb_artist
                         best_title    = mb_title
                         best_mbid     = mb_mbid
+                        best_album    = mb_album
 
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz Best-Match "
                     f"(title='{title_part}', artist='{artist_part}', variante='{variant_label}'): "
                     f"Score={best_score}, MB-Artist='{best_artist}', MB-Title='{best_title}', "
-                    f"MBID='{best_mbid}', combined={best_combined:.1f}",
+                    f"MBID='{best_mbid}', Album='{best_album}', combined={best_combined:.1f}",
                     xbmc.LOGDEBUG
                 )
-                return best_score, best_artist, best_title, best_mbid
+                return best_score, best_artist, best_title, best_mbid, best_album
 
             except Exception as e:
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz Fehler Variante '{variant_label}' "
                     f"(Versuch {attempt+1}/{retries+1}): {e}",
-                    xbmc.LOGDEBUG
+                    xbmc.LOGWARNING
                 )
                 if attempt < retries:
                     time.sleep(2)
@@ -222,7 +236,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
         f"fuer recording:'{title_part}' artist:'{artist_part}'",
         xbmc.LOGDEBUG
     )
-    return 0, '', '', ''
+    return 0, '', '', '', ''
 
 def _parse_radiode_api_title(full_title, station_name=None):
     """
@@ -283,7 +297,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     Ähnlichkeitsvergleich gegen beide ICY-Parts geprüft um die Reihenfolge zu bestimmen.
 
     Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
-    oder (0, '', '', '') bei Fehler/kein Treffer.
+    oder (0, '', '', '', '') bei Fehler/kein Treffer.
     """
     safe_title = _musicbrainz_escape(title_part)
     params = {
@@ -300,7 +314,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
                 f"[{ADDON_NAME}] MB Fallback-Query: kein Treffer für recording:'{title_part}'",
                 xbmc.LOGDEBUG
             )
-            return 0, '', '', ''
+            return 0, '', '', '', ''
 
         hints = [h for h in (artist_hints or []) if h]
         best = None
@@ -327,17 +341,18 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
         mb_title  = best.get("title", "")
         mb_artist = _musicbrainz_extract_artist(best)
         mb_mbid   = _musicbrainz_extract_artist_mbid(best)
+        mb_album  = _musicbrainz_extract_album(best)
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
-            f"Score={score}, Artist='{mb_artist}', Title='{mb_title}', MBID='{mb_mbid}', "
+            f"Score={score}, Artist='{mb_artist}', Title='{mb_title}', Album='{mb_album}', MBID='{mb_mbid}', "
             f"hint_sim={best_hint_sim:.2f}, combined={best_combined:.1f}",
             xbmc.LOGDEBUG
         )
-        return score, mb_artist, mb_title, mb_mbid
+        return score, mb_artist, mb_title, mb_mbid, mb_album
 
     except Exception as e:
-        xbmc.log(f"[{ADDON_NAME}] MB Fallback-Query Fehler: {e}", xbmc.LOGDEBUG)
-        return 0, '', '', ''
+        xbmc.log(f"[{ADDON_NAME}] MB Fallback-Query Fehler: {e}", xbmc.LOGWARNING)
+        return 0, '', '', '', ''
 
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
@@ -354,7 +369,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     MB gibt dann seinen korrekten Artistnamen zurück; der Ähnlichkeitsvergleich
     gegen beide ICY-Parts bestimmt die Reihenfolge.
 
-    Rückgabe: (artist, title, mbid, uncertain)
+    Rückgabe: (artist, title, album, mbid, uncertain)
       uncertain=True  → kein verlässlicher Treffer, ICY-Standard behalten
       uncertain=False → Reihenfolge sicher bestimmt
     """
@@ -362,7 +377,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
     THRESHOLD = 0.7  # Ähnlichkeitsschwelle MB-Artist ↔ ICY-Part
 
     if not part1 or not part2:
-        return part1, part2, '', True
+        return part1, part2, '', '', True
 
     # --- Bereinigung der Titel-Parts für die MusicBrainz-Suche ---
     # Entfernt häufige, störende Suffixe in Klammern, die die MB-Suche stören,
@@ -398,13 +413,13 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
         xbmc.log(f"[{ADDON_NAME}] MusicBrainz: Bereinigte Parts für Titel-Suche: '{p1_cleaned}' / '{p2_cleaned}'", xbmc.LOGDEBUG)
 
     # --- Q1: part1=Title, part2=Artist ---
-    score_1, mb_artist_1, mb_title_1, mbid_1 = _musicbrainz_query_recording(
+    score_1, mb_artist_1, mb_title_1, mbid_1, album_1 = _musicbrainz_query_recording(
         title_part=p1_cleaned, artist_part=part2
     )
 
     # --- Q2: part2=Title, part1=Artist ---
     time.sleep(1)  # MusicBrainz Rate-Limit: ~1 req/s
-    score_2, mb_artist_2, mb_title_2, mbid_2 = _musicbrainz_query_recording(
+    score_2, mb_artist_2, mb_title_2, mbid_2, album_2 = _musicbrainz_query_recording(
         title_part=p2_cleaned, artist_part=part1
     )
 
@@ -432,7 +447,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
             xbmc.LOGINFO
         )
         time.sleep(1)
-        score_f, mb_artist_f, mb_title_f, mbid_f = _musicbrainz_query_title_only(
+        score_f, mb_artist_f, mb_title_f, mbid_f, album_f = _musicbrainz_query_title_only(
             p1_cleaned, artist_hints=[part1, part2]
         )
 
@@ -452,7 +467,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
                     f"(MB-Artist='{mb_artist_f}', sim_p2={sim_f_p2:.2f})",
                     xbmc.LOGINFO
                 )
-                return part2, part1, mbid_f, False
+                return part2, part1, album_f, mbid_f, False
             # MB-Artist ähnelt part1 → part1 ist Artist, part2 ist Title (ICY-Standard stimmt)
             if sim_f_p1 >= THRESHOLD and sim_f_p1 > sim_f_p2:
                 xbmc.log(
@@ -460,7 +475,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
                     f"(MB-Artist='{mb_artist_f}', sim_p1={sim_f_p1:.2f})",
                     xbmc.LOGINFO
                 )
-                return part1, part2, mbid_f, False
+                return part1, part2, album_f, mbid_f, False
             xbmc.log(
                 f"[{ADDON_NAME}] MB Fallback: Artist-Ähnlichkeit zu niedrig "
                 f"(sim_p1={sim_f_p1:.2f}, sim_p2={sim_f_p2:.2f}), behalte ICY-Original",
@@ -471,7 +486,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
                 f"[{ADDON_NAME}] MB Fallback-Query Score zu niedrig ({score_f}), behalte ICY-Original",
                 xbmc.LOGINFO
             )
-        return part1, part2, '', True
+        return part1, part2, '', '', True
 
     # Beide combined-Scores zu niedrig → uncertain
     if combined_1 < MIN_SCORE * THRESHOLD and combined_2 < MIN_SCORE * THRESHOLD:
@@ -481,7 +496,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
             f"Artist='{part1}', Title='{part2}'",
             xbmc.LOGINFO
         )
-        return part1, part2, '', True
+        return part1, part2, '', '', True
 
     # Q1 gewinnt → part1=Title, part2=Artist
     if combined_1 >= combined_2:
@@ -491,7 +506,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
                 f"(MB-Artist='{mb_artist_1}', sim={sim_1_p2:.2f})",
                 xbmc.LOGINFO
             )
-            return part2, part1, mbid_1, False
+            return part2, part1, album_1, mbid_1, False
         # MB-Artist ähnelt eher part1 (Reihenfolge stimmt schon)
         sim_1_p1 = _mb_similarity(mb_artist_1, part1)
         if sim_1_p1 >= THRESHOLD:
@@ -500,14 +515,14 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
                 f"(MB-Artist='{mb_artist_1}', sim={sim_1_p1:.2f})",
                 xbmc.LOGINFO
             )
-            return part1, part2, mbid_1, False
+            return part1, part2, album_1, mbid_1, False
         xbmc.log(
             f"[{ADDON_NAME}] MusicBrainz Q1 gewinnt aber Artist passt nicht gut "
             f"(sim_p1={_mb_similarity(mb_artist_1, part1):.2f}, sim_p2={sim_1_p2:.2f}), "
             f"behalte Original",
             xbmc.LOGINFO
         )
-        return part1, part2, '', True
+        return part1, part2, '', '', True
 
     # Q2 gewinnt → part2=Title, part1=Artist
     if sim_2_p1 >= THRESHOLD:
@@ -516,7 +531,7 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
             f"(MB-Artist='{mb_artist_2}', sim={sim_2_p1:.2f})",
             xbmc.LOGINFO
         )
-        return part1, part2, mbid_2, False
+        return part1, part2, album_2, mbid_2, False
     # MB-Artist ähnelt eher part2
     sim_2_p2 = _mb_similarity(mb_artist_2, part2)
     if sim_2_p2 >= THRESHOLD:
@@ -525,14 +540,14 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
             f"(MB-Artist='{mb_artist_2}', sim={sim_2_p2:.2f})",
             xbmc.LOGINFO
         )
-        return part2, part1, mbid_2, False
+        return part2, part1, album_2, mbid_2, False
     xbmc.log(
         f"[{ADDON_NAME}] MusicBrainz Q2 gewinnt aber Artist passt nicht gut "
         f"(sim_p1={sim_2_p1:.2f}, sim_p2={_mb_similarity(mb_artist_2, part2):.2f}), "
         f"behalte Original",
         xbmc.LOGINFO
     )
-    return part1, part2, '', True
+    return part1, part2, '', '', True
 
 # Window-Properties für die Skin
 WINDOW = xbmcgui.Window(10000)  # Home window
@@ -655,7 +670,7 @@ class RadioMonitor(xbmc.Monitor):
             # Kein echtes Logo → Property leer lassen (Kodi nutzt automatisch Fallback)
             WINDOW.clearProperty('RadioMonitor.Logo')
     
-    def update_player_metadata(self, artist, title, station, logo=None, mbid=None):
+    def update_player_metadata(self, artist, title, album_or_station, logo=None, mbid=None):
         """Versucht die Kodi Player Metadaten zu aktualisieren (für Standard InfoLabels)"""
         try:
             if not self.player.isPlayingAudio():
@@ -670,8 +685,8 @@ class RadioMonitor(xbmc.Monitor):
                 info_tag.setTitle(title)
             if artist:
                 info_tag.setArtist(artist)
-            if station:
-                info_tag.setAlbum(station)  # Station als Album
+            if album_or_station:
+                info_tag.setAlbum(album_or_station)  # Album oder Station als Fallback
             if mbid:
                 # Kodi/Python API unterscheidet je nach Version bei Methodennamen und Parametertyp.
                 set_mbid_methods = [
@@ -831,8 +846,8 @@ class RadioMonitor(xbmc.Monitor):
             
             params = {'query': search_name, 'count': 20}
             response = requests.get(RADIODE_SEARCH_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
-            if response.status_code != 200 or not response.content:
-                xbmc.log(f"[{ADDON_NAME}] radio.de API: ungültige Antwort (Status {response.status_code})", xbmc.LOGDEBUG)
+            if response.status_code != 200:
+                xbmc.log(f"[{ADDON_NAME}] radio.de API: ungültige Antwort (Status {response.status_code})", xbmc.LOGWARNING)
                 return None, None
             data = response.json()
             
@@ -964,16 +979,19 @@ class RadioMonitor(xbmc.Monitor):
                         
                         # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                         self.set_logo_safe()
-                        mbid = ''
+                        album, mbid = '', ''
                         if artist and title:
-                            mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(artist, title)
+                            mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(artist, title)
                             if uncertain:
                                 mbid = ''
-                            elif mb_artist and mb_title and (
-                                _mb_similarity(mb_artist, artist) < 0.8 or _mb_similarity(mb_title, title) < 0.8
-                            ):
-                                # Nur MBID nutzen, wenn MB den API-Titel plausibel bestätigt.
-                                mbid = ''
+                            else:
+                                album = mb_album
+                                if mb_artist and mb_title and (
+                                    _mb_similarity(mb_artist, artist) < 0.8 or _mb_similarity(mb_title, title) < 0.8
+                                ):
+                                    # Nur MBID/Album nutzen, wenn MB den API-Titel plausibel bestätigt.
+                                    mbid = ''
+                                    album = ''
                         
                         if artist:
                             # Reihenfolge: MBID und Title vor Artist setzen.
@@ -982,6 +1000,10 @@ class RadioMonitor(xbmc.Monitor):
                             # gesetzt sein wenn Artist den Trigger auslöst.
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', f"{artist} - {title}")
+                            if album:
+                                self.set_property_safe('RadioMonitor.Album', album)
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.Album')
                             if mbid:
                                 self.set_property_safe('RadioMonitor.MBID', mbid)
                             else:
@@ -991,10 +1013,11 @@ class RadioMonitor(xbmc.Monitor):
                              
                             # Aktualisiere Kodi Player Metadaten
                             logo = WINDOW.getProperty('RadioMonitor.Logo')
-                            self.update_player_metadata(artist, title, station_name, logo if logo else None, mbid if mbid else None)
+                            self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
                         else:
                             WINDOW.clearProperty('RadioMonitor.Artist')
                             WINDOW.clearProperty('RadioMonitor.MBID')
+                            WINDOW.clearProperty('RadioMonitor.Album')
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', title)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {title}", xbmc.LOGINFO)
@@ -1116,13 +1139,13 @@ class RadioMonitor(xbmc.Monitor):
             title  = von_match.group(1).strip()
             artist = von_match.group(2).strip()
             xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-            mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(artist, title)
+            mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(artist, title)
             if uncertain:
                 xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze 'von'-Ergebnis: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
                 mb_artist, mb_title = artist, title
             if mb_artist in invalid: mb_artist = None
             if mb_title in invalid:  mb_title  = None
-            return mb_artist or None, mb_title or None, mbid
+            return mb_artist or None, mb_title or None, mb_album, mbid
 
         # --- Trennzeichen → part1 / part2 ---
         # Zusätzlich: last-separator Split als Alternative bei mehrfachem ' - '.
@@ -1156,11 +1179,11 @@ class RadioMonitor(xbmc.Monitor):
             # Stationsname als Titel ausschließen
             clean = stream_title.strip()
             if clean in INVALID_METADATA_VALUES:
-                return None, None, ''
+                return None, None, '', ''
             if station_name and _mb_similarity(clean.lower(), station_name.lower()) >= 0.8:
                 xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String aehnelt Stationsname -> ignoriert: '{clean}'", xbmc.LOGDEBUG)
-                return None, None, ''
-            return None, clean, ''
+                return None, None, '', ''
+            return None, clean, '', ''
 
         # Stationsname in part1 oder part2 → kein Song sondern Sender-Info
         station_lower = (station_name or '').lower().strip()
@@ -1169,7 +1192,7 @@ class RadioMonitor(xbmc.Monitor):
             _mb_similarity(part2.lower(), station_lower) >= 0.8
         ):
             xbmc.log(f"[{ADDON_NAME}] Stationsname in ICY-Parts erkannt → kein Song: '{stream_title}'", xbmc.LOGDEBUG)
-            return None, None, ''
+            return None, None, '', ''
 
         # --- API prüfen ---
         api_artist, api_title = None, None
@@ -1201,11 +1224,11 @@ class RadioMonitor(xbmc.Monitor):
         # geprüft (alt_part1=Title, alt_part2=Artist). Nur bei uncertain=True wird
         # auf die Standard-Variante (part1/part2) zurückgefallen.
         if api_artist and api_title:
-            mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(api_artist, api_title)
+            mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(api_artist, api_title)
             if uncertain:
                 xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze API-Ergebnis: Artist='{api_artist}', Title='{api_title}'", xbmc.LOGDEBUG)
                 mb_artist, mb_title = api_artist, api_title
-                mbid = ''
+                mb_album, mbid = '', ''
         elif alt_part1 and alt_part2:
             # Last-separator Variante zuerst probieren: alt_part1=Title, alt_part2=Artist
             xbmc.log(
@@ -1213,19 +1236,19 @@ class RadioMonitor(xbmc.Monitor):
                 f"Title='{alt_part1}', Artist='{alt_part2}'",
                 xbmc.LOGINFO
             )
-            mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(alt_part1, alt_part2)
+            mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(alt_part1, alt_part2)
             if uncertain:
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz last-separator unentschieden – "
                     f"fallback auf Standard-Split: Title='{part1}', Artist='{part2}'",
                     xbmc.LOGINFO
                 )
-                mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
+                mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
                 if uncertain:
                     mb_artist, mb_title = part1, part2
-                    mbid = ''
+                    mb_album, mbid = '', ''
         else:
-            mb_artist, mb_title, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
+            mb_artist, mb_title, mb_album, mbid, uncertain = _identify_artist_title_via_musicbrainz(part1, part2)
             if uncertain:
                 # ICY-Standard beibehalten: part1=Artist, part2=Title
                 # (nicht stream_title als Ganzes – das verliert die Trennung)
@@ -1235,13 +1258,13 @@ class RadioMonitor(xbmc.Monitor):
                     xbmc.LOGDEBUG
                 )
                 mb_artist, mb_title = part1, part2
-                mbid = ''
+                mb_album, mbid = '', ''
 
         if mb_artist in invalid: mb_artist = None
         if mb_title in invalid:  mb_title  = None
         if not mb_artist and not mb_title:
-            return None, None, ''
-        return mb_artist, mb_title, mbid
+            return None, None, '', ''
+        return mb_artist, mb_title, mb_album, mbid
         
     def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
@@ -1314,7 +1337,7 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] ICY-Daten: station='{station_name}', stream_title='{stream_title}'", xbmc.LOGINFO)
 
                             # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
-                            artist, title, mbid = self.parse_stream_title(stream_title, station_name, url)
+                            artist, title, album, mbid = self.parse_stream_title(stream_title, station_name, url)
 
                             # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
                             if artist is None and title is None:
@@ -1322,6 +1345,7 @@ class RadioMonitor(xbmc.Monitor):
                                 # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
                                 WINDOW.clearProperty('RadioMonitor.Artist')
                                 WINDOW.clearProperty('RadioMonitor.Title')
+                                WINDOW.clearProperty('RadioMonitor.Album')
                                 WINDOW.clearProperty('RadioMonitor.MBID')
                                 WINDOW.clearProperty('RadioMonitor.StreamTitle')
                                 continue
@@ -1339,6 +1363,11 @@ class RadioMonitor(xbmc.Monitor):
                             else:
                                 WINDOW.clearProperty('RadioMonitor.Title')
                                 title = ''
+                            if album:
+                                self.set_property_safe('RadioMonitor.Album', album)
+                                xbmc.log(f"[{ADDON_NAME}] Album: {album}", xbmc.LOGDEBUG)
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.Album')
                             if mbid:
                                 self.set_property_safe('RadioMonitor.MBID', mbid)
                                 xbmc.log(f"[{ADDON_NAME}] MBID: {mbid}", xbmc.LOGDEBUG)
@@ -1355,21 +1384,22 @@ class RadioMonitor(xbmc.Monitor):
                             self.set_logo_safe()
                             
                             # DEBUG: Zeige alle gesetzten Properties
-                            xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty('RadioMonitor.Playing')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.MBID = {WINDOW.getProperty('RadioMonitor.MBID')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGINFO)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty('RadioMonitor.Playing')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Album = {WINDOW.getProperty('RadioMonitor.Album')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.MBID = {WINDOW.getProperty('RadioMonitor.MBID')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGDEBUG)
                             
                             # Aktualisiere Kodi Player Metadaten (für Standard InfoLabels)
                             logo = WINDOW.getProperty('RadioMonitor.Logo')
                             self.update_player_metadata(artist if artist else None, 
                                                         title if title else None, 
-                                                        station_name if station_name else None,
+                                                        album if album else station_name,
                                                         logo if logo else None,
                                                         mbid if mbid else None)
                             
@@ -1408,7 +1438,7 @@ class RadioMonitor(xbmc.Monitor):
                             except Exception as e:
                                 xbmc.log(f"[{ADDON_NAME}] Fehler bei JSON-RPC Notify: {str(e)}", xbmc.LOGDEBUG)
                             
-                            xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'})", xbmc.LOGINFO)
+                            xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
 
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata-Loop (Thread läuft weiter): {str(e)}", xbmc.LOGERROR)
@@ -1474,6 +1504,7 @@ class RadioMonitor(xbmc.Monitor):
                         artist = None
                         album = None
                         WINDOW.clearProperty('RadioMonitor.MBID')
+                        WINDOW.clearProperty('RadioMonitor.Album')
                         
                         # Basis-Informationen aus dem Player
                         try:
@@ -1514,15 +1545,13 @@ class RadioMonitor(xbmc.Monitor):
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
                                 xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird spaeter von API geholt", xbmc.LOGDEBUG)
                             
-                            # Nur Title und Album als vorläufige Info setzen.
-                            # RadioMonitor.Artist wird bewusst NICHT gesetzt – Artist
-                            # ist der Trigger für AS, und ohne MBID (die erst nach
-                            # MB-Query bekannt ist) würde AS mit falschen Daten starten.
-                            # Artist + MBID werden zusammen vom Metadata-Worker gesetzt.
+                            # Nur Title als vorläufige Info setzen.
+                            # RadioMonitor.Artist und RadioMonitor.Album werden bewusst NICHT gesetzt.
+                            # Artist ist der Trigger für AS, und ohne MBID würde AS mit falschen Daten starten.
+                            # Album wird erst nach erfolgreicher MB-Query gesetzt.
+                            # Artist, Album + MBID werden zusammen vom Metadata-Worker gesetzt.
                             if title:
                                 self.set_property_safe('RadioMonitor.Title', title)
-                            if album:
-                                self.set_property_safe('RadioMonitor.Album', album)
                             
                             # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                             self.set_logo_safe()
@@ -1560,24 +1589,24 @@ class RadioMonitor(xbmc.Monitor):
                         # Playing-Flag setzen
                         WINDOW.setProperty('RadioMonitor.Playing', 'true')
                         
-                        xbmc.log(f"[{ADDON_NAME}] === STREAM GESTARTET - INITIAL STATE ===", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = true", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGINFO)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGINFO)
+                        xbmc.log(f"[{ADDON_NAME}] === STREAM GESTARTET - INITIAL STATE ===", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = true", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGDEBUG)
                         
                         # Zeige was vom Player kommt
                         try:
                             if self.player.isPlayingAudio():
                                 info_tag = self.player.getMusicInfoTag()
-                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Artist = {info_tag.getArtist()}", xbmc.LOGINFO)
-                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Title = {info_tag.getTitle()}", xbmc.LOGINFO)
-                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Album = {info_tag.getAlbum()}", xbmc.LOGINFO)
+                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Artist = {info_tag.getArtist()}", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Title = {info_tag.getTitle()}", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] Initial MusicPlayer.Album = {info_tag.getAlbum()}", xbmc.LOGDEBUG)
                         except Exception:
                             pass
-                        xbmc.log(f"[{ADDON_NAME}] ========================================", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] ========================================", xbmc.LOGINFO)
                         
                         # ICY-Metadaten-Monitoring starten
                         self.start_metadata_monitoring(playing_file)
