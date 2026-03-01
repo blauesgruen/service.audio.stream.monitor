@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.11">
+<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.12">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
     <import addon="script.module.requests" />
@@ -13,7 +13,13 @@
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
-    <news>v1.1.11
+    <news>v1.1.12 (2026-03-01)
+- Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden vor der Album-Auswahl zu einem gemeinsamen Pool zusammengeführt. Bisher wurde das Album pro Recording einzeln ermittelt, wodurch ein Live-Recording (zufällig erster Treffer) gegenüber einem Studio-Recording mit mehr Releases gewinnen konnte.
+- Album-Filterlogik vereinfacht: Das älteste nicht-Various-Artists-Release gewinnt. Compilations erscheinen chronologisch immer nach dem Original – eine mehrstufige Keyword-/Typfilterung ist damit nicht notwendig.
+- MB-Suchlimit von 25 auf 100 erhöht (MB-Maximum): Mehr Recordings im Pool bedeuten mehr Releases und damit eine zuverlässigere Album-Auswahl.
+- Bugfix: Tuple-Größenfehler in _musicbrainz_query_recording und _musicbrainz_query_title_only behoben (5 statt 6 Rückgabewerte führten zu ValueError).
+- Bugfix: get_nowplaying_from_apis gab bei validem Ergebnis None zurück (bare return statt return parsed_artist, parsed_title).
+v1.1.11
 - readme.md und Beschreibung in der addon.xml aktualisiert
 v1.1.10 (2026-02-26)
 - MusicBrainz Artist-Fallback erweitert: Apostroph-Varianten und Komma-Namen (Nachname, Vorname -> Vorname Nachname) werden bei 0 Treffern als Varianten getestet.
