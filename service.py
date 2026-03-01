@@ -67,8 +67,9 @@ def _musicbrainz_extract_artist_mbid(rec):
 
 def _musicbrainz_extract_album(releases_or_rec):
     """Extrahiert Albumtitel + Datum aus einem MB-Recording-Dict oder einer direkten Release-Liste.
-    Strategie: das älteste Release gewinnt – Compilations erscheinen chronologisch immer
-    nach dem Original. Various-Artists-Releases werden nur als Fallback verwendet.
+    Strategie (3 Stufen): ältestes nicht-VA-nicht-Live Release gewinnt (Originalalbum).
+    Fallback 1: ältestes nicht-VA Release (Live erlaubt).
+    Fallback 2: ältestes Release inkl. Various Artists.
     Rückgabe: (album_title, album_date) – beide können leer sein.
     """
     if isinstance(releases_or_rec, dict):
@@ -93,9 +94,18 @@ def _musicbrainz_extract_album(releases_or_rec):
                     return True
         return False
 
-    # Bevorzuge Releases die nicht Various-Artists sind; Various Artists nur als Fallback
+    def is_live(r):
+        rg = r.get("release-group", {})
+        secondary = [s.lower() for s in rg.get("secondary-types", [])]
+        return "live" in secondary
+
+    # Priorisierung (3 Stufen):
+    # 1. Nicht-VA UND nicht-Live  → Originalveröffentlichung
+    # 2. Nicht-VA (Live erlaubt)  → Fallback
+    # 3. Alle Kandidaten          → letzter Fallback (VA)
     non_va = [r for r in candidates if not is_various_artists(r)]
-    pool = non_va if non_va else candidates
+    preferred = [r for r in non_va if not is_live(r)]
+    pool = preferred if preferred else (non_va if non_va else candidates)
     result = oldest(pool)
     xbmc.log(
         f"[{ADDON_NAME}] Album-Filter: '{result.get('title')}' ({result.get('date', '')}) "
@@ -176,8 +186,8 @@ def _musicbrainz_query_recording(title_part, artist_part):
     zu artist_part passt (Score × Ähnlichkeit). Das verhindert Fehlgriffe wenn
     der erste Treffer zwar hohen Score hat aber einen komplett anderen Artist.
 
-    Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
-    oder (0, '', '', '', '') bei Fehler/kein Treffer.
+    Rückgabe: (score, mb_artist, mb_title, mb_mbid, mb_album, mb_album_date)
+    oder (0, '', '', '', '', '') bei Fehler/kein Treffer.
     """
     safe_title = _musicbrainz_escape(title_part)
     artist_variants = _musicbrainz_artist_variants(artist_part)
@@ -241,20 +251,18 @@ def _musicbrainz_query_recording(title_part, artist_part):
                         best_title    = mb_title
                         best_mbid     = mb_mbid
 
-                # Releases aller Top-Recordings zusammenführen (innerhalb 5% des besten combined)
-                # So profitiert das Album-Filter von allen Releases gleichzeitig.
-                threshold = best_combined * 0.95
-                top_releases = []
+                # Releases ALLER Recordings zusammenführen – die artistname-Query filtert
+                # bereits auf den richtigen Artist, daher kein Score-Schwellwert nötig.
+                # So findet oldest() auch ältere Recordings (z.B. 1999 vs. 2026).
+                all_releases = []
                 for (combined, score, artist, title, mbid, releases) in rec_data:
-                    if combined >= threshold:
-                        top_releases.extend(releases)
+                    all_releases.extend(releases)
                 xbmc.log(
-                    f"[{ADDON_NAME}] MB Top-Recordings für Album-Aggregation: "
-                    f"{sum(1 for d in rec_data if d[0] >= threshold)} Recordings, "
-                    f"{len(top_releases)} Releases gesamt",
+                    f"[{ADDON_NAME}] MB Recordings für Album-Aggregation: "
+                    f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
                     xbmc.LOGDEBUG
                 )
-                best_album, best_album_date = _musicbrainz_extract_album(top_releases)
+                best_album, best_album_date = _musicbrainz_extract_album(all_releases)
 
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz Best-Match "
@@ -340,8 +348,8 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     MB gibt seinen eigenen, korrekten Artistnamen zurück. Dieser wird dann per
     Ähnlichkeitsvergleich gegen beide ICY-Parts geprüft um die Reihenfolge zu bestimmen.
 
-    Rückgabe: (score, mb_artist, mb_title, mb_artist_mbid)
-    oder (0, '', '', '', '') bei Fehler/kein Treffer.
+    Rückgabe: (score, mb_artist, mb_title, mb_mbid, mb_album, mb_album_date)
+    oder (0, '', '', '', '', '') bei Fehler/kein Treffer.
     """
     safe_title = _musicbrainz_escape(title_part)
     params = {
@@ -389,19 +397,17 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
                 best_title    = mb_title
                 best_mbid     = mb_mbid
 
-        # Releases aller Top-Recordings zusammenführen (innerhalb 5% des besten combined)
-        threshold = best_combined * 0.95
-        top_releases = []
+        # Releases ALLER Recordings zusammenführen – kein Score-Schwellwert,
+        # damit auch ältere Recordings ihre Releases beisteuern können.
+        all_releases = []
         for (combined, hint_sim, score, artist, title, mbid, releases) in rec_data:
-            if combined >= threshold:
-                top_releases.extend(releases)
+            all_releases.extend(releases)
         xbmc.log(
-            f"[{ADDON_NAME}] MB Fallback Top-Recordings für Album-Aggregation: "
-            f"{sum(1 for d in rec_data if d[0] >= threshold)} Recordings, "
-            f"{len(top_releases)} Releases gesamt",
+            f"[{ADDON_NAME}] MB Fallback Recordings für Album-Aggregation: "
+            f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
             xbmc.LOGDEBUG
         )
-        mb_album, mb_album_date = _musicbrainz_extract_album(top_releases)
+        mb_album, mb_album_date = _musicbrainz_extract_album(all_releases)
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
             f"Score={best_score}, Artist='{best_artist}', Title='{best_title}', Album='{mb_album}', AlbumDate='{mb_album_date}', MBID='{best_mbid}', "
