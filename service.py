@@ -1206,6 +1206,16 @@ class RadioMonitor(xbmc.Monitor):
                     return api_artist, api_title, '', '', ''
             return None, None, '', '', ''
 
+        # --- Stationsname-Check (ganzer StreamTitle) – VOR jedem Split ---
+        # Verhindert, dass reine ICY-Senderkennung (z.B. "NDR 90,3") als Artist landet.
+        # Vergleich direkt mit station_name aus der Quelle – kein Window-Property-Lookup nötig.
+        if station_name and _mb_similarity(stream_title.strip().lower(), station_name.strip().lower()) >= 0.8:
+            xbmc.log(
+                f"[{ADDON_NAME}] StreamTitle entspricht Stationsname → kein Song: '{stream_title}'",
+                xbmc.LOGDEBUG
+            )
+            return None, None, '', '', ''
+
         # --- 'von'-Format → nur wenn Title in Anführungszeichen (sonst Programm-Ansage) ---
         von_match = re.match(r'^"(.+?)"\s+von\s+(.+)$', stream_title, re.IGNORECASE)
         if von_match:
