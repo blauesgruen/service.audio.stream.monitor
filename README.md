@@ -9,10 +9,12 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Universelle Unterstützung für alle HTTP/HTTPS Audio-Streams
 - ✅ Automatische Erkennung von Radio- und Musik-Streams
 - ✅ Auslesen von ICY-Metadaten (Icecast/Shoutcast)
-- ✅ Trennung von Artist und Title
+- ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format)
+- ✅ Stationsname-Filterung: ICY-Strings, die nur den Sendernamen enthalten, werden nicht als Artist/Title übernommen
+- ✅ MusicBrainz-Abgleich zur Validierung und Korrektur von Artist, Title, Album und MBID
+- ✅ radio.de Now-Playing API als Fallback bei fehlenden ICY-Metadaten
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
-- ✅ Spezielle Optimierungen für radio.de API
 
 ## Verfügbare Window Properties
 
@@ -24,10 +26,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.Station` | Name des Radiosenders | "Bayern 3" |
 | `RadioMonitor.Title` | Aktueller Song-Titel | "Bohemian Rhapsody" |
 | `RadioMonitor.Artist` | Aktueller Interpret | "Queen" |
-| `RadioMonitor.MBID` | MusicBrainz Artist ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
-| `RadioMonitor.StreamTitle` | Vollständiger StreamTitle | "Queen - Bohemian Rhapsody" |
+| `RadioMonitor.MBID` | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
+| `RadioMonitor.Album` | Album (via MusicBrainz) | "A Night at the Opera" |
+| `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
+| `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.Genre` | Genre des Senders | "Pop" |
-| `RadioMonitor.Album` | Album (falls verfügbar) | "A Night at the Opera" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 
 ## Verwendung in Skins
@@ -95,7 +98,10 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 
 Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die `kodi.log`. Für eine detaillierte Analyse, insbesondere bei Problemen mit der Titelerkennung, sollte das Debug-Logging in Kodi aktiviert werden.
 
-1. **Log-Datei ansehen:** Die `kodi.log` befindet sich im `temp`-Ordner deines Kodi-Benutzerdatenverzeichnisses.
+1. **Log-Datei ansehen:** Die `kodi.log` befindet sich typischerweise unter:
+   - Windows (normal): `%APPDATA%\Kodi\temp\kodi.log`
+   - Windows (portable): `<Kodi-Ordner>\portable_data\temp\kodi.log`
+   - Linux: `~/.kodi/temp/kodi.log`
 2. **Suche nach:** `[Audio Stream Monitor]`
 3. **Für detaillierte Logs:** Aktiviere "Debug-Logging" in Kodi unter `Einstellungen → System → Logging`.
 
@@ -108,7 +114,7 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 ## Bekannte Limitierungen
 
 - Nicht alle Radio-Streams senden ICY-Metadaten
-- Manche Sender senden nur den Sendernamen, keinen aktuellen Titel
+- Manche Sender senden nur den Sendernamen statt Interpret/Titel – dieser wird korrekt gefiltert und nicht als Artist oder Title übernommen; alle Properties bleiben in diesem Fall leer
 - Bei verschlüsselten Streams (HTTPS) können manche Server keine ICY-Metadaten liefern
 
 ## Lizenz

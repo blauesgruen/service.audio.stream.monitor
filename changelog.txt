@@ -1,4 +1,8 @@
-﻿v1.1.12 (2026-03-01)
+﻿v1.1.13 (2026-03-02)
+- Stationsname-Filterung verbessert: der gesamte StreamTitle wird jetzt als erstes gegen den Stationsnamen verglichen (vor jedem Split und vor dem 'von'-Format-Check). Reine ICY-Senderkennung wie "NDR 90,3" wird damit zuverlässig verworfen und landet nicht mehr als Artist oder Title in den RadioMonitor-Properties.
+- README.md aktualisiert: AlbumDate-Property ergänzt, Features-Liste vervollständigt, Bekannte Limitierungen präzisiert, Log-Pfade für portable und normale Installation ergänzt.
+
+v1.1.12 (2026-03-01)
 - Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden vor der Album-Auswahl zu einem gemeinsamen Pool zusammengeführt. Bisher wurde das Album pro Recording einzeln ermittelt, wodurch ein Live-Recording (zufällig erster Treffer) gegenüber einem Studio-Recording mit mehr Releases gewinnen konnte.
 - Album-Filterlogik vereinfacht: Das älteste nicht-Various-Artists-Release gewinnt. Compilations erscheinen chronologisch immer nach dem Original – eine mehrstufige Keyword-/Typfilterung ist damit nicht notwendig.
 - MB-Suchlimit von 25 auf 100 erhöht (MB-Maximum): Mehr Recordings im Pool bedeuten mehr Releases und damit eine zuverlässigere Album-Auswahl.
