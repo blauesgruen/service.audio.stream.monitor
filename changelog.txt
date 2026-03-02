@@ -1,4 +1,8 @@
-﻿v1.1.13 (2026-03-02)
+﻿v1.1.14 (2026-03-02)
+- Artist/Title-Reihenfolge-Erkennung grundlegend überarbeitet: Die fehlerhafte Kreuz-Validierung zwischen API- und ICY-Daten wurde entfernt. API und ICY liefern beide nur zwei Parts ohne bekannte Reihenfolge – MusicBrainz entscheidet bidirektional welcher Part Artist und welcher Title ist.
+- Aktualitäts-Check für API-Daten eingeführt: Stimmt kein API-Part (Schwelle 0.6) mit einem ICY-Part überein, wird die API als veraltet (noch alter Song) verworfen und ICY als Datenquelle genutzt. Damit werden Song-Wechsel zuverlässig erkannt, auch wenn die API verzögert aktualisiert.
+
+v1.1.13 (2026-03-02)
 - Stationsname-Filterung verbessert: der gesamte StreamTitle wird jetzt als erstes gegen den Stationsnamen verglichen (vor jedem Split und vor dem 'von'-Format-Check). Reine ICY-Senderkennung wie "NDR 90,3" wird damit zuverlässig verworfen und landet nicht mehr als Artist oder Title in den RadioMonitor-Properties.
 - README.md aktualisiert: AlbumDate-Property ergänzt, Features-Liste vervollständigt, Bekannte Limitierungen präzisiert, Log-Pfade für portable und normale Installation ergänzt.
 
