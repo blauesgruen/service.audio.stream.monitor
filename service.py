@@ -1281,35 +1281,37 @@ class RadioMonitor(xbmc.Monitor):
         api_artist, api_title = None, None
         if station_name and stream_url:
             raw_artist, raw_title = self.get_nowplaying_from_apis(station_name, stream_url)
-
-            # Beide Felder müssen gefüllt sein
             if raw_artist and raw_title and raw_artist not in invalid and raw_title not in invalid:
-
-                # Kreuz-Validierung: API-Parts müssen den ICY-Parts ähneln
-                a_matches_p1 = _mb_similarity(raw_artist, part1) >= 0.8
-                a_matches_p2 = _mb_similarity(raw_artist, part2) >= 0.8
-                t_matches_p1 = _mb_similarity(raw_title,  part1) >= 0.8
-                t_matches_p2 = _mb_similarity(raw_title,  part2) >= 0.8
-
-                if (a_matches_p2 and t_matches_p1) or (a_matches_p1 and t_matches_p2):
-                    xbmc.log(f"[{ADDON_NAME}] API gegen ICY validiert: Artist='{raw_artist}', Title='{raw_title}'", xbmc.LOGINFO)
+                # Aktualitäts-Check: Mindestens ein API-Part muss zu einem ICY-Part passen.
+                # Wenn keine Ähnlichkeit besteht, ist die API noch beim alten Song (Verzögerung).
+                api_current = (
+                    _mb_similarity(raw_artist, part1) >= 0.6 or
+                    _mb_similarity(raw_artist, part2) >= 0.6 or
+                    _mb_similarity(raw_title,  part1) >= 0.6 or
+                    _mb_similarity(raw_title,  part2) >= 0.6
+                )
+                if api_current:
+                    xbmc.log(f"[{ADDON_NAME}] API-Daten aktuell: Teil1='{raw_artist}', Teil2='{raw_title}' → MB entscheidet Reihenfolge", xbmc.LOGINFO)
                     api_artist, api_title = raw_artist, raw_title
                 else:
-                    xbmc.log(f"[{ADDON_NAME}] API-Daten passen nicht zu ICY-Parts → ignoriert", xbmc.LOGDEBUG)
+                    xbmc.log(f"[{ADDON_NAME}] API-Daten veraltet (noch alter Song) → ICY als Quelle: '{part1}' / '{part2}'", xbmc.LOGINFO)
             else:
-                xbmc.log(f"[{ADDON_NAME}] API: ein oder beide Felder leer → ignoriert", xbmc.LOGDEBUG)
+                xbmc.log(f"[{ADDON_NAME}] API: ein oder beide Felder leer → ICY als Quelle", xbmc.LOGDEBUG)
 
-        # --- MusicBrainz zur Bestätigung/Korrektur ---
-        # Wenn API validiert: MB bekommt API-Artist/Title zur Bestätigung
-        # Wenn keine API:     MB bekommt ICY-Parts zur Ermittlung der Reihenfolge
-        #
+        # --- MusicBrainz zur Reihenfolge-Bestimmung ---
+        # API hat Vorrang als Datenquelle; ICY als Fallback wenn API leer.
+        # MB entscheidet bidirektional welcher Part Artist und welcher Title ist.
         # Sonderfall: Bei mehrfachem ' - ' wird zuerst die last-separator Variante
         # geprüft (alt_part1=Title, alt_part2=Artist). Nur bei uncertain=True wird
         # auf die Standard-Variante (part1/part2) zurückgefallen.
         if api_artist and api_title:
             mb_artist, mb_title, mb_album, mb_album_date, mbid, uncertain = _identify_artist_title_via_musicbrainz(api_artist, api_title)
             if uncertain:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze API-Ergebnis: Artist='{api_artist}', Title='{api_title}'", xbmc.LOGDEBUG)
+                xbmc.log(
+                    f"[{ADDON_NAME}] MusicBrainz unentschieden (API-Quelle), nutze API-Reihenfolge: "
+                    f"Artist='{api_artist}', Title='{api_title}'",
+                    xbmc.LOGDEBUG
+                )
                 mb_artist, mb_title = api_artist, api_title
                 mb_album, mb_album_date, mbid = '', '', ''
         elif alt_part1 and alt_part2:
