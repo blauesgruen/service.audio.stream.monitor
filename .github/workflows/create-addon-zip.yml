@@ -34,7 +34,7 @@ jobs:
         if: steps.get_version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           mkdir -p build/service.audio.stream.monitor
-          rsync -av --exclude='.git' --exclude='.github' --exclude='build' . build/service.audio.stream.monitor/
+          rsync -av --exclude='.git' --exclude='.github' --exclude='.vscode' --exclude='.gitignore' --exclude='build' . build/service.audio.stream.monitor/
           cd build
           zip -r ../service.audio.stream.monitor-${{ steps.get_version.outputs.version }}.zip service.audio.stream.monitor/
 
