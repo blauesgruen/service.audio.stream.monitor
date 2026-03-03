@@ -1,5 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
-<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.1">
+﻿<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.1">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
