@@ -2,7 +2,7 @@ name: Create Addon ZIP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'addon.xml'
   workflow_dispatch:
