@@ -1,0 +1,9 @@
+# PowerShell scripts (local tools, not part of the addon)
+*.ps1
+
+# Build output
+build/
+
+# Python cache
+__pycache__/
+*.pyc
