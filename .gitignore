@@ -1,5 +1,6 @@
-# PowerShell scripts (local tools, not part of the addon)
+# PowerShell scripts and batch files (local tools, not part of the addon)
 *.ps1
+*.bat
 
 # Build output
 build/
