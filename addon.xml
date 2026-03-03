@@ -5,19 +5,18 @@
   </requires>
   <extension point="xbmc.service" library="service.py" start="login" />
   <extension point="xbmc.addon.metadata">
-    <summary lang="de_DE">Universeller Monitor für HTTP/HTTPS Audio-Streams</summary>
-    <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
-    <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
-    <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
-    <language>de</language>
-    <platform>all</platform>
-    <license>MIT</license>
     <news>v1.0.1: Karaoke-Releases bei Album-Auswahl ausgeschlossen (via MB secondary-type und Titel-Heuristik)</news>
-    <forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
-    <source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
     <assets>
       <icon>icon.png</icon>
       <fanart>fanart.jpg</fanart>
     </assets>
+    <platform>all</platform>
+    <license>MIT</license>
+    <forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
+    <source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
+    <summary lang="de_DE">Universeller Monitor für HTTP/HTTPS Audio-Streams</summary>
+    <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
+    <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
+    <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
   </extension>
 </addon>
