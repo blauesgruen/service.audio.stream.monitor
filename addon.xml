@@ -28,6 +28,8 @@ v1.1.12 (2026-03-01)
 - Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden zusammengeführt.
 - MB-Suchlimit auf 100 erhöht.
 - Bugfixes: Tuple-Größe, get_nowplaying_from_apis bare return.</news>
+		<forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
+		<source>https://github.com/blauesgruen/service.monitor.radio_de_light</source>
     <assets>
         <icon>icon.png</icon>
         <fanart>fanart.jpg</fanart>
