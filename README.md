@@ -74,7 +74,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 
 ### Manuelle Installation
 
-1. Kopiere den Ordner `service.monitor.radio_de_light` in dein Kodi Addon-Verzeichnis:
+1. Kopiere den Ordner `service.audio.stream.monitor` in dein Kodi Addon-Verzeichnis:
    - Windows: `%APPDATA%\Kodi\addons\`
    - Linux: `~/.kodi/addons/`
    - Portable: `<Kodi-Ordner>\portable_data\addons\`

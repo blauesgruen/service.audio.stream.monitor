@@ -1616,7 +1616,7 @@ class RadioMonitor(xbmc.Monitor):
                                     "jsonrpc": "2.0",
                                     "method": "JSONRPC.NotifyAll",
                                     "params": {
-                                        "sender": "service.monitor.radio_de_light",
+                                        "sender": "service.audio.stream.monitor",
                                         "message": "UpdateMusicInfo",
                                         "data": {
                                             "artist": artist,
