@@ -16,8 +16,8 @@
     <forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
     <source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
     <assets>
-        <icon>icon.png</icon>
-        <fanart>fanart.jpg</fanart>
+      <icon>icon.png</icon>
+      <fanart>fanart.jpg</fanart>
     </assets>
   </extension>
 </addon>
