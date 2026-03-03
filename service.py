@@ -67,9 +67,9 @@ def _musicbrainz_extract_artist_mbid(rec):
 
 def _musicbrainz_extract_album(releases_or_rec):
     """Extrahiert Albumtitel + Datum aus einem MB-Recording-Dict oder einer direkten Release-Liste.
-    Strategie (4 Stufen): ältestes Originalalbum gewinnt (nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation).
-    Fallback 1: ältestes nicht-VA, nicht-Live Release (Single/EP erlaubt).
-    Fallback 2: ältestes nicht-VA Release (Live erlaubt).
+    Strategie (4 Stufen): ältestes Originalalbum gewinnt (nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation, nicht-Karaoke).
+    Fallback 1: ältestes nicht-VA, nicht-Live, nicht-Karaoke Release (Single/EP erlaubt).
+    Fallback 2: ältestes nicht-VA Release (Live erlaubt, kein Karaoke).
     Fallback 3: ältestes Release inkl. Various Artists.
     Innerhalb jeder Stufe werden datierte Releases undatierten vorgezogen.
     Bekannte MB-Platzhalter (z.B. 'Unclustered Files') werden grundsätzlich ausgeschlossen.
@@ -130,13 +130,22 @@ def _musicbrainz_extract_album(releases_or_rec):
         secondary = [s.lower() for s in rg.get("secondary-types", [])]
         return "compilation" in secondary
 
+    def is_karaoke(r):
+        rg = r.get("release-group", {})
+        secondary = [s.lower() for s in rg.get("secondary-types", [])]
+        if "karaoke" in secondary:
+            return True
+        # Heuristik: Titel enthält "karaoke" (z.B. "... / Karaoke Version")
+        title = r.get("title", "").lower()
+        return "karaoke" in title
+
     # Priorisierung (4 Stufen):
-    # 1. Nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation → reines Originalalbum
-    # 2. Nicht-VA, nicht-Live (Single/EP erlaubt)                 → Fallback
-    # 3. Nicht-VA (Live erlaubt)                                  → Fallback
-    # 4. Alle Kandidaten                                          → letzter Fallback (VA)
+    # 1. Nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation, nicht-Karaoke → reines Originalalbum
+    # 2. Nicht-VA, nicht-Live (Single/EP erlaubt, kein Karaoke)                  → Fallback
+    # 3. Nicht-VA (Live erlaubt, kein Karaoke)                                   → Fallback
+    # 4. Alle Kandidaten                                                          → letzter Fallback (VA)
     non_va = [r for r in candidates if not is_various_artists(r)]
-    non_va_non_live = [r for r in non_va if not is_live(r)]
+    non_va_non_live = [r for r in non_va if not is_live(r) and not is_karaoke(r)]
     preferred = [r for r in non_va_non_live if not is_single_or_ep(r) and not is_compilation(r)]
 
     pool = (preferred       if preferred       else
