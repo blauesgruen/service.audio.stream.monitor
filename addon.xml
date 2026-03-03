@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.15">
+<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.0">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
     <import addon="script.module.requests" />
@@ -13,23 +13,9 @@
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
-    <news>v1.1.15 (2026-03-03)
-- Neue Property RadioMonitor.FirstRelease: Jahr der Erstveröffentlichung des Songs (MusicBrainz first-release-date, ältester Wert über alle Recordings).
-v1.1.14 (2026-03-02)
-- Artist/Title-Reihenfolge-Erkennung grundlegend überarbeitet: MusicBrainz entscheidet bidirektional, API/ICY-Kreuzvalidierung entfernt.
-- Aktualitäts-Check für API-Daten: veraltete API-Antworten (noch alter Song) werden verworfen.
-- Album-Filterlogik: 4-stufige Pool-Selektion, Singles/EPs/Compilations/Live-Alben werden ausgeschlossen.
-- Album-Datum auf Jahreszahl gekürzt. MB-Platzhaltertitel ausgeschlossen.
-- Klammern-Bereinigung vor MB-Suche: nur Keyword-Klammern (iterativ), inhaltliche Klammern bleiben.
-- Erweiterte Artist-Varianten: CamelCase-Split, Komma+CamelCase, tokenbasierter no-quotes-Fallback.
-v1.1.13 (2026-03-02)
-- Stationsname-Filterung verbessert: der gesamte StreamTitle wird zuerst gegen den Stationsnamen verglichen.
-v1.1.12 (2026-03-01)
-- Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden zusammengeführt.
-- MB-Suchlimit auf 100 erhöht.
-- Bugfixes: Tuple-Größe, get_nowplaying_from_apis bare return.</news>
-		<forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
-		<source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
+    <news></news>
+	<forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
+	<source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
     <assets>
         <icon>icon.png</icon>
         <fanart>fanart.jpg</fanart>

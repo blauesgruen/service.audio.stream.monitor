@@ -1,4 +1,8 @@
-﻿v1.1.15 (2026-03-03)
+﻿v1.0.0
+- Namensänderung
+
+Archiv:
+v1.1.15 (2026-03-03)
 - Neue Property RadioMonitor.FirstRelease: Zeigt das Jahr der Erstveröffentlichung des Songs gemäß MusicBrainz (first-release-date). Der älteste Wert über alle zurückgegebenen Recordings wird genutzt – konsistent mit der Album-Aggregation. Die Property wird in allen Pfaden (ICY-Worker, API-Fallback-Worker) gesetzt und in clear_properties() geleert.
 
 v1.1.14 (2026-03-02)
