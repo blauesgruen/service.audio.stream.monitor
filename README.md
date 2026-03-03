@@ -9,10 +9,14 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Universelle Unterstützung für alle HTTP/HTTPS Audio-Streams
 - ✅ Automatische Erkennung von Radio- und Musik-Streams
 - ✅ Auslesen von ICY-Metadaten (Icecast/Shoutcast)
-- ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format)
+- ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format, last-separator-Variante)
 - ✅ Stationsname-Filterung: ICY-Strings, die nur den Sendernamen enthalten, werden nicht als Artist/Title übernommen
-- ✅ MusicBrainz-Abgleich zur Validierung und Korrektur von Artist, Title, Album und MBID
+- ✅ MusicBrainz-Abgleich zur Validierung und Korrektur von Artist, Title, Album, AlbumDate, FirstRelease und MBID
+- ✅ Erweitertes Artist-Matching: CamelCase-Splitting ("DeBurgh" → "De Burgh"), Komma-Umkehr, Apostroph-Normalisierung und tokenbasierter Fallback
+- ✅ Intelligente Album-Auswahl: Singles/EPs, Compilations und Live-Alben werden zugunsten des Originalalbums aussortiert
+- ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de Now-Playing API als Fallback bei fehlenden ICY-Metadaten
+- ✅ Aktualitäts-Check für API-Daten: veraltete API-Antworten (noch alter Song) werden verworfen
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
@@ -29,6 +33,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.MBID` | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
 | `RadioMonitor.Album` | Album (via MusicBrainz) | "A Night at the Opera" |
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
+| `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.Genre` | Genre des Senders | "Pop" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |

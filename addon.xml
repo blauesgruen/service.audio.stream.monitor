@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.14">
+<addon id="service.monitor.radio_de_light" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.15">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
     <import addon="script.module.requests" />
@@ -13,23 +13,21 @@
     <language>de</language>
     <platform>all</platform>
     <license>MIT</license>
-    <news>v1.1.14 (2026-03-02)
-- Artist/Title-Reihenfolge-Erkennung grundlegend überarbeitet: Die fehlerhafte Kreuz-Validierung zwischen API- und ICY-Daten wurde entfernt. API und ICY liefern beide nur zwei Parts ohne bekannte Reihenfolge – MusicBrainz entscheidet bidirektional welcher Part Artist und welcher Title ist.
-- Aktualitäts-Check für API-Daten eingeführt: Stimmt kein API-Part (Schwelle 0.6) mit einem ICY-Part überein, wird die API als veraltet (noch alter Song) verworfen und ICY als Datenquelle genutzt. Damit werden Song-Wechsel zuverlässig erkannt, auch wenn die API verzögert aktualisiert.
+    <news>v1.1.15 (2026-03-03)
+- Neue Property RadioMonitor.FirstRelease: Jahr der Erstveröffentlichung des Songs (MusicBrainz first-release-date, ältester Wert über alle Recordings).
+v1.1.14 (2026-03-02)
+- Artist/Title-Reihenfolge-Erkennung grundlegend überarbeitet: MusicBrainz entscheidet bidirektional, API/ICY-Kreuzvalidierung entfernt.
+- Aktualitäts-Check für API-Daten: veraltete API-Antworten (noch alter Song) werden verworfen.
+- Album-Filterlogik: 4-stufige Pool-Selektion, Singles/EPs/Compilations/Live-Alben werden ausgeschlossen.
+- Album-Datum auf Jahreszahl gekürzt. MB-Platzhaltertitel ausgeschlossen.
+- Klammern-Bereinigung vor MB-Suche: nur Keyword-Klammern (iterativ), inhaltliche Klammern bleiben.
+- Erweiterte Artist-Varianten: CamelCase-Split, Komma+CamelCase, tokenbasierter no-quotes-Fallback.
 v1.1.13 (2026-03-02)
-- Stationsname-Filterung verbessert: der gesamte StreamTitle wird jetzt als erstes gegen den Stationsnamen verglichen (vor jedem Split und vor dem 'von'-Format-Check). Reine ICY-Senderkennung wie "NDR 90,3" wird damit zuverlässig verworfen und landet nicht mehr als Artist oder Title in den RadioMonitor-Properties.
+- Stationsname-Filterung verbessert: der gesamte StreamTitle wird zuerst gegen den Stationsnamen verglichen.
 v1.1.12 (2026-03-01)
-- Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden vor der Album-Auswahl zu einem gemeinsamen Pool zusammengeführt. Bisher wurde das Album pro Recording einzeln ermittelt, wodurch ein Live-Recording (zufällig erster Treffer) gegenüber einem Studio-Recording mit mehr Releases gewinnen konnte.
-- Album-Filterlogik vereinfacht: Das älteste nicht-Various-Artists-Release gewinnt. Compilations erscheinen chronologisch immer nach dem Original – eine mehrstufige Keyword-/Typfilterung ist damit nicht notwendig.
-- MB-Suchlimit von 25 auf 100 erhöht (MB-Maximum): Mehr Recordings im Pool bedeuten mehr Releases und damit eine zuverlässigere Album-Auswahl.
-- Bugfix: Tuple-Größenfehler in _musicbrainz_query_recording und _musicbrainz_query_title_only behoben (5 statt 6 Rückgabewerte führten zu ValueError).
-- Bugfix: get_nowplaying_from_apis gab bei validem Ergebnis None zurück (bare return statt return parsed_artist, parsed_title).
-v1.1.11
-- readme.md und Beschreibung in der addon.xml aktualisiert
-v1.1.10 (2026-02-26)
-- MusicBrainz Artist-Fallback erweitert: Apostroph-Varianten und Komma-Namen (Nachname, Vorname -> Vorname Nachname) werden bei 0 Treffern als Varianten getestet.
-- Logging erweitert: pro Variante wird geloggt, welche Artist-Form getestet wurde und welche Variante Treffer liefert.
-- Unsicheren MusicBrainz-Fallback entschärft: keine erzwungene Artist/Title-Umkehr mehr bei unklarem Ergebnis.</news>
+- Album-Ermittlung grundlegend überarbeitet: Releases aller Top-Recordings werden zusammengeführt.
+- MB-Suchlimit auf 100 erhöht.
+- Bugfixes: Tuple-Größe, get_nowplaying_from_apis bare return.</news>
     <assets>
         <icon>icon.png</icon>
         <fanart>fanart.jpg</fanart>

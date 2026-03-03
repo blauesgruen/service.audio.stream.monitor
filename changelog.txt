@@ -1,6 +1,13 @@
-﻿v1.1.14 (2026-03-02)
+﻿v1.1.15 (2026-03-03)
+- Neue Property RadioMonitor.FirstRelease: Zeigt das Jahr der Erstveröffentlichung des Songs gemäß MusicBrainz (first-release-date). Der älteste Wert über alle zurückgegebenen Recordings wird genutzt – konsistent mit der Album-Aggregation. Die Property wird in allen Pfaden (ICY-Worker, API-Fallback-Worker) gesetzt und in clear_properties() geleert.
+
+v1.1.14 (2026-03-02)
 - Artist/Title-Reihenfolge-Erkennung grundlegend überarbeitet: Die fehlerhafte Kreuz-Validierung zwischen API- und ICY-Daten wurde entfernt. API und ICY liefern beide nur zwei Parts ohne bekannte Reihenfolge – MusicBrainz entscheidet bidirektional welcher Part Artist und welcher Title ist.
-- Aktualitäts-Check für API-Daten eingeführt: Stimmt kein API-Part (Schwelle 0.6) mit einem ICY-Part überein, wird die API als veraltet (noch alter Song) verworfen und ICY als Datenquelle genutzt. Damit werden Song-Wechsel zuverlässig erkannt, auch wenn die API verzögert aktualisiert.
+- Aktualitäts-Check für API-Daten eingeführt: Stimmt kein API-Part (Schwelle 0.6) mit einem ICY-Part überein, wird die API als veraltet (noch alter Song) verworfen und ICY als Datenquelle genutzt.
+- Album-Filterlogik überarbeitet: 4-stufige Pool-Selektion (bevorzugt: kein Various-Artists, kein Live, keine Single/EP, keine Compilation). Live-Alben werden zusätzlich anhand eines Datumspräfix im Titel erkannt (z.B. "1978-12-02: Nakano Sun Plaza"). MB-Platzhaltertitel ("Unclustered Files", "[standalone recordings]") werden ausgeschlossen.
+- Album-Datum auf Jahreszahl gekürzt ([:4]).
+- Klammern-Bereinigung vor MB-Suche verbessert: Nur noch Klammern mit bekannten Metadaten-Keywords (Radio Edit, Remastered, Bonus usw.) werden entfernt, iterativ für gestapelte Klammern. Inhaltliche Klammern wie "(Love theme)" bleiben erhalten.
+- Erweiterte Artist-Varianten für MusicBrainz-Suche: CamelCase-Splitting ("DeBurgh" → "De Burgh"), kombinierte Komma-Umkehr + CamelCase-Split, tokenbasierter no-quotes-Fallback als letztes Mittel.
 
 v1.1.13 (2026-03-02)
 - Stationsname-Filterung verbessert: der gesamte StreamTitle wird jetzt als erstes gegen den Stationsnamen verglichen (vor jedem Split und vor dem 'von'-Format-Check). Reine ICY-Senderkennung wie "NDR 90,3" wird damit zuverlässig verworfen und landet nicht mehr als Artist oder Title in den RadioMonitor-Properties.
