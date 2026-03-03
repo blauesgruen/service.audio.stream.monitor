@@ -1,6 +1,6 @@
 ﻿<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.1">
   <requires>
-    <import addon="xbmc.python" version="3.0.1"/>
+    <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
   </requires>
   <extension point="xbmc.service" library="service.py" start="login" />
@@ -13,8 +13,8 @@
     <platform>all</platform>
     <license>MIT</license>
     <news>v1.0.1: Karaoke-Releases bei Album-Auswahl ausgeschlossen (via MB secondary-type und Titel-Heuristik)</news>
-	<forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
-	<source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
+    <forum>https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/</forum>
+    <source>https://github.com/blauesgruen/service.audio.stream.monitor</source>
     <assets>
         <icon>icon.png</icon>
         <fanart>fanart.jpg</fanart>
