@@ -66,20 +66,17 @@ def _musicbrainz_extract_artist_mbid(rec):
     return ""
 
 def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
-    """Ermittelt das Album, auf dem ein Song erstmals erschienen ist.
+    """Ermittelt das erste passende Album für einen Song anhand von FirstRelease.
 
     Strategie:
       Aus allen Releases werden zunächst nur echte Alben gezogen
       (primary-type == "Album", kein Live, kein Karaoke, kein VA, keine Compilation).
-      Aus diesem Pool wird das Album gewählt, dessen Erscheinungsjahr dem
-      first_release_date des Songs am nächsten liegt – unabhängig davon ob
-      der Song vorher als Single erschienen ist.
+      Mit first_release_date wird das früheste Release ab diesem Jahr gewählt
+      (erstes erschienenes Album mit dem Song).
 
-      Fallback-Stufen wenn kein Album gefunden wird:
-        1. primary-type fehlt (null/leer) → undefinierte Releases, aber kein Live/Karaoke/VA
-        2. Compilation erlaubt
-        3. VA erlaubt (letzter Ausweg)
-      Innerhalb jeder Stufe gilt dieselbe "nächstes Jahr"-Logik.
+      Fallback-Stufe wenn kein Album gefunden wird:
+        1. Album + Compilation (weiterhin kein Live/Karaoke/VA)
+      Wenn kein Album-Release gefunden wird, bleibt Album leer.
 
       Ohne first_release_date wird das älteste passende Release genommen.
 
@@ -155,24 +152,20 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
     # --- Qualitätsstufen ---
     # Stufe 1: echtes Album, kein Compilation
     # Stufe 2: echtes Album, Compilation erlaubt
-    # Stufe 3: primary-type unbekannt, kein Compilation (MB-Datenlücke)
-    # Stufe 4: Compilation erlaubt (VA bereits in clean ausgeschlossen)
-    # Stufe 5: VA-Fallback aus allen Kandidaten
+    # Fehlt ein Album-Typ, wird bewusst kein Album gesetzt.
     quality_pools = [
         ("album",            [r for r in clean     if is_album(r) and not is_compilation(r)]),
         ("album+compilat",   [r for r in clean     if is_album(r)]),
-        ("unknown-type",     [r for r in clean     if is_type_unknown(r) and not is_compilation(r)]),
-        ("unknown+compilat", [r for r in clean     if is_type_unknown(r)]),
-        ("va-fallback",      candidates),
     ]
 
     # --- Anker-Jahr ---
     anchor_year = (first_release_date or "")[:4]
 
-    def nearest_to_anchor(pool):
+    def first_release_album(pool):
         """
-        Wählt das Release dessen Jahr dem anchor_year am nächsten liegt.
-        Bei gleichem Abstand gewinnt das frühere Release.
+        Wählt das früheste Release ab anchor_year.
+        Wenn kein Release >= anchor_year vorhanden ist, fällt es auf das älteste
+        datierte Release zurück.
         Ohne Anker: ältestes datiertes Release.
         Undatierte Releases nur wenn kein datiertes vorhanden.
         """
@@ -188,16 +181,19 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
         if not anchor_year:
             return min(dated, key=lambda r: release_year(r))
 
-        anchor = int(anchor_year)
-        return min(
-            dated,
-            # Primär: kleinster Abstand zum Ankerjahr; sekundär: früheres Jahr bevorzugt
-            key=lambda r: (abs(int(release_year(r)) - anchor), int(release_year(r)))
-        )
+        try:
+            anchor = int(anchor_year)
+        except ValueError:
+            return min(dated, key=lambda r: release_year(r))
+
+        same_or_later = [r for r in dated if int(release_year(r)) >= anchor]
+        if same_or_later:
+            return min(same_or_later, key=lambda r: int(release_year(r)))
+        return min(dated, key=lambda r: int(release_year(r)))
 
     # --- Erste Stufe die ein Ergebnis liefert gewinnt ---
     for pool_label, pool in quality_pools:
-        result = nearest_to_anchor(pool)
+        result = first_release_album(pool)
         if result:
             album_title = result.get("title", "")
             album_year  = release_year(result)
