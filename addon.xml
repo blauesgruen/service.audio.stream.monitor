@@ -1,4 +1,5 @@
-﻿<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.2">
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.2">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
@@ -7,7 +8,6 @@
   <extension point="xbmc.addon.metadata">
     <assets>
       <icon>icon.png</icon>
-      <fanart>fanart.jpg</fanart>
     </assets>
     <platform>all</platform>
     <license>MIT</license>
