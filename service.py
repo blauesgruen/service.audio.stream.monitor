@@ -65,17 +65,27 @@ def _musicbrainz_extract_artist_mbid(rec):
                     return mbid
     return ""
 
-def _musicbrainz_extract_album(releases_or_rec):
-    """Extrahiert Albumtitel + Datum aus einem MB-Recording-Dict oder einer direkten Release-Liste.
-    Strategie (4 Stufen): ältestes Originalalbum gewinnt (nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation, nicht-Karaoke).
-    Fallback 1: ältestes nicht-VA, nicht-Live, nicht-Karaoke Release (Single/EP erlaubt).
-    Fallback 2: ältestes nicht-VA Release (Live erlaubt, kein Karaoke).
-    Fallback 3: ältestes Release inkl. Various Artists.
-    Innerhalb jeder Stufe werden datierte Releases undatierten vorgezogen.
-    Bekannte MB-Platzhalter (z.B. 'Unclustered Files') werden grundsätzlich ausgeschlossen.
-    Rückgabe: (album_title, album_date) – beide können leer sein.
+def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
+    """Ermittelt das Album, auf dem ein Song erstmals erschienen ist.
+
+    Strategie:
+      Aus allen Releases werden zunächst nur echte Alben gezogen
+      (primary-type == "Album", kein Live, kein Karaoke, kein VA, keine Compilation).
+      Aus diesem Pool wird das Album gewählt, dessen Erscheinungsjahr dem
+      first_release_date des Songs am nächsten liegt – unabhängig davon ob
+      der Song vorher als Single erschienen ist.
+
+      Fallback-Stufen wenn kein Album gefunden wird:
+        1. primary-type fehlt (null/leer) → undefinierte Releases, aber kein Live/Karaoke/VA
+        2. Compilation erlaubt
+        3. VA erlaubt (letzter Ausweg)
+      Innerhalb jeder Stufe gilt dieselbe "nächstes Jahr"-Logik.
+
+      Ohne first_release_date wird das älteste passende Release genommen.
+
+    Bekannte MB-Platzhalter ("Unclustered Files", etc.) werden immer ausgeschlossen.
+    Rückgabe: (album_title, album_year) – beide können leer sein, Jahr immer 4-stellig.
     """
-    # MB-Platzhalter-Titel die kein echtes Album sind
     MB_PLACEHOLDER_TITLES = {"unclustered files", "[standalone recordings]"}
 
     if isinstance(releases_or_rec, dict):
@@ -84,84 +94,122 @@ def _musicbrainz_extract_album(releases_or_rec):
         releases = releases_or_rec
     if not releases or not isinstance(releases, list):
         return "", ""
+
     candidates = [
         r for r in releases
-        if isinstance(r, dict) and r.get("title")
+        if isinstance(r, dict)
+        and r.get("title")
         and (r.get("title") or "").lower() not in MB_PLACEHOLDER_TITLES
     ]
     if not candidates:
         return "", ""
 
-    def oldest(pool):
-        # Datierte Releases vor undatierten; innerhalb jeder Gruppe ältestes zuerst
-        dated   = [r for r in pool if r.get("date")]
-        undated = [r for r in pool if not r.get("date")]
-        pick_from = dated if dated else undated
-        return min(pick_from, key=lambda r: r.get("date", "9999") or "9999")
+    # --- Hilfsfunktionen ---
+
+    def release_year(r):
+        return (r.get("date") or "")[:4]
+
+    def primary_type(r):
+        return (r.get("release-group", {}).get("primary-type") or "").lower()
+
+    def secondary_types(r):
+        return [s.lower() for s in r.get("release-group", {}).get("secondary-types", [])]
 
     def is_various_artists(r):
         for credit in r.get("artist-credit", []):
             if isinstance(credit, dict):
-                name = (credit.get("name") or "").lower()
+                name        = (credit.get("name") or "").lower()
                 artist_name = (credit.get("artist", {}).get("name") or "").lower()
                 if "various" in name or "various" in artist_name:
                     return True
         return False
 
     def is_live(r):
-        rg = r.get("release-group", {})
-        secondary = [s.lower() for s in rg.get("secondary-types", [])]
-        if "live" in secondary:
+        if "live" in secondary_types(r):
             return True
-        # Heuristik: Titel beginnt mit Datum (z.B. "1978-12-02: Nakano Sun Plaza")
-        # → Live-Bootleg/Konzert, auch wenn MB secondary-type fehlt
-        title = r.get("title", "")
-        if re.match(r'^\d{4}[-\u2010\u2011\u2012\u2013/]\d{2}[-\u2010\u2011\u2012\u2013/]\d{2}\b', title):
-            return True
-        return False
-
-    def is_single_or_ep(r):
-        rg = r.get("release-group", {})
-        primary = (rg.get("primary-type") or "").lower()
-        return primary in ("single", "ep")
-
-    def is_compilation(r):
-        rg = r.get("release-group", {})
-        secondary = [s.lower() for s in rg.get("secondary-types", [])]
-        return "compilation" in secondary
+        # Heuristik: Titel beginnt mit ISO-Datum → Konzert-Bootleg
+        return bool(re.match(
+            r'^\d{4}[-\u2010\u2011\u2012\u2013/]\d{2}[-\u2010\u2011\u2012\u2013/]\d{2}\b',
+            r.get("title", "")
+        ))
 
     def is_karaoke(r):
-        rg = r.get("release-group", {})
-        secondary = [s.lower() for s in rg.get("secondary-types", [])]
-        if "karaoke" in secondary:
-            return True
-        # Heuristik: Titel enthält "karaoke" (z.B. "... / Karaoke Version")
-        title = r.get("title", "").lower()
-        return "karaoke" in title
+        return "karaoke" in secondary_types(r) or "karaoke" in r.get("title", "").lower()
 
-    # Priorisierung (4 Stufen):
-    # 1. Nicht-VA, nicht-Live, nicht-Single/EP, nicht-Compilation, nicht-Karaoke → reines Originalalbum
-    # 2. Nicht-VA, nicht-Live (Single/EP erlaubt, kein Karaoke)                  → Fallback
-    # 3. Nicht-VA (Live erlaubt, kein Karaoke)                                   → Fallback
-    # 4. Alle Kandidaten                                                          → letzter Fallback (VA)
-    non_va = [r for r in candidates if not is_various_artists(r)]
-    non_va_non_live = [r for r in non_va if not is_live(r) and not is_karaoke(r)]
-    preferred = [r for r in non_va_non_live if not is_single_or_ep(r) and not is_compilation(r)]
+    def is_compilation(r):
+        return "compilation" in secondary_types(r)
 
-    pool = (preferred       if preferred       else
-            non_va_non_live if non_va_non_live else
-            non_va          if non_va          else
-            candidates)
+    def is_album(r):
+        return primary_type(r) == "album"
 
-    result = oldest(pool)
-    album_title = result.get("title", "")
-    album_date = (result.get("date", "") or "")[:4]  # nur Jahreszahl
-    xbmc.log(
-        f"[{ADDON_NAME}] Album-Filter: '{album_title}' ({album_date}) "
-        f"aus {len(pool)} Releases ({len(candidates)} gesamt)",
-        xbmc.LOGINFO
-    )
-    return album_title, album_date
+    def is_type_unknown(r):
+        # primary-type nicht gesetzt – MB-Datenlücke, als Fallback brauchbar
+        return primary_type(r) == ""
+
+    # --- Basis-Ausschlüsse gelten immer ---
+    clean = [
+        r for r in candidates
+        if not is_live(r) and not is_karaoke(r) and not is_various_artists(r)
+    ]
+
+    # --- Qualitätsstufen ---
+    # Stufe 1: echtes Album, kein Compilation
+    # Stufe 2: echtes Album, Compilation erlaubt
+    # Stufe 3: primary-type unbekannt, kein Compilation (MB-Datenlücke)
+    # Stufe 4: Compilation erlaubt (VA bereits in clean ausgeschlossen)
+    # Stufe 5: VA-Fallback aus allen Kandidaten
+    quality_pools = [
+        ("album",            [r for r in clean     if is_album(r) and not is_compilation(r)]),
+        ("album+compilat",   [r for r in clean     if is_album(r)]),
+        ("unknown-type",     [r for r in clean     if is_type_unknown(r) and not is_compilation(r)]),
+        ("unknown+compilat", [r for r in clean     if is_type_unknown(r)]),
+        ("va-fallback",      candidates),
+    ]
+
+    # --- Anker-Jahr ---
+    anchor_year = (first_release_date or "")[:4]
+
+    def nearest_to_anchor(pool):
+        """
+        Wählt das Release dessen Jahr dem anchor_year am nächsten liegt.
+        Bei gleichem Abstand gewinnt das frühere Release.
+        Ohne Anker: ältestes datiertes Release.
+        Undatierte Releases nur wenn kein datiertes vorhanden.
+        """
+        if not pool:
+            return None
+
+        dated   = [r for r in pool if release_year(r)]
+        undated = [r for r in pool if not release_year(r)]
+
+        if not dated:
+            return undated[0] if undated else None
+
+        if not anchor_year:
+            return min(dated, key=lambda r: release_year(r))
+
+        anchor = int(anchor_year)
+        return min(
+            dated,
+            # Primär: kleinster Abstand zum Ankerjahr; sekundär: früheres Jahr bevorzugt
+            key=lambda r: (abs(int(release_year(r)) - anchor), int(release_year(r)))
+        )
+
+    # --- Erste Stufe die ein Ergebnis liefert gewinnt ---
+    for pool_label, pool in quality_pools:
+        result = nearest_to_anchor(pool)
+        if result:
+            album_title = result.get("title", "")
+            album_year  = release_year(result)
+            xbmc.log(
+                f"[{ADDON_NAME}] Album-Auswahl: '{album_title}' ({album_year}) "
+                f"[Anker={anchor_year or '–'}, Pool={pool_label}, "
+                f"Kandidaten={len(candidates)}]",
+                xbmc.LOGINFO
+            )
+            return album_title, album_year
+
+    return "", ""
 
 def _musicbrainz_artist_variants(artist_part):
     """
@@ -270,7 +318,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
         params = {
             "query": query_str,
             "fmt":   "json",
-            "limit": 100,
+            "limit": 10,
             "inc":   "releases+release-groups",
         }
         xbmc.log(
@@ -343,7 +391,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
                     xbmc.LOGDEBUG
                 )
-                best_album, best_album_date = _musicbrainz_extract_album(all_releases)
+                best_album, best_album_date = _musicbrainz_extract_album(all_releases, best_first_release)
 
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz Best-Match "
@@ -436,7 +484,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     params = {
         "query": f'recording:"{safe_title}"',
         "fmt":   "json",
-        "limit": 100,
+        "limit": 10,
         "inc":   "releases+release-groups",
     }
     try:
@@ -496,7 +544,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
             f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
             xbmc.LOGDEBUG
         )
-        mb_album, mb_album_date = _musicbrainz_extract_album(all_releases)
+        mb_album, mb_album_date = _musicbrainz_extract_album(all_releases, best_first_release)
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
             f"Score={best_score}, Artist='{best_artist}', Title='{best_title}', Album='{mb_album}', AlbumDate='{mb_album_date}', MBID='{best_mbid}', FirstRelease='{best_first_release}', "
@@ -508,6 +556,92 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     except Exception as e:
         xbmc.log(f"[{ADDON_NAME}] MB Fallback-Query Fehler: {e}", xbmc.LOGWARNING)
         return 0, '', '', '', '', '', ''
+
+
+# Cache: verhindert wiederholte API-Aufrufe für dieselbe MBID innerhalb einer Session.
+# Key: mbid (str), Value: (band_formed, band_members) – beide können leer sein.
+_artist_info_cache = {}
+
+def _musicbrainz_query_artist_info(mbid):
+    """
+    Holt Gründungsjahr und Bandmitglieder für eine bekannte Artist-MBID.
+
+    Nutzt einen In-Memory-Cache damit pro Song-Wechsel beim selben Künstler
+    kein erneuter API-Call erfolgt.
+
+    Endpunkt: /ws/2/artist/{mbid}?inc=artist-rels&fmt=json
+    Liefert:
+      - life-span.begin → Gründungsjahr (Band) oder Geburtsjahr (Solo)
+      - relations[type="member of band", direction="backward"] → Mitglieder
+        Nur aktuelle Mitglieder (ended=False) werden aufgenommen; bei Bands
+        ohne ended-Flag werden alle gelistet.
+
+    Rückgabe: (band_formed, band_members)
+      band_formed  … Jahr als String, z.B. "1970", oder ''
+      band_members … kommagetrennte Namen, z.B. "Freddie Mercury, Brian May", oder ''
+    """
+    if not mbid:
+        return '', ''
+
+    if mbid in _artist_info_cache:
+        xbmc.log(
+            f"[{ADDON_NAME}] Artist-Info Cache-Treffer für MBID={mbid}",
+            xbmc.LOGDEBUG
+        )
+        return _artist_info_cache[mbid]
+
+    url = f"https://musicbrainz.org/ws/2/artist/{mbid}"
+    params = {"inc": "artist-rels", "fmt": "json"}
+
+    try:
+        response = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
+        data = response.json()
+
+        # Nur Bands (Groups) – Solo-Künstler haben kein Gründungsjahr/Mitglieder
+        if data.get("type") != "Group":
+            _artist_info_cache[mbid] = ('', '')
+            return '', ''
+
+        # Gründungsjahr: nur die ersten 4 Zeichen (Jahr) übernehmen
+        life_span = data.get("life-span", {})
+        raw_begin = (life_span.get("begin") or "")[:4]
+        band_formed = raw_begin if raw_begin.isdigit() else ''
+
+        # Bandmitglieder: Relations mit type="member of band" und direction="backward"
+        # direction="backward" bedeutet: diese Person ist Mitglied DER Band (mbid)
+        relations = data.get("relations", [])
+        member_names = [
+            rel["artist"]["name"]
+            for rel in relations
+            if (
+                isinstance(rel, dict)
+                and rel.get("type") == "member of band"
+                and rel.get("direction") == "backward"
+                and not rel.get("ended", False)
+                and isinstance(rel.get("artist"), dict)
+                and rel["artist"].get("name")
+            )
+        ]
+        band_members = ", ".join(member_names)
+
+        xbmc.log(
+            f"[{ADDON_NAME}] Artist-Info für MBID={mbid}: "
+            f"BandFormed='{band_formed}', Members='{band_members}'",
+            xbmc.LOGINFO
+        )
+
+        result = (band_formed, band_members)
+        _artist_info_cache[mbid] = result
+        return result
+
+    except Exception as e:
+        xbmc.log(
+            f"[{ADDON_NAME}] Fehler beim Artist-Info Lookup (MBID={mbid}): {e}",
+            xbmc.LOGWARNING
+        )
+        # Negativen Cache-Eintrag setzen um Wiederholungs-Requests zu vermeiden
+        _artist_info_cache[mbid] = ('', '')
+        return '', ''
 
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
@@ -785,25 +919,15 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty('RadioMonitor.Title')
         WINDOW.clearProperty('RadioMonitor.Artist')
         WINDOW.clearProperty('RadioMonitor.Album')
+        WINDOW.clearProperty('RadioMonitor.AlbumDate')
         WINDOW.clearProperty('RadioMonitor.Genre')
         WINDOW.clearProperty('RadioMonitor.MBID')
         WINDOW.clearProperty('RadioMonitor.FirstRelease')
         WINDOW.clearProperty('RadioMonitor.StreamTitle')
         WINDOW.clearProperty('RadioMonitor.Playing')
         WINDOW.clearProperty('RadioMonitor.Logo')
-        
-        # MusicPlayer-Properties (Kodi-Standard)
-        # Diese können mit MusicPlayer.Property(Artist) in Skins abgerufen werden
-        if self.player.isPlayingAudio():
-            try:
-                self.player.clearProperty('Artist')
-                self.player.clearProperty('Title')
-                self.player.clearProperty('Album')
-                self.player.clearProperty('Genre')
-                self.player.clearProperty('MBID')
-                self.player.clearProperty('StreamTitle')
-            except Exception:
-                pass
+        WINDOW.clearProperty('RadioMonitor.BandFormed')
+        WINDOW.clearProperty('RadioMonitor.BandMembers')
         
         xbmc.log(f"[{ADDON_NAME}] Properties gelöscht", xbmc.LOGDEBUG)
         
@@ -1177,8 +1301,24 @@ class RadioMonitor(xbmc.Monitor):
                                 self.set_property_safe('RadioMonitor.FirstRelease', first_release)
                             else:
                                 WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                            # Artist-Trigger zuerst setzen, dann Artist-Info nachziehen.
+                            # MBID ist nur gesetzt wenn MB den Artist sicher bestimmt hat.
                             self.set_property_safe('RadioMonitor.Artist', artist)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
+                            if mbid and artist:
+                                time.sleep(1)  # MusicBrainz Rate-Limit einhalten
+                                band_formed, band_members = _musicbrainz_query_artist_info(mbid)
+                                if band_formed:
+                                    self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                                else:
+                                    WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                if band_members:
+                                    self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                                else:
+                                    WINDOW.clearProperty('RadioMonitor.BandMembers')
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                WINDOW.clearProperty('RadioMonitor.BandMembers')
                              
                             # Aktualisiere Kodi Player Metadaten
                             logo = WINDOW.getProperty('RadioMonitor.Logo')
@@ -1189,6 +1329,8 @@ class RadioMonitor(xbmc.Monitor):
                             WINDOW.clearProperty('RadioMonitor.Album')
                             WINDOW.clearProperty('RadioMonitor.AlbumDate')
                             WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                            WINDOW.clearProperty('RadioMonitor.BandFormed')
+                            WINDOW.clearProperty('RadioMonitor.BandMembers')
                             self.set_property_safe('RadioMonitor.Title', title)
                             self.set_property_safe('RadioMonitor.StreamTitle', title)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {title}", xbmc.LOGINFO)
@@ -1537,6 +1679,8 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty('RadioMonitor.AlbumDate')
                                 WINDOW.clearProperty('RadioMonitor.MBID')
                                 WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                                WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                WINDOW.clearProperty('RadioMonitor.BandMembers')
                                 WINDOW.clearProperty('RadioMonitor.StreamTitle')
                                 continue
                             
@@ -1579,9 +1723,32 @@ class RadioMonitor(xbmc.Monitor):
                             else:
                                 WINDOW.clearProperty('RadioMonitor.Artist')
                                 artist = ''
-                            
-                            # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
+
+                            # Logo sofort nach Artist setzen – vor dem optionalen Artist-Info-Call,
+                            # damit der time.sleep(1) das Logo nicht verzögert.
                             self.set_logo_safe()
+
+                            # Artist-Info (Gründungsjahr + Mitglieder) erst NACH Artist-Property setzen.
+                            # Grund: RadioMonitor.Artist ist der AS-Trigger – er darf nicht durch den
+                            # sleep im Artist-Lookup verzögert werden. Die MBID ist nur gesetzt wenn
+                            # MB den Artist sicher bestimmt hat (uncertain=False), daher ist sie hier
+                            # ein verlässlicher Indikator für einen validen Artist-Match.
+                            if mbid and artist:
+                                time.sleep(1)  # MusicBrainz Rate-Limit einhalten
+                                band_formed, band_members = _musicbrainz_query_artist_info(mbid)
+                                if band_formed:
+                                    self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                                    xbmc.log(f"[{ADDON_NAME}] BandFormed: {band_formed}", xbmc.LOGDEBUG)
+                                else:
+                                    WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                if band_members:
+                                    self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                                    xbmc.log(f"[{ADDON_NAME}] BandMembers: {band_members}", xbmc.LOGDEBUG)
+                                else:
+                                    WINDOW.clearProperty('RadioMonitor.BandMembers')
+                            else:
+                                WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                WINDOW.clearProperty('RadioMonitor.BandMembers')
                             
                             # DEBUG: Zeige alle gesetzten Properties
                             xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGDEBUG)
@@ -1593,6 +1760,8 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.AlbumDate = {WINDOW.getProperty('RadioMonitor.AlbumDate')}", xbmc.LOGDEBUG)
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.MBID = {WINDOW.getProperty('RadioMonitor.MBID')}", xbmc.LOGDEBUG)
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.FirstRelease = {WINDOW.getProperty('RadioMonitor.FirstRelease')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandFormed = {WINDOW.getProperty('RadioMonitor.BandFormed')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandMembers = {WINDOW.getProperty('RadioMonitor.BandMembers')}", xbmc.LOGDEBUG)
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGDEBUG)
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGDEBUG)
                             xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGDEBUG)
@@ -1652,8 +1821,8 @@ class RadioMonitor(xbmc.Monitor):
         finally:
             try:
                 response.close()
-            except Exception:
-                pass
+            except Exception as e:
+                xbmc.log(f"[{ADDON_NAME}] Stream-Response konnte nicht geschlossen werden: {e}", xbmc.LOGDEBUG)
             xbmc.log(f"[{ADDON_NAME}] Metadata Worker beendet", xbmc.LOGDEBUG)
             
     def start_metadata_monitoring(self, url):
@@ -1761,10 +1930,8 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] Logo gesetzt: {self.station_logo}", xbmc.LOGINFO)
                             else:
                                 xbmc.log(f"[{ADDON_NAME}] Kein echtes Logo, nutze Kodi-Fallback", xbmc.LOGDEBUG)
-                        except Exception:
-                            pass
-                        
-                        # Hole Logo von radio.de API (falls NDR/WDR/etc.) NUR wenn noch kein Logo vorhanden
+                        except Exception as e:
+                            xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen von InfoTag/Logo beim Stream-Start: {e}", xbmc.LOGDEBUG)
                         if album and (not self.station_logo or self.station_logo == 'DefaultAudio.png'):
                             try:
                                 xbmc.log(f"[{ADDON_NAME}] Hole Station-Logo für: {album}", xbmc.LOGDEBUG)
