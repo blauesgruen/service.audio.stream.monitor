@@ -74,9 +74,8 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
       Mit first_release_date wird das früheste Release ab diesem Jahr gewählt
       (erstes erschienenes Album mit dem Song).
 
-      Fallback-Stufe wenn kein Album gefunden wird:
-        1. Album + Compilation (weiterhin kein Live/Karaoke/VA)
-      Wenn kein Album-Release gefunden wird, bleibt Album leer.
+      Es werden ausschließlich echte Alben ohne Compilation verwendet.
+      Wenn kein solches Album-Release gefunden wird, bleibt Album leer.
 
       Ohne first_release_date wird das älteste passende Release genommen.
 
@@ -150,12 +149,10 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
     ]
 
     # --- Qualitätsstufen ---
-    # Stufe 1: echtes Album, kein Compilation
-    # Stufe 2: echtes Album, Compilation erlaubt
-    # Fehlt ein Album-Typ, wird bewusst kein Album gesetzt.
+    # Nur echte Alben ohne Compilation.
+    # Fehlt ein solcher Album-Typ, wird bewusst kein Album gesetzt.
     quality_pools = [
         ("album",            [r for r in clean     if is_album(r) and not is_compilation(r)]),
-        ("album+compilat",   [r for r in clean     if is_album(r)]),
     ]
 
     # --- Anker-Jahr ---
@@ -175,21 +172,51 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
         dated   = [r for r in pool if release_year(r)]
         undated = [r for r in pool if not release_year(r)]
 
+        def title_quality_key(r):
+            """
+            Bevorzugt innerhalb desselben Jahres das "Basisalbum" statt Sondereditionen.
+            Niedriger ist besser.
+            """
+            title = (r.get("title") or "").lower()
+            edition_tokens = [
+                "deluxe", "exclusive", "special edition", "edition", "bonus",
+                "expanded", "remaster", "remastered", "anniversary", "reissue",
+                "walmart", "target", "japan", "tour", "collector", "collectors"
+            ]
+            penalty = sum(1 for token in edition_tokens if token in title)
+            # Kürzere, weniger "dekorierte" Titel als Tie-Breaker bevorzugen.
+            normalized = re.sub(r'\([^)]*\)', '', title).strip()
+            return (penalty, len(normalized), normalized)
+
+        def pick_from_year_bucket(items):
+            if not items:
+                return None
+            return min(items, key=title_quality_key)
+
         if not dated:
             return undated[0] if undated else None
 
         if not anchor_year:
-            return min(dated, key=lambda r: release_year(r))
+            oldest_year = min(int(release_year(r)) for r in dated)
+            bucket = [r for r in dated if int(release_year(r)) == oldest_year]
+            return pick_from_year_bucket(bucket)
 
         try:
             anchor = int(anchor_year)
         except ValueError:
-            return min(dated, key=lambda r: release_year(r))
+            oldest_year = min(int(release_year(r)) for r in dated)
+            bucket = [r for r in dated if int(release_year(r)) == oldest_year]
+            return pick_from_year_bucket(bucket)
 
         same_or_later = [r for r in dated if int(release_year(r)) >= anchor]
         if same_or_later:
-            return min(same_or_later, key=lambda r: int(release_year(r)))
-        return min(dated, key=lambda r: int(release_year(r)))
+            first_year = min(int(release_year(r)) for r in same_or_later)
+            bucket = [r for r in same_or_later if int(release_year(r)) == first_year]
+            return pick_from_year_bucket(bucket)
+
+        oldest_year = min(int(release_year(r)) for r in dated)
+        bucket = [r for r in dated if int(release_year(r)) == oldest_year]
+        return pick_from_year_bucket(bucket)
 
     # --- Erste Stufe die ein Ergebnis liefert gewinnt ---
     for pool_label, pool in quality_pools:
@@ -341,11 +368,17 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     xbmc.LOGDEBUG
                 )
 
-                # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen
+                # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen.
+                # Tie-Breaker: früheres first-release-date bevorzugen.
                 best_combined = -1
                 best_score, best_artist, best_title, best_mbid = 0, '', '', ''
-                rec_data = []  # (combined, score, mb_artist, mb_title, mb_mbid, releases)
-                all_first_releases = []  # first-release-date aller Recordings
+                best_releases = []
+                best_first_release = ''
+                best_first_release_year = 9999
+
+                def frd_year(frd):
+                    year = (frd or "")[:4]
+                    return int(year) if year.isdigit() else 9999
 
                 for rec in recordings:
                     score     = int(rec.get("score", 0))
@@ -354,8 +387,6 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
                     releases  = rec.get("releases", [])
                     frd       = rec.get("first-release-date") or ""
-                    if frd:
-                        all_first_releases.append(frd)
                     # Ähnlichkeit gegen den Original-Artistpart für stabile Entscheidung
                     artist_sim = _mb_similarity(mb_artist, artist_part)
                     combined   = score * artist_sim
@@ -364,30 +395,31 @@ def _musicbrainz_query_recording(title_part, artist_part):
                         f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
                         xbmc.LOGDEBUG
                     )
-                    rec_data.append((combined, score, mb_artist, mb_title, mb_mbid, releases))
-                    if combined > best_combined:
+                    candidate_year = frd_year(frd)
+                    is_better = (
+                        combined > best_combined
+                        or (
+                            combined == best_combined and (
+                                score > best_score
+                                or (score == best_score and candidate_year < best_first_release_year)
+                            )
+                        )
+                    )
+                    if is_better:
                         best_combined = combined
                         best_score    = score
                         best_artist   = mb_artist
                         best_title    = mb_title
                         best_mbid     = mb_mbid
-
-                # Ältestes first-release-date über ALLE Recordings – konsistent mit
-                # Album-Aggregation (ebenfalls über alle Recordings, nicht nur den Sieger)
-                best_first_release = min(all_first_releases)[:4] if all_first_releases else ''
-
-                # Releases ALLER Recordings zusammenführen – die artistname-Query filtert
-                # bereits auf den richtigen Artist, daher kein Score-Schwellwert nötig.
-                # So findet oldest() auch ältere Recordings (z.B. 1999 vs. 2026).
-                all_releases = []
-                for (combined, score, artist, title, mbid, releases) in rec_data:
-                    all_releases.extend(releases)
+                        best_releases = releases
+                        best_first_release = frd[:4] if frd else ''
+                        best_first_release_year = candidate_year
                 xbmc.log(
-                    f"[{ADDON_NAME}] MB Recordings für Album-Aggregation: "
-                    f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
+                    f"[{ADDON_NAME}] MB Best-Recording für Album-Auswahl: "
+                    f"{len(best_releases)} Releases, FirstRelease='{best_first_release or '-'}'",
                     xbmc.LOGDEBUG
                 )
-                best_album, best_album_date = _musicbrainz_extract_album(all_releases, best_first_release)
+                best_album, best_album_date = _musicbrainz_extract_album(best_releases, best_first_release)
 
                 xbmc.log(
                     f"[{ADDON_NAME}] MusicBrainz Best-Match "
@@ -495,11 +527,16 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
             return 0, '', '', '', '', '', ''
 
         hints = [h for h in (artist_hints or []) if h]
-        rec_data = []  # (combined, hint_sim, score, mb_artist, mb_title, mb_mbid, releases)
         best_combined = -1.0
         best_hint_sim = 0.0
         best_score, best_artist, best_title, best_mbid = 0, '', '', ''
-        all_first_releases = []  # first-release-date aller Recordings
+        best_releases = []
+        best_first_release = ''
+        best_first_release_year = 9999
+
+        def frd_year(frd):
+            year = (frd or "")[:4]
+            return int(year) if year.isdigit() else 9999
 
         for rec in recordings:
             score = int(rec.get("score", 0))
@@ -508,8 +545,6 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
             mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
             releases  = rec.get("releases", [])
             frd       = rec.get("first-release-date") or ""
-            if frd:
-                all_first_releases.append(frd)
             hint_sim = max([_mb_similarity(mb_artist, h) for h in hints], default=0.0)
             combined = score * hint_sim if hints else float(score)
             xbmc.log(
@@ -517,30 +552,37 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
                 f"Score={score}, hint_sim={hint_sim:.2f}, combined={combined:.1f}",
                 xbmc.LOGDEBUG
             )
-            rec_data.append((combined, hint_sim, score, mb_artist, mb_title, mb_mbid, releases))
-            if combined > best_combined or (combined == best_combined and hint_sim > best_hint_sim):
+            candidate_year = frd_year(frd)
+            is_better = (
+                combined > best_combined
+                or (
+                    combined == best_combined and (
+                        hint_sim > best_hint_sim
+                        or (
+                            hint_sim == best_hint_sim and (
+                                score > best_score
+                                or (score == best_score and candidate_year < best_first_release_year)
+                            )
+                        )
+                    )
+                )
+            )
+            if is_better:
                 best_combined = combined
                 best_hint_sim = hint_sim
                 best_score    = score
                 best_artist   = mb_artist
                 best_title    = mb_title
                 best_mbid     = mb_mbid
-
-        # Ältestes first-release-date über ALLE Recordings – konsistent mit
-        # Album-Aggregation (ebenfalls über alle Recordings, nicht nur den Sieger)
-        best_first_release = min(all_first_releases)[:4] if all_first_releases else ''
-
-        # Releases ALLER Recordings zusammenführen – kein Score-Schwellwert,
-        # damit auch ältere Recordings ihre Releases beisteuern können.
-        all_releases = []
-        for (combined, hint_sim, score, artist, title, mbid, releases) in rec_data:
-            all_releases.extend(releases)
+                best_releases = releases
+                best_first_release = frd[:4] if frd else ''
+                best_first_release_year = candidate_year
         xbmc.log(
-            f"[{ADDON_NAME}] MB Fallback Recordings für Album-Aggregation: "
-            f"{len(rec_data)} Recordings, {len(all_releases)} Releases gesamt",
+            f"[{ADDON_NAME}] MB Fallback Best-Recording für Album-Auswahl: "
+            f"{len(best_releases)} Releases, FirstRelease='{best_first_release or '-'}'",
             xbmc.LOGDEBUG
         )
-        mb_album, mb_album_date = _musicbrainz_extract_album(all_releases, best_first_release)
+        mb_album, mb_album_date = _musicbrainz_extract_album(best_releases, best_first_release)
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
             f"Score={best_score}, Artist='{best_artist}', Title='{best_title}', Album='{mb_album}', AlbumDate='{mb_album_date}', MBID='{best_mbid}', FirstRelease='{best_first_release}', "
