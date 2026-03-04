@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:wiki.musicbrainz.org)",
       "WebFetch(domain:musicbrainz.org)",
-      "WebFetch(domain:kodi.wiki)"
+      "WebFetch(domain:kodi.wiki)",
+      "Bash(bash .git/hooks/post-commit)"
     ]
   }
 }
