@@ -1,4 +1,10 @@
-﻿v1.0.2 (2026-03-04)
+﻿v1.0.3 (2026-03-04)
+- Album-Ermittlung präzisiert: Album wird nur noch aus Releases des tatsächlich gewählten Best-Recordings bestimmt (kein Mischen über alle Recordings).
+- FirstRelease-Ermittlung präzisiert: FirstRelease wird vom Best-Recording übernommen, nicht mehr als globales Minimum über alle Treffer.
+- Album-Filter verschärft: Nur echte Album-Releases ohne Compilation werden akzeptiert; wenn kein passendes Album gefunden wird, bleibt RadioMonitor.Album leer.
+- Tie-Breaker für gleiches Jahr ergänzt: Bei mehreren passenden Album-Releases werden Sonder-/Store-/Deluxe-Editionen gegenüber dem Basisalbum nachrangig behandelt.
+
+v1.0.2 (2026-03-04)
 - Neue Properties RadioMonitor.BandFormed und RadioMonitor.BandMembers: Gründungsjahr und aktuelle Mitglieder einer Band, abgerufen via MusicBrainz Artist-Endpoint (inc=artist-rels). Nur für Künstler vom Typ "Group" – Solo-Künstler liefern leere Properties. In-Memory-Cache verhindert wiederholte API-Aufrufe für denselben Künstler innerhalb einer Session.
 - Album-Auswahl auf Anker-Logik umgestellt: Statt des ältesten Releases wird nun das Album gewählt, dessen Erscheinungsjahr dem first_release_date des Songs am nächsten liegt. 5-stufige Qualitätspyramide (Album → Album+Compilation → unknown-type → unknown+Compilation → VA-Fallback).
 - MusicBrainz Query-Limit von 100 auf 10 reduziert (schnellere Antwortzeiten, für Webradio-Content ausreichend).
