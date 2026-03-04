@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:wiki.musicbrainz.org)",
+      "WebFetch(domain:musicbrainz.org)"
+    ]
+  }
+}
