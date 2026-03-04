@@ -1548,8 +1548,11 @@ class RadioMonitor(xbmc.Monitor):
                             logo = WINDOW.getProperty('RadioMonitor.Logo')
                             self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
                         else:
-                            WINDOW.clearProperty('RadioMonitor.Artist')
-                            WINDOW.clearProperty('RadioMonitor.MBID')
+                            # Artist und MBID bewusst NICHT löschen —
+                            # alten Wert behalten bis neuer gesichert ist.
+                            # ArtistSlideshow zeigt weiter den letzten bekannten Künstler
+                            # statt auf rohes ICY-Metadaten-Fallback zurückzufallen.
+                            # Gelöscht wird nur beim echten Stream-Stop (clear_properties).
                             WINDOW.clearProperty('RadioMonitor.Album')
                             WINDOW.clearProperty('RadioMonitor.AlbumDate')
                             WINDOW.clearProperty('RadioMonitor.FirstRelease')
