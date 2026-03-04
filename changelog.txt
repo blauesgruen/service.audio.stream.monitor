@@ -1,4 +1,12 @@
-﻿v1.0.1 (2026-03-03)
+﻿v1.0.2 (2026-03-04)
+- Neue Properties RadioMonitor.BandFormed und RadioMonitor.BandMembers: Gründungsjahr und aktuelle Mitglieder einer Band, abgerufen via MusicBrainz Artist-Endpoint (inc=artist-rels). Nur für Künstler vom Typ "Group" – Solo-Künstler liefern leere Properties. In-Memory-Cache verhindert wiederholte API-Aufrufe für denselben Künstler innerhalb einer Session.
+- Album-Auswahl auf Anker-Logik umgestellt: Statt des ältesten Releases wird nun das Album gewählt, dessen Erscheinungsjahr dem first_release_date des Songs am nächsten liegt. 5-stufige Qualitätspyramide (Album → Album+Compilation → unknown-type → unknown+Compilation → VA-Fallback).
+- MusicBrainz Query-Limit von 100 auf 10 reduziert (schnellere Antwortzeiten, für Webradio-Content ausreichend).
+- RadioMonitor.AlbumDate wird jetzt auch in _clear_properties() geleert (war bisher vergessen).
+- player.clearProperty()-Aufrufe für MusicPlayer-Properties entfernt (nicht zuverlässig von Kodi unterstützt).
+- Fehler-Logging verbessert: stille except-pass-Blöcke durch aussagekräftige xbmc.log-Einträge ersetzt.
+
+v1.0.1 (2026-03-03)
 - Album-Filter: Karaoke-Releases werden nun ausgeschlossen – sowohl per MusicBrainz secondary-type als auch per Titel-Heuristik ("karaoke" im Titel). Damit wird z.B. "Wellerman (Sea Shanty / Karaoke Version)" zugunsten des Original-Releases übersprungen.
 
 v1.0.0
