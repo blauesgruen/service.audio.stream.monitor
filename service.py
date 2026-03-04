@@ -6,6 +6,7 @@ import re
 import time
 import threading
 import json
+import random
 from difflib import SequenceMatcher
 
 ADDON = xbmcaddon.Addon()
@@ -26,6 +27,14 @@ MUSICBRAINZ_HEADERS = {
 }
 DEFAULT_HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
+
+# MusicBrainz HTTP-Session: TCP keep-alive, Verbindungswiederverwendung
+_mb_session = requests.Session()
+_mb_session.headers.update(MUSICBRAINZ_HEADERS)
+
+# Song-Kontext-Cache: (title_lower, artist_lower) → (result_tuple, timestamp)
+_mb_song_cache: dict = {}
+MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 
 def _musicbrainz_escape(s):
     """
@@ -181,7 +190,8 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
             edition_tokens = [
                 "deluxe", "exclusive", "special edition", "edition", "bonus",
                 "expanded", "remaster", "remastered", "anniversary", "reissue",
-                "walmart", "target", "japan", "tour", "collector", "collectors"
+                "walmart", "target", "japan", "tour", "collector", "collectors",
+                "hits", "best of", "greatest", "formel"
             ]
             penalty = sum(1 for token in edition_tokens if token in title)
             # Kürzere, weniger "dekorierte" Titel als Tie-Breaker bevorzugen.
@@ -214,9 +224,8 @@ def _musicbrainz_extract_album(releases_or_rec, first_release_date=""):
             bucket = [r for r in same_or_later if int(release_year(r)) == first_year]
             return pick_from_year_bucket(bucket)
 
-        oldest_year = min(int(release_year(r)) for r in dated)
-        bucket = [r for r in dated if int(release_year(r)) == oldest_year]
-        return pick_from_year_bucket(bucket)
+        # Kein Album ab anchor_year – besser leer als falsch datiertes Album
+        return None
 
     # --- Erste Stufe die ein Ergebnis liefert gewinnt ---
     for pool_label, pool in quality_pools:
@@ -316,6 +325,172 @@ def _musicbrainz_artist_variants(artist_part):
 
     return variants
 
+def _mb_year(value):
+    """Gibt das 4-stellige Jahr aus einem MB-Datum zurueck oder ''."""
+    year = (value or "")[:4]
+    return year if year.isdigit() else ""
+
+def _mb_get(url, params=None, timeout=5):
+    """MB-GET mit 3 Versuchen, Exponential-Backoff und Jitter.
+    Nutzt _mb_session (persistente TCP-Verbindung).
+    Wirft bei dauerhaftem Fehler die letzte Exception.
+    """
+    last_exc = Exception("MB-GET: kein Versuch")
+    for attempt in range(3):
+        try:
+            r = _mb_session.get(url, params=params, timeout=timeout)
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            last_exc = e
+            if attempt < 2:
+                wait = 2 ** attempt + random.uniform(0, 1)
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB-GET Retry {attempt+1}/3 in {wait:.1f}s: {e}",
+                    xbmc.LOGWARNING
+                )
+                time.sleep(wait)
+    raise last_exc
+
+def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_first_release, fallback_releases):
+    """
+    Ermittelt song-weites FirstRelease und Album ueber Work-Recordings.
+
+    Hintergrund:
+      recording.first-release-date gilt nur fuer ein konkretes Recording.
+      Fuer das tatsaechliche Song-FirstRelease werden daher alle Recordings
+      derselben Work betrachtet.
+
+    Rueckgabe: (first_release_year, album_title, album_year)
+    """
+    fallback_year = _mb_year(fallback_first_release)
+    fallback_album, fallback_album_date = _musicbrainz_extract_album(fallback_releases, fallback_year)
+
+    if not recording_mbid:
+        return fallback_year, fallback_album, fallback_album_date
+
+    try:
+        # 1) Work-IDs des gewaehlten Recordings laden
+        rec_lookup = _mb_get(
+            f"{MUSICBRAINZ_API_URL}{recording_mbid}",
+            params={"fmt": "json", "inc": "work-rels"},
+        ).json()
+        work_ids = []
+        for rel in rec_lookup.get("relations", []):
+            if not isinstance(rel, dict):
+                continue
+            work = rel.get("work", {})
+            work_id = work.get("id") if isinstance(work, dict) else ""
+            if work_id and work_id not in work_ids:
+                work_ids.append(work_id)
+
+        if not work_ids:
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Work-Kontext: keine Work-ID fuer Recording {recording_mbid}",
+                xbmc.LOGDEBUG
+            )
+            return fallback_year, fallback_album, fallback_album_date
+
+        # 2) Alle Work-Recordings holen (Browse + Paging).
+        # Hinweis: Beim Browse sind releases/release-groups im `inc` nicht erlaubt.
+        recording_by_id = {}
+        for work_id in work_ids:
+            offset = 0
+            page_size = 100
+            max_pages = 3  # 300 Recordings reichen fuer Song-Kontext
+            for _ in range(max_pages):
+                response = _mb_get(
+                    MUSICBRAINZ_API_URL,
+                    params={
+                        "work": work_id,
+                        "fmt": "json",
+                        "limit": page_size,
+                        "offset": offset,
+                        "inc": "artist-credits",
+                    },
+                )
+                data = response.json()
+                recordings = data.get("recordings", [])
+                if not recordings:
+                    break
+                for rec in recordings:
+                    rec_id = rec.get("id", "")
+                    if rec_id and rec_id not in recording_by_id:
+                        recording_by_id[rec_id] = rec
+                if len(recordings) < page_size:
+                    break
+                offset += page_size
+                time.sleep(1)  # MB-Richtlinie: max ~1 req/s
+
+        all_recordings = list(recording_by_id.values())
+        if not all_recordings:
+            return fallback_year, fallback_album, fallback_album_date
+
+        # 3) Auf erwarteten Artist filtern (sonst Werk-Cover-Versionen)
+        artist_filtered = []
+        for rec in all_recordings:
+            rec_artist = _musicbrainz_extract_artist(rec)
+            if expected_artist and _mb_similarity(rec_artist, expected_artist) < 0.70:
+                continue
+            artist_filtered.append(rec)
+        if not artist_filtered:
+            artist_filtered = all_recordings
+
+        # 4) Echte Song-Erstveroeffentlichung ueber alle passenden Recordings
+        first_release_candidates = [
+            rec.get("first-release-date")
+            for rec in artist_filtered
+            if rec.get("first-release-date")
+        ]
+        song_first_release = min(first_release_candidates)[:4] if first_release_candidates else fallback_year
+
+        # 5) Detail-Lookups (2. Stufe): Releases fuer die fruehesten passenden
+        # Work-Recordings laden und daraus Album bestimmen.
+        def sort_key(rec):
+            year = _mb_year(rec.get("first-release-date"))
+            return (int(year) if year else 9999, rec.get("id", ""))
+
+        detail_candidates = sorted(artist_filtered, key=sort_key)
+        max_detail_lookups = 25
+        detail_candidates = detail_candidates[:max_detail_lookups]
+
+        # Fallback-Releases vorseeden: Das Recording aus dem initialen Query hat
+        # typischerweise viele Releases (inkl. erstem Album). Work-Context-Recordings
+        # sind oft Remixe/Promo-Versionen mit wenigen oder schlechter getaggten Releases.
+        # Durch das Vorseeden gewinnt immer das qualitativ beste Album aus dem Gesamtpool.
+        all_releases = list(fallback_releases or [])
+        album, album_date = _musicbrainz_extract_album(all_releases, song_first_release)
+        actual_lookups = 0
+        if not album:
+            for rec_stub in detail_candidates:
+                rec_id = rec_stub.get("id", "")
+                if not rec_id:
+                    continue
+                rec_detail = _mb_get(
+                    f"{MUSICBRAINZ_API_URL}{rec_id}",
+                    params={"fmt": "json", "inc": "releases+release-groups"},
+                ).json()
+                actual_lookups += 1
+                all_releases.extend(rec_detail.get("releases", []) or [])
+                album, album_date = _musicbrainz_extract_album(all_releases, song_first_release)
+                if album:
+                    break
+                time.sleep(1)  # MB-Richtlinie: max ~1 req/s
+
+        xbmc.log(
+            f"[{ADDON_NAME}] MB Work-Kontext: works={len(work_ids)}, "
+            f"recordings={len(all_recordings)}, artist_filtered={len(artist_filtered)}, "
+            f"detail_lookups={actual_lookups}/{len(detail_candidates)}, FirstRelease='{song_first_release or '-'}', "
+            f"Releases={len(all_releases)}, "
+            f"Album='{album or ''}'",
+            xbmc.LOGDEBUG
+        )
+        return song_first_release, album, album_date
+
+    except Exception as e:
+        xbmc.log(f"[{ADDON_NAME}] MB Work-Kontext Fehler: {e}", xbmc.LOGWARNING)
+        return fallback_year, fallback_album, fallback_album_date
+
 def _musicbrainz_query_recording(title_part, artist_part):
     """
     Führt eine MusicBrainz-Recording-Query mit expliziten Feldangaben durch.
@@ -328,9 +503,17 @@ def _musicbrainz_query_recording(title_part, artist_part):
     Rückgabe: (score, mb_artist, mb_title, mb_mbid, mb_album, mb_album_date)
     oder (0, '', '', '', '', '') bei Fehler/kein Treffer.
     """
+    cache_key = (title_part.lower().strip(), artist_part.lower().strip())
+    cached = _mb_song_cache.get(cache_key)
+    if cached and time.time() - cached[1] < MB_SONG_CACHE_TTL:
+        xbmc.log(
+            f"[{ADDON_NAME}] MB Song-Cache Treffer: '{title_part}' / '{artist_part}'",
+            xbmc.LOGDEBUG
+        )
+        return cached[0]
+
     safe_title = _musicbrainz_escape(title_part)
     artist_variants = _musicbrainz_artist_variants(artist_part)
-    retries = 2
     for variant_label, variant_artist in artist_variants:
         safe_artist = _musicbrainz_escape(variant_artist)
         # Token-Fallback: ohne Anführungszeichen → tokenbasierte Suche statt Phrase
@@ -341,7 +524,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
         params = {
             "query": query_str,
             "fmt":   "json",
-            "limit": 10,
+            "limit": 100,
             "inc":   "releases+release-groups",
         }
         xbmc.log(
@@ -349,97 +532,97 @@ def _musicbrainz_query_recording(title_part, artist_part):
             f"artistname='{variant_artist}' ({variant_label})",
             xbmc.LOGDEBUG
         )
-        for attempt in range(retries + 1):
-            try:
-                r = requests.get(MUSICBRAINZ_API_URL, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-                data = r.json()
-                recordings = data.get("recordings", [])
-                if not recordings:
-                    xbmc.log(
-                        f"[{ADDON_NAME}] MusicBrainz: kein Treffer für Variante '{variant_label}' "
-                        f"(recording:'{title_part}' artistname:'{variant_artist}')",
-                        xbmc.LOGDEBUG
-                    )
-                    break
-
+        try:
+            data = _mb_get(MUSICBRAINZ_API_URL, params=params).json()
+            recordings = data.get("recordings", [])
+            if not recordings:
                 xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz: Treffer mit Variante '{variant_label}' "
-                    f"(count={len(recordings)})",
+                    f"[{ADDON_NAME}] MusicBrainz: kein Treffer für Variante '{variant_label}' "
+                    f"(recording:'{title_part}' artistname:'{variant_artist}')",
                     xbmc.LOGDEBUG
                 )
+                continue
 
-                # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen.
-                # Tie-Breaker: früheres first-release-date bevorzugen.
-                best_combined = -1
-                best_score, best_artist, best_title, best_mbid = 0, '', '', ''
-                best_releases = []
-                best_first_release = ''
-                best_first_release_year = 9999
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz: Treffer mit Variante '{variant_label}' "
+                f"(count={len(recordings)})",
+                xbmc.LOGDEBUG
+            )
 
-                def frd_year(frd):
-                    year = (frd or "")[:4]
-                    return int(year) if year.isdigit() else 9999
+            # Besten Treffer anhand von Score × Artist-Ähnlichkeit wählen.
+            # Tie-Breaker: früheres first-release-date bevorzugen.
+            best_combined = -1
+            best_score, best_artist, best_title, best_mbid = 0, '', '', ''
+            best_recording_mbid = ''
+            best_releases = []
+            best_first_release = ''
+            best_first_release_year = 9999
 
-                for rec in recordings:
-                    score     = int(rec.get("score", 0))
-                    mb_title  = rec.get("title", "")
-                    mb_artist = _musicbrainz_extract_artist(rec)
-                    mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
-                    releases  = rec.get("releases", [])
-                    frd       = rec.get("first-release-date") or ""
-                    # Ähnlichkeit gegen den Original-Artistpart für stabile Entscheidung
-                    artist_sim = _mb_similarity(mb_artist, artist_part)
-                    combined   = score * artist_sim
-                    xbmc.log(
-                        f"[{ADDON_NAME}] MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
-                        f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
-                        xbmc.LOGDEBUG
-                    )
-                    candidate_year = frd_year(frd)
-                    is_better = (
-                        combined > best_combined
-                        or (
-                            combined == best_combined and (
-                                score > best_score
-                                or (score == best_score and candidate_year < best_first_release_year)
-                            )
+            def frd_year(frd):
+                year = (frd or "")[:4]
+                return int(year) if year.isdigit() else 9999
+
+            for rec in recordings:
+                score     = int(rec.get("score", 0))
+                mb_title  = rec.get("title", "")
+                mb_artist = _musicbrainz_extract_artist(rec)
+                mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
+                rec_mbid  = rec.get("id", "")
+                releases  = rec.get("releases", [])
+                frd       = rec.get("first-release-date") or ""
+                # Ähnlichkeit gegen den Original-Artistpart für stabile Entscheidung
+                artist_sim = _mb_similarity(mb_artist, artist_part)
+                combined   = score * artist_sim
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
+                    f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
+                    xbmc.LOGDEBUG
+                )
+                candidate_year = frd_year(frd)
+                is_better = (
+                    combined > best_combined
+                    or (
+                        combined == best_combined and (
+                            score > best_score
+                            or (score == best_score and candidate_year < best_first_release_year)
                         )
                     )
-                    if is_better:
-                        best_combined = combined
-                        best_score    = score
-                        best_artist   = mb_artist
-                        best_title    = mb_title
-                        best_mbid     = mb_mbid
-                        best_releases = releases
-                        best_first_release = frd[:4] if frd else ''
-                        best_first_release_year = candidate_year
-                xbmc.log(
-                    f"[{ADDON_NAME}] MB Best-Recording für Album-Auswahl: "
-                    f"{len(best_releases)} Releases, FirstRelease='{best_first_release or '-'}'",
-                    xbmc.LOGDEBUG
                 )
-                best_album, best_album_date = _musicbrainz_extract_album(best_releases, best_first_release)
+                if is_better:
+                    best_combined = combined
+                    best_score    = score
+                    best_artist   = mb_artist
+                    best_title    = mb_title
+                    best_mbid     = mb_mbid
+                    best_recording_mbid = rec_mbid
+                    best_releases = releases
+                    best_first_release = frd[:4] if frd else ''
+                    best_first_release_year = candidate_year
+            xbmc.log(
+                f"[{ADDON_NAME}] MB Best-Recording für Album-Auswahl: "
+                f"{len(best_releases)} Releases, FirstRelease='{best_first_release or '-'}'",
+                xbmc.LOGDEBUG
+            )
+            best_first_release, best_album, best_album_date = _musicbrainz_resolve_song_context(
+                best_recording_mbid, best_artist, best_first_release, best_releases
+            )
 
-                xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz Best-Match "
-                    f"(title='{title_part}', artist='{artist_part}', variante='{variant_label}'): "
-                    f"Score={best_score}, MB-Artist='{best_artist}', MB-Title='{best_title}', "
-                    f"MBID='{best_mbid}', Album='{best_album}', AlbumDate='{best_album_date}', FirstRelease='{best_first_release}', combined={best_combined:.1f}",
-                    xbmc.LOGDEBUG
-                )
-                return best_score, best_artist, best_title, best_mbid, best_album, best_album_date, best_first_release
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Best-Match "
+                f"(title='{title_part}', artist='{artist_part}', variante='{variant_label}'): "
+                f"Score={best_score}, MB-Artist='{best_artist}', MB-Title='{best_title}', "
+                f"MBID='{best_mbid}', Album='{best_album}', AlbumDate='{best_album_date}', FirstRelease='{best_first_release}', combined={best_combined:.1f}",
+                xbmc.LOGDEBUG
+            )
+            result = (best_score, best_artist, best_title, best_mbid, best_album, best_album_date, best_first_release)
+            _mb_song_cache[cache_key] = (result, time.time())
+            return result
 
-            except Exception as e:
-                xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz Fehler Variante '{variant_label}' "
-                    f"(Versuch {attempt+1}/{retries+1}): {e}",
-                    xbmc.LOGWARNING
-                )
-                if attempt < retries:
-                    time.sleep(2)
-                else:
-                    break
+        except Exception as e:
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicBrainz Fehler Variante '{variant_label}': {e}",
+                xbmc.LOGWARNING
+            )
     xbmc.log(
         f"[{ADDON_NAME}] MusicBrainz: keine Variante lieferte Treffer "
         f"fuer recording:'{title_part}' artist:'{artist_part}'",
@@ -512,12 +695,11 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
     params = {
         "query": f'recording:"{safe_title}"',
         "fmt":   "json",
-        "limit": 10,
+        "limit": 100,
         "inc":   "releases+release-groups",
     }
     try:
-        r = requests.get(MUSICBRAINZ_API_URL, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-        data = r.json()
+        data = _mb_get(MUSICBRAINZ_API_URL, params=params).json()
         recordings = data.get("recordings", [])
         if not recordings:
             xbmc.log(
@@ -530,6 +712,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
         best_combined = -1.0
         best_hint_sim = 0.0
         best_score, best_artist, best_title, best_mbid = 0, '', '', ''
+        best_recording_mbid = ''
         best_releases = []
         best_first_release = ''
         best_first_release_year = 9999
@@ -543,6 +726,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
             mb_title = rec.get("title", "")
             mb_artist = _musicbrainz_extract_artist(rec)
             mb_mbid   = _musicbrainz_extract_artist_mbid(rec)
+            rec_mbid  = rec.get("id", "")
             releases  = rec.get("releases", [])
             frd       = rec.get("first-release-date") or ""
             hint_sim = max([_mb_similarity(mb_artist, h) for h in hints], default=0.0)
@@ -574,6 +758,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
                 best_artist   = mb_artist
                 best_title    = mb_title
                 best_mbid     = mb_mbid
+                best_recording_mbid = rec_mbid
                 best_releases = releases
                 best_first_release = frd[:4] if frd else ''
                 best_first_release_year = candidate_year
@@ -582,7 +767,9 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
             f"{len(best_releases)} Releases, FirstRelease='{best_first_release or '-'}'",
             xbmc.LOGDEBUG
         )
-        mb_album, mb_album_date = _musicbrainz_extract_album(best_releases, best_first_release)
+        best_first_release, mb_album, mb_album_date = _musicbrainz_resolve_song_context(
+            best_recording_mbid, best_artist, best_first_release, best_releases
+        )
         xbmc.log(
             f"[{ADDON_NAME}] MB Fallback-Query Best-Match: "
             f"Score={best_score}, Artist='{best_artist}', Title='{best_title}', Album='{mb_album}', AlbumDate='{mb_album_date}', MBID='{best_mbid}', FirstRelease='{best_first_release}', "
@@ -632,8 +819,7 @@ def _musicbrainz_query_artist_info(mbid):
     params = {"inc": "artist-rels", "fmt": "json"}
 
     try:
-        response = requests.get(url, params=params, headers=MUSICBRAINZ_HEADERS, timeout=5)
-        data = response.json()
+        data = _mb_get(url, params=params).json()
 
         # Nur Bands (Groups) – Solo-Künstler haben kein Gründungsjahr/Mitglieder
         if data.get("type") != "Group":
