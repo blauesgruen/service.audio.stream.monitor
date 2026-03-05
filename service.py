@@ -37,6 +37,30 @@ _mb_session.headers.update(MUSICBRAINZ_HEADERS)
 _mb_song_cache: dict = {}
 MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 
+# Window-Property-Namen als Konstanten (verhindert Tippfehler, vereinfacht Umbenennung)
+class _P:
+    STATION    = _P.STATION
+    TITLE      = _P.TITLE
+    ARTIST     = _P.ARTIST
+    ALBUM      = _P.ALBUM
+    ALBUM_DATE = _P.ALBUM_DATE
+    GENRE      = _P.GENRE
+    MBID       = _P.MBID
+    FIRST_REL  = _P.FIRST_REL
+    STREAM_TTL = _P.STREAM_TTL
+    PLAYING    = _P.PLAYING
+    LOGO       = _P.LOGO
+    BAND_FORM  = _P.BAND_FORM
+    BAND_MEM   = _P.BAND_MEM
+
+# Regex für numerische IDs (z.B. "123 - 456") – an mehreren Stellen verwendet
+_NUMERIC_ID_RE = re.compile(r'^\d+\s*-\s*\d+$')
+
+def _frd_year(frd):
+    """Extrahiert eine Jahreszahl aus einem FirstReleaseDate-String. 9999 wenn unbekannt."""
+    year = (frd or "")[:4]
+    return int(year) if year.isdigit() else 9999
+
 def _musicbrainz_escape(s):
     """
     Für MusicBrainz-Query in Anführungszeichen: nur Backslash und Anführungszeichen escapen.
@@ -559,10 +583,6 @@ def _musicbrainz_query_recording(title_part, artist_part):
             best_first_release = ''
             best_first_release_year = 9999
 
-            def frd_year(frd):
-                year = (frd or "")[:4]
-                return int(year) if year.isdigit() else 9999
-
             for rec in recordings:
                 score     = int(rec.get("score", 0))
                 mb_title  = rec.get("title", "")
@@ -579,7 +599,7 @@ def _musicbrainz_query_recording(title_part, artist_part):
                     f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}",
                     xbmc.LOGDEBUG
                 )
-                candidate_year = frd_year(frd)
+                candidate_year = _frd_year(frd)
                 is_better = (
                     combined > best_combined
                     or (
@@ -646,7 +666,7 @@ def _parse_radiode_api_title(full_title, station_name=None):
         artist = ''
     if title in invalid or (station_name and title == station_name):
         title = ''
-    if title and re.match(r'^\d+\s*-\s*\d+$', title):
+    if title and _NUMERIC_ID_RE.match(title):
         return None, None
     return artist or None, title or None
 
@@ -718,10 +738,6 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
         best_first_release = ''
         best_first_release_year = 9999
 
-        def frd_year(frd):
-            year = (frd or "")[:4]
-            return int(year) if year.isdigit() else 9999
-
         for rec in recordings:
             score = int(rec.get("score", 0))
             mb_title = rec.get("title", "")
@@ -737,7 +753,7 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
                 f"Score={score}, hint_sim={hint_sim:.2f}, combined={combined:.1f}",
                 xbmc.LOGDEBUG
             )
-            candidate_year = frd_year(frd)
+            candidate_year = _frd_year(frd)
             is_better = (
                 combined > best_combined
                 or (
@@ -1151,19 +1167,19 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty('RadioDE.StationName')
         
         # Window-Properties (für Fallback)
-        WINDOW.clearProperty('RadioMonitor.Station')
-        WINDOW.clearProperty('RadioMonitor.Title')
-        WINDOW.clearProperty('RadioMonitor.Artist')
-        WINDOW.clearProperty('RadioMonitor.Album')
-        WINDOW.clearProperty('RadioMonitor.AlbumDate')
-        WINDOW.clearProperty('RadioMonitor.Genre')
-        WINDOW.clearProperty('RadioMonitor.MBID')
-        WINDOW.clearProperty('RadioMonitor.FirstRelease')
-        WINDOW.clearProperty('RadioMonitor.StreamTitle')
-        WINDOW.clearProperty('RadioMonitor.Playing')
-        WINDOW.clearProperty('RadioMonitor.Logo')
-        WINDOW.clearProperty('RadioMonitor.BandFormed')
-        WINDOW.clearProperty('RadioMonitor.BandMembers')
+        WINDOW.clearProperty(_P.STATION)
+        WINDOW.clearProperty(_P.TITLE)
+        WINDOW.clearProperty(_P.ARTIST)
+        WINDOW.clearProperty(_P.ALBUM)
+        WINDOW.clearProperty(_P.ALBUM_DATE)
+        WINDOW.clearProperty(_P.GENRE)
+        WINDOW.clearProperty(_P.MBID)
+        WINDOW.clearProperty(_P.FIRST_REL)
+        WINDOW.clearProperty(_P.STREAM_TTL)
+        WINDOW.clearProperty(_P.PLAYING)
+        WINDOW.clearProperty(_P.LOGO)
+        WINDOW.clearProperty(_P.BAND_FORM)
+        WINDOW.clearProperty(_P.BAND_MEM)
         
         xbmc.log(f"[{ADDON_NAME}] Properties gelöscht", xbmc.LOGDEBUG)
         
@@ -1182,10 +1198,10 @@ class RadioMonitor(xbmc.Monitor):
     def set_logo_safe(self):
         """Setzt Logo-Property nur wenn echtes Logo vorhanden, sonst Kodi-Fallback"""
         if self.station_logo and self.is_real_logo(self.station_logo):
-            self.set_property_safe('RadioMonitor.Logo', self.station_logo)
+            self.set_property_safe(_P.LOGO, self.station_logo)
         else:
             # Kein echtes Logo → Property leer lassen (Kodi nutzt automatisch Fallback)
-            WINDOW.clearProperty('RadioMonitor.Logo')
+            WINDOW.clearProperty(_P.LOGO)
     
     def update_player_metadata(self, artist, title, album_or_station, logo=None, mbid=None):
         """Versucht die Kodi Player Metadaten zu aktualisieren (für Standard InfoLabels)"""
@@ -1261,7 +1277,7 @@ class RadioMonitor(xbmc.Monitor):
                     station_name = station_name.replace('Brf ', 'Berliner Rundfunk ')
                     station_name = station_name.replace('100prozent', '100%')
 
-                    self.set_property_safe('RadioMonitor.Station', station_name)
+                    self.set_property_safe(_P.STATION, station_name)
                     xbmc.log(f"[{ADDON_NAME}] Station aus URL erkannt: {station_name}", xbmc.LOGDEBUG)
 
                     self.use_api_fallback = True
@@ -1292,7 +1308,7 @@ class RadioMonitor(xbmc.Monitor):
                 invalid_values = INVALID_METADATA_VALUES + ['', station_name]
                 if title and title not in invalid_values:
                     # Filter Zahlen-IDs
-                    if re.match(r'^\d+\s*-\s*\d+$', title):
+                    if _NUMERIC_ID_RE.match(title):
                         xbmc.log(f"[{ADDON_NAME}] Player InfoTag enthält Zahlen-ID, ignoriere: {title}", xbmc.LOGDEBUG)
                         return None, None
                     
@@ -1361,7 +1377,7 @@ class RadioMonitor(xbmc.Monitor):
                             if isinstance(det_data, list) and len(det_data) > 0:
                                 proper_name = det_data[0].get('name', '')
                                 if proper_name:
-                                    self.set_property_safe('RadioMonitor.Station', proper_name)
+                                    self.set_property_safe(_P.STATION, proper_name)
                                     xbmc.log(f"[{ADDON_NAME}] Station-Name aus Details-API: '{proper_name}'", xbmc.LOGINFO)
                                 else:
                                     xbmc.log(f"[{ADDON_NAME}] Details-API: kein 'name'-Feld, Keys: {list(det_data[0].keys())[:10]}", xbmc.LOGDEBUG)
@@ -1460,7 +1476,7 @@ class RadioMonitor(xbmc.Monitor):
                     # Speichere Logo für spätere Verwendung
                     if station_logo:
                         self.station_logo = station_logo
-                        self.set_property_safe('RadioMonitor.Logo', station_logo)
+                        self.set_property_safe(_P.LOGO, station_logo)
                         xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
                     
                     xbmc.log(f"[{ADDON_NAME}] Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
@@ -1519,7 +1535,7 @@ class RadioMonitor(xbmc.Monitor):
         
         last_title = ""
         poll_interval = 10  # Sekunden zwischen API-Abfragen
-        station_name = WINDOW.getProperty('RadioMonitor.Station')
+        station_name = WINDOW.getProperty(_P.STATION)
         stream_url = self.current_url or ''
         
         try:
@@ -1531,7 +1547,7 @@ class RadioMonitor(xbmc.Monitor):
             ):
                 # station_name aktualisieren falls API in get_radiode_api_nowplaying
                 # den korrekten Namen nachträglich gesetzt hat (z.B. via Details-API)
-                fresh_station = WINDOW.getProperty('RadioMonitor.Station')
+                fresh_station = WINDOW.getProperty(_P.STATION)
                 if fresh_station:
                     station_name = fresh_station
 
@@ -1567,47 +1583,47 @@ class RadioMonitor(xbmc.Monitor):
                             # AS lauscht auf RadioMonitor.Artist als Trigger und liest
                             # danach sofort RadioMonitor.MBID – daher muss MBID bereits
                             # gesetzt sein wenn Artist den Trigger auslöst.
-                            self.set_property_safe('RadioMonitor.Title', title)
-                            self.set_property_safe('RadioMonitor.StreamTitle', f"{artist} - {title}")
+                            self.set_property_safe(_P.TITLE, title)
+                            self.set_property_safe(_P.STREAM_TTL, f"{artist} - {title}")
                             if album:
-                                self.set_property_safe('RadioMonitor.Album', album)
+                                self.set_property_safe(_P.ALBUM, album)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.Album')
+                                WINDOW.clearProperty(_P.ALBUM)
                             if album_date:
-                                self.set_property_safe('RadioMonitor.AlbumDate', album_date)
+                                self.set_property_safe(_P.ALBUM_DATE, album_date)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.AlbumDate')
+                                WINDOW.clearProperty(_P.ALBUM_DATE)
                             if mbid:
-                                self.set_property_safe('RadioMonitor.MBID', mbid)
+                                self.set_property_safe(_P.MBID, mbid)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.MBID')
+                                WINDOW.clearProperty(_P.MBID)
                             if first_release:
-                                self.set_property_safe('RadioMonitor.FirstRelease', first_release)
+                                self.set_property_safe(_P.FIRST_REL, first_release)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                                WINDOW.clearProperty(_P.FIRST_REL)
                             # Artist-Trigger zuerst setzen, dann Artist-Info nachziehen.
                             # MBID ist nur gesetzt wenn MB den Artist sicher bestimmt hat.
-                            self.set_property_safe('RadioMonitor.Artist', artist)
+                            self.set_property_safe(_P.ARTIST, artist)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
                             if mbid and artist:
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
                                 band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                                 if band_formed:
-                                    self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                                    self.set_property_safe(_P.BAND_FORM, band_formed)
                                 else:
-                                    WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                    WINDOW.clearProperty(_P.BAND_FORM)
                                 if band_members:
-                                    self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                                    self.set_property_safe(_P.BAND_MEM, band_members)
                                 else:
-                                    WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                    WINDOW.clearProperty(_P.BAND_MEM)
                                 if mb_genre:
-                                    self.set_property_safe('RadioMonitor.Genre', mb_genre)
+                                    self.set_property_safe(_P.GENRE, mb_genre)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.BandFormed')
-                                WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                WINDOW.clearProperty(_P.BAND_FORM)
+                                WINDOW.clearProperty(_P.BAND_MEM)
 
                             # Aktualisiere Kodi Player Metadaten
-                            logo = WINDOW.getProperty('RadioMonitor.Logo')
+                            logo = WINDOW.getProperty(_P.LOGO)
                             self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
                         else:
                             # Artist und MBID bewusst NICHT löschen —
@@ -1615,17 +1631,17 @@ class RadioMonitor(xbmc.Monitor):
                             # ArtistSlideshow zeigt weiter den letzten bekannten Künstler
                             # statt auf rohes ICY-Metadaten-Fallback zurückzufallen.
                             # Gelöscht wird nur beim echten Stream-Stop (clear_properties).
-                            WINDOW.clearProperty('RadioMonitor.Album')
-                            WINDOW.clearProperty('RadioMonitor.AlbumDate')
-                            WINDOW.clearProperty('RadioMonitor.FirstRelease')
-                            WINDOW.clearProperty('RadioMonitor.BandFormed')
-                            WINDOW.clearProperty('RadioMonitor.BandMembers')
-                            self.set_property_safe('RadioMonitor.Title', title)
-                            self.set_property_safe('RadioMonitor.StreamTitle', title)
+                            WINDOW.clearProperty(_P.ALBUM)
+                            WINDOW.clearProperty(_P.ALBUM_DATE)
+                            WINDOW.clearProperty(_P.FIRST_REL)
+                            WINDOW.clearProperty(_P.BAND_FORM)
+                            WINDOW.clearProperty(_P.BAND_MEM)
+                            self.set_property_safe(_P.TITLE, title)
+                            self.set_property_safe(_P.STREAM_TTL, title)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {title}", xbmc.LOGINFO)
                             
                             # Aktualisiere Kodi Player Metadaten
-                            logo = WINDOW.getProperty('RadioMonitor.Logo')
+                            logo = WINDOW.getProperty(_P.LOGO)
                             self.update_player_metadata(None, title, station_name, logo if logo else None, None)
                 
                 # Warte vor nächster Abfrage
@@ -1667,7 +1683,7 @@ class RadioMonitor(xbmc.Monitor):
                 # MusicPlayer-Metadaten lesen
                 try:
                     if not self.player.isPlayingAudio():
-                        WINDOW.clearProperty('RadioMonitor.Playing')
+                        WINDOW.clearProperty(_P.PLAYING)
                         xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: kein Audio - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
                         return
                     info_tag = self.player.getMusicInfoTag()
@@ -1675,13 +1691,13 @@ class RadioMonitor(xbmc.Monitor):
                     mp_title = (info_tag.getTitle() or '').strip()
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: Fehler beim Lesen der Metadaten: {e}", xbmc.LOGDEBUG)
-                    WINDOW.clearProperty('RadioMonitor.Playing')
+                    WINDOW.clearProperty(_P.PLAYING)
                     return
 
                 # Erster Durchlauf und beide leer → deaktivieren
                 if not last_artist and not last_title and not mp_artist and not mp_title:
                     xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: Artist und Title leer - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
-                    WINDOW.clearProperty('RadioMonitor.Playing')
+                    WINDOW.clearProperty(_P.PLAYING)
                     return
 
                 # Titelwechsel (oder erster Durchlauf mit Inhalt)?
@@ -1706,31 +1722,31 @@ class RadioMonitor(xbmc.Monitor):
 
                     # Properties setzen – MBID vor Artist (AS-Trigger)
                     if title:
-                        self.set_property_safe('RadioMonitor.Title', title)
+                        self.set_property_safe(_P.TITLE, title)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.Title')
+                        WINDOW.clearProperty(_P.TITLE)
                     if mb_album:
-                        self.set_property_safe('RadioMonitor.Album', mb_album)
+                        self.set_property_safe(_P.ALBUM, mb_album)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.Album')
+                        WINDOW.clearProperty(_P.ALBUM)
                     if mb_album_date:
-                        self.set_property_safe('RadioMonitor.AlbumDate', mb_album_date)
+                        self.set_property_safe(_P.ALBUM_DATE, mb_album_date)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.AlbumDate')
+                        WINDOW.clearProperty(_P.ALBUM_DATE)
                     if mbid:
-                        self.set_property_safe('RadioMonitor.MBID', mbid)
+                        self.set_property_safe(_P.MBID, mbid)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.MBID')
+                        WINDOW.clearProperty(_P.MBID)
                     if mb_first_release:
-                        self.set_property_safe('RadioMonitor.FirstRelease', mb_first_release)
+                        self.set_property_safe(_P.FIRST_REL, mb_first_release)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                        WINDOW.clearProperty(_P.FIRST_REL)
                     if artist:
-                        self.set_property_safe('RadioMonitor.Artist', artist)
+                        self.set_property_safe(_P.ARTIST, artist)
                         xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback gesetzt: Artist='{artist}', Title='{title}', MBID='{mbid}'", xbmc.LOGINFO)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.Artist')
-                        WINDOW.clearProperty('RadioMonitor.Playing')
+                        WINDOW.clearProperty(_P.ARTIST)
+                        WINDOW.clearProperty(_P.PLAYING)
                         xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: kein Artist ermittelbar - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
                         return
 
@@ -1747,18 +1763,18 @@ class RadioMonitor(xbmc.Monitor):
                         time.sleep(1)
                         band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                         if band_formed:
-                            self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                            self.set_property_safe(_P.BAND_FORM, band_formed)
                         else:
-                            WINDOW.clearProperty('RadioMonitor.BandFormed')
+                            WINDOW.clearProperty(_P.BAND_FORM)
                         if band_members:
-                            self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                            self.set_property_safe(_P.BAND_MEM, band_members)
                         else:
-                            WINDOW.clearProperty('RadioMonitor.BandMembers')
+                            WINDOW.clearProperty(_P.BAND_MEM)
                         if mb_genre:
-                            self.set_property_safe('RadioMonitor.Genre', mb_genre)
+                            self.set_property_safe(_P.GENRE, mb_genre)
                     else:
-                        WINDOW.clearProperty('RadioMonitor.BandFormed')
-                        WINDOW.clearProperty('RadioMonitor.BandMembers')
+                        WINDOW.clearProperty(_P.BAND_FORM)
+                        WINDOW.clearProperty(_P.BAND_MEM)
 
                 # Warte vor nächster Abfrage (in 0.5s-Schritten für schnelles Beenden)
                 for _ in range(poll_interval * 2):
@@ -1793,14 +1809,14 @@ class RadioMonitor(xbmc.Monitor):
             # Station ausschließlich aus ICY-Header icy-name
             station_name = icy_name
             if station_name:
-                self.set_property_safe('RadioMonitor.Station', station_name)
+                self.set_property_safe(_P.STATION, station_name)
                 xbmc.log(f"[{ADDON_NAME}] Station (ICY): {station_name}", xbmc.LOGDEBUG)
             else:
-                WINDOW.clearProperty('RadioMonitor.Station')
+                WINDOW.clearProperty(_P.STATION)
                 xbmc.log(f"[{ADDON_NAME}] Kein icy-name - Station geleert", xbmc.LOGDEBUG)
             
             if icy_genre:
-                self.set_property_safe('RadioMonitor.Genre', icy_genre)
+                self.set_property_safe(_P.GENRE, icy_genre)
                 xbmc.log(f"[{ADDON_NAME}] Genre: {icy_genre}", xbmc.LOGDEBUG)
             
             # Metaint - Position der Metadaten im Stream
@@ -1848,7 +1864,7 @@ class RadioMonitor(xbmc.Monitor):
         invalid = INVALID_METADATA_VALUES + ["", station_name]
 
         # --- StreamTitle Grundvalidierung ---
-        if not stream_title or stream_title in INVALID_METADATA_VALUES or re.match(r'^\d+\s*-\s*\d+$', stream_title):
+        if not stream_title or stream_title in INVALID_METADATA_VALUES or _NUMERIC_ID_RE.match(stream_title):
             xbmc.log(f"[{ADDON_NAME}] StreamTitle leer/ungueltig: '{stream_title}'", xbmc.LOGDEBUG)
             # Kein ICY-Titel → nur API als letzte Chance (beide Felder müssen gefüllt sein)
             if station_name and stream_url:
@@ -2022,7 +2038,7 @@ class RadioMonitor(xbmc.Monitor):
             return
             
         metaint = stream_info['metaint']
-        response = stream_info['response']
+        response = stream_info.get('response')
         last_title = ""
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
@@ -2076,56 +2092,56 @@ class RadioMonitor(xbmc.Monitor):
                             if artist is None and title is None:
                                 xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten fuer '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
                                 # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
-                                WINDOW.clearProperty('RadioMonitor.Artist')
-                                WINDOW.clearProperty('RadioMonitor.Title')
-                                WINDOW.clearProperty('RadioMonitor.Album')
-                                WINDOW.clearProperty('RadioMonitor.AlbumDate')
-                                WINDOW.clearProperty('RadioMonitor.MBID')
-                                WINDOW.clearProperty('RadioMonitor.FirstRelease')
-                                WINDOW.clearProperty('RadioMonitor.BandFormed')
-                                WINDOW.clearProperty('RadioMonitor.BandMembers')
-                                WINDOW.clearProperty('RadioMonitor.Genre')
-                                WINDOW.clearProperty('RadioMonitor.StreamTitle')
+                                WINDOW.clearProperty(_P.ARTIST)
+                                WINDOW.clearProperty(_P.TITLE)
+                                WINDOW.clearProperty(_P.ALBUM)
+                                WINDOW.clearProperty(_P.ALBUM_DATE)
+                                WINDOW.clearProperty(_P.MBID)
+                                WINDOW.clearProperty(_P.FIRST_REL)
+                                WINDOW.clearProperty(_P.BAND_FORM)
+                                WINDOW.clearProperty(_P.BAND_MEM)
+                                WINDOW.clearProperty(_P.GENRE)
+                                WINDOW.clearProperty(_P.STREAM_TTL)
                                 continue
                             
                             if stream_title not in INVALID_METADATA_VALUES:
-                                self.set_property_safe('RadioMonitor.StreamTitle', stream_title)
+                                self.set_property_safe(_P.STREAM_TTL, stream_title)
                             
                             # Reihenfolge: Title und MBID vor Artist setzen.
                             # AS lauscht auf RadioMonitor.Artist als Trigger und liest
                             # danach sofort RadioMonitor.MBID – daher muss MBID bereits
                             # gesetzt sein wenn Artist den Trigger auslöst.
                             if title:
-                                self.set_property_safe('RadioMonitor.Title', title)
+                                self.set_property_safe(_P.TITLE, title)
                                 xbmc.log(f"[{ADDON_NAME}] Title: {title}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.Title')
+                                WINDOW.clearProperty(_P.TITLE)
                                 title = ''
                             if album:
-                                self.set_property_safe('RadioMonitor.Album', album)
+                                self.set_property_safe(_P.ALBUM, album)
                                 xbmc.log(f"[{ADDON_NAME}] Album: {album}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.Album')
+                                WINDOW.clearProperty(_P.ALBUM)
                             if album_date:
-                                self.set_property_safe('RadioMonitor.AlbumDate', album_date)
+                                self.set_property_safe(_P.ALBUM_DATE, album_date)
                                 xbmc.log(f"[{ADDON_NAME}] AlbumDate: {album_date}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.AlbumDate')
+                                WINDOW.clearProperty(_P.ALBUM_DATE)
                             if mbid:
-                                self.set_property_safe('RadioMonitor.MBID', mbid)
+                                self.set_property_safe(_P.MBID, mbid)
                                 xbmc.log(f"[{ADDON_NAME}] MBID: {mbid}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.MBID')
+                                WINDOW.clearProperty(_P.MBID)
                             if first_release:
-                                self.set_property_safe('RadioMonitor.FirstRelease', first_release)
+                                self.set_property_safe(_P.FIRST_REL, first_release)
                                 xbmc.log(f"[{ADDON_NAME}] FirstRelease: {first_release}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                                WINDOW.clearProperty(_P.FIRST_REL)
                             if artist:
-                                self.set_property_safe('RadioMonitor.Artist', artist)
+                                self.set_property_safe(_P.ARTIST, artist)
                                 xbmc.log(f"[{ADDON_NAME}] Artist: {artist}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.Artist')
+                                WINDOW.clearProperty(_P.ARTIST)
                                 artist = ''
 
                             # Logo sofort nach Artist setzen – vor dem optionalen Artist-Info-Call,
@@ -2141,40 +2157,40 @@ class RadioMonitor(xbmc.Monitor):
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
                                 band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                                 if band_formed:
-                                    self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                                    self.set_property_safe(_P.BAND_FORM, band_formed)
                                     xbmc.log(f"[{ADDON_NAME}] BandFormed: {band_formed}", xbmc.LOGDEBUG)
                                 else:
-                                    WINDOW.clearProperty('RadioMonitor.BandFormed')
+                                    WINDOW.clearProperty(_P.BAND_FORM)
                                 if band_members:
-                                    self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                                    self.set_property_safe(_P.BAND_MEM, band_members)
                                     xbmc.log(f"[{ADDON_NAME}] BandMembers: {band_members}", xbmc.LOGDEBUG)
                                 else:
-                                    WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                    WINDOW.clearProperty(_P.BAND_MEM)
                                 if mb_genre:
-                                    self.set_property_safe('RadioMonitor.Genre', mb_genre)
+                                    self.set_property_safe(_P.GENRE, mb_genre)
                                     xbmc.log(f"[{ADDON_NAME}] Genre (MB): {mb_genre}", xbmc.LOGDEBUG)
                             else:
-                                WINDOW.clearProperty('RadioMonitor.BandFormed')
-                                WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                WINDOW.clearProperty(_P.BAND_FORM)
+                                WINDOW.clearProperty(_P.BAND_MEM)
                             
                             # DEBUG: Zeige alle gesetzten Properties
                             xbmc.log(f"[{ADDON_NAME}] === PROPERTIES GESETZT ===", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty('RadioMonitor.Playing')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Album = {WINDOW.getProperty('RadioMonitor.Album')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.AlbumDate = {WINDOW.getProperty('RadioMonitor.AlbumDate')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.MBID = {WINDOW.getProperty('RadioMonitor.MBID')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.FirstRelease = {WINDOW.getProperty('RadioMonitor.FirstRelease')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandFormed = {WINDOW.getProperty('RadioMonitor.BandFormed')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandMembers = {WINDOW.getProperty('RadioMonitor.BandMembers')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty('RadioMonitor.StreamTitle')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGDEBUG)
-                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = {WINDOW.getProperty(_P.PLAYING)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty(_P.STATION)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty(_P.ARTIST)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty(_P.TITLE)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Album = {WINDOW.getProperty(_P.ALBUM)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.AlbumDate = {WINDOW.getProperty(_P.ALBUM_DATE)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.MBID = {WINDOW.getProperty(_P.MBID)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.FirstRelease = {WINDOW.getProperty(_P.FIRST_REL)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandFormed = {WINDOW.getProperty(_P.BAND_FORM)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.BandMembers = {WINDOW.getProperty(_P.BAND_MEM)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.StreamTitle = {WINDOW.getProperty(_P.STREAM_TTL)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty(_P.GENRE)}", xbmc.LOGDEBUG)
+                            xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty(_P.LOGO)}", xbmc.LOGDEBUG)
                             
                             # Aktualisiere Kodi Player Metadaten (für Standard InfoLabels)
-                            logo = WINDOW.getProperty('RadioMonitor.Logo')
+                            logo = WINDOW.getProperty(_P.LOGO)
                             self.update_player_metadata(artist if artist else None, 
                                                         title if title else None, 
                                                         album if album else station_name,
@@ -2227,7 +2243,8 @@ class RadioMonitor(xbmc.Monitor):
             xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata Worker: {str(e)}", xbmc.LOGERROR)
         finally:
             try:
-                response.close()
+                if response is not None:
+                    response.close()
             except Exception as e:
                 xbmc.log(f"[{ADDON_NAME}] Stream-Response konnte nicht geschlossen werden: {e}", xbmc.LOGDEBUG)
             xbmc.log(f"[{ADDON_NAME}] Metadata Worker beendet", xbmc.LOGDEBUG)
@@ -2281,9 +2298,9 @@ class RadioMonitor(xbmc.Monitor):
                         title = None
                         artist = None
                         album = None
-                        WINDOW.clearProperty('RadioMonitor.MBID')
-                        WINDOW.clearProperty('RadioMonitor.Album')
-                        WINDOW.clearProperty('RadioMonitor.Station')
+                        WINDOW.clearProperty(_P.MBID)
+                        WINDOW.clearProperty(_P.ALBUM)
+                        WINDOW.clearProperty(_P.STATION)
                         
                         # Basis-Informationen aus dem Player
                         try:
@@ -2330,7 +2347,7 @@ class RadioMonitor(xbmc.Monitor):
                             # Album wird erst nach erfolgreicher MB-Query gesetzt.
                             # Artist, Album + MBID werden zusammen vom Metadata-Worker gesetzt.
                             if title:
-                                self.set_property_safe('RadioMonitor.Title', title)
+                                self.set_property_safe(_P.TITLE, title)
                             
                             # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                             self.set_logo_safe()
@@ -2358,21 +2375,21 @@ class RadioMonitor(xbmc.Monitor):
                                     logo_url = station.get('logo300x300', '')
                                     if logo_url:
                                         self.station_logo = logo_url
-                                        self.set_property_safe('RadioMonitor.Logo', logo_url)
+                                        self.set_property_safe(_P.LOGO, logo_url)
                                         xbmc.log(f"[{ADDON_NAME}] Station-Logo gefunden: {logo_url}", xbmc.LOGINFO)
                             except Exception as e:
                                 xbmc.log(f"[{ADDON_NAME}] Fehler beim Holen des Station-Logos: {str(e)}", xbmc.LOGDEBUG)
                         
                         # Playing-Flag setzen
-                        WINDOW.setProperty('RadioMonitor.Playing', 'true')
+                        WINDOW.setProperty(_P.PLAYING, 'true')
                         
                         xbmc.log(f"[{ADDON_NAME}] === STREAM GESTARTET - INITIAL STATE ===", xbmc.LOGDEBUG)
                         xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Playing = true", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty('RadioMonitor.Station')}", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty('RadioMonitor.Artist')}", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty('RadioMonitor.Title')}", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty('RadioMonitor.Logo')}", xbmc.LOGDEBUG)
-                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty('RadioMonitor.Genre')}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Station = {WINDOW.getProperty(_P.STATION)}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Artist = {WINDOW.getProperty(_P.ARTIST)}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Title = {WINDOW.getProperty(_P.TITLE)}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Logo = {WINDOW.getProperty(_P.LOGO)}", xbmc.LOGDEBUG)
+                        xbmc.log(f"[{ADDON_NAME}] RadioMonitor.Genre = {WINDOW.getProperty(_P.GENRE)}", xbmc.LOGDEBUG)
                         
                         # Zeige was vom Player kommt
                         try:
