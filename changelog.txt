@@ -1,4 +1,11 @@
-﻿v1.0.4 (2026-03-05)
+﻿v1.0.5 (2026-03-05)
+- MusicPlayer-Fallback: Neue Polling-Methode für Streams ohne ICY-Metaint und ohne radio.de API (z.B. AzuraCast-Streams wie Mother Earth Radio, Ampache-Library-Streams). Erkennt Titelwechsel bei Live-Streams und verarbeitet Artist/Title via MusicBrainz. RadioMonitor.Playing wird geleert wenn kein Artist ermittelbar (z.B. Podcast ohne Interpret).
+- Station ausschließlich aus ICY icy-name: MusicPlayer.Album wird nicht mehr als Stationsquelle verwendet.
+- Station-ID direkt aus Logo-URL: Bei radio.de-Streams wird die Station-ID aus der Logo-URL extrahiert (z.B. radio-assets.com/300/energyclubbin.jpeg → energyclubbin). Die radio.de-Suche wird übersprungen – kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin').
+- Stationsname via radio.de Details-API: Echter Sendername wird per Details-API geholt und in RadioMonitor.Station gesetzt, wenn Station-ID aus Logo bekannt.
+- Logo-Update bei Titelwechsel: Im MusicPlayer-Fallback wird Player.Icon bei jedem Titelwechsel neu gelesen. AzuraCast-Streams liefern pro Song ein anderes Album-Cover – RadioMonitor.Logo wechselt damit mit.
+
+v1.0.4 (2026-03-05)
 - RadioMonitor.Genre wird jetzt via MusicBrainz befüllt: _musicbrainz_query_artist_info ruft den Artist-Endpoint mit inc=artist-rels+genres ab und liefert das meistgewählte Genre (nach Community-Vote-Count) zurück. Funktioniert für alle Artist-Typen (nicht nur Bands).
 - Genre-Löschung vervollständigt: RadioMonitor.Genre wird nun auch gelöscht wenn kein verwertbarer StreamTitle vorliegt (artist=None und title=None), analog zu den anderen Properties.
 

@@ -17,6 +17,10 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de Now-Playing API als Fallback bei fehlenden ICY-Metadaten
 - ✅ Aktualitäts-Check für API-Daten: veraltete API-Antworten (noch alter Song) werden verworfen
+- ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
+- ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
+- ✅ MusicPlayer-Fallback für Streams ohne ICY und ohne radio.de API (AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
+- ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
@@ -116,13 +120,14 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 
 - Kodi 19 (Matrix) und höher
 - Alle Plattformen (Windows, Linux, Android, etc.)
-- Funktioniert mit allen Radio-Streams, die ICY-Metadaten unterstützen
+- Getestet mit: radio.de, radio.de light, Mother Earth Radio (AzuraCast), Intergalactic, I Love Music, Ampache
 
 ## Bekannte Limitierungen
 
-- Nicht alle Radio-Streams senden ICY-Metadaten
+- Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift der MusicPlayer-Fallback (AzuraCast) oder die radio.de API
 - Manche Sender senden nur den Sendernamen statt Interpret/Titel – dieser wird korrekt gefiltert und nicht als Artist oder Title übernommen; alle Properties bleiben in diesem Fall leer
 - Bei verschlüsselten Streams (HTTPS) können manche Server keine ICY-Metadaten liefern
+- Künstler ohne Einträge in fanart.tv oder theaudiodb liefern keine Hintergrundbilder für Artist Slideshow
 
 ## Lizenz
 
