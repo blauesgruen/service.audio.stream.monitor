@@ -1529,6 +1529,12 @@ class RadioMonitor(xbmc.Monitor):
                 and self.use_api_fallback
                 and generation == self.metadata_generation
             ):
+                # station_name aktualisieren falls API in get_radiode_api_nowplaying
+                # den korrekten Namen nachträglich gesetzt hat (z.B. via Details-API)
+                fresh_station = WINDOW.getProperty('RadioMonitor.Station')
+                if fresh_station:
+                    station_name = fresh_station
+
                 # Versuche verschiedene APIs
                 if station_name:
                     artist, title = self.get_nowplaying_from_apis(station_name, stream_url)
@@ -1789,6 +1795,9 @@ class RadioMonitor(xbmc.Monitor):
             if station_name:
                 self.set_property_safe('RadioMonitor.Station', station_name)
                 xbmc.log(f"[{ADDON_NAME}] Station (ICY): {station_name}", xbmc.LOGDEBUG)
+            else:
+                WINDOW.clearProperty('RadioMonitor.Station')
+                xbmc.log(f"[{ADDON_NAME}] Kein icy-name - Station geleert", xbmc.LOGDEBUG)
             
             if icy_genre:
                 self.set_property_safe('RadioMonitor.Genre', icy_genre)
