@@ -1,4 +1,8 @@
-﻿v1.0.3 (2026-03-04)
+﻿v1.0.4 (2026-03-05)
+- RadioMonitor.Genre wird jetzt via MusicBrainz befüllt: _musicbrainz_query_artist_info ruft den Artist-Endpoint mit inc=artist-rels+genres ab und liefert das meistgewählte Genre (nach Community-Vote-Count) zurück. Funktioniert für alle Artist-Typen (nicht nur Bands).
+- Genre-Löschung vervollständigt: RadioMonitor.Genre wird nun auch gelöscht wenn kein verwertbarer StreamTitle vorliegt (artist=None und title=None), analog zu den anderen Properties.
+
+v1.0.3 (2026-03-04)
 - Album-Ermittlung präzisiert: Album wird nur noch aus Releases des tatsächlich gewählten Best-Recordings bestimmt (kein Mischen über alle Recordings).
 - FirstRelease-Ermittlung präzisiert: FirstRelease wird vom Best-Recording übernommen, nicht mehr als globales Minimum über alle Treffer.
 - Album-Filter verschärft: Nur echte Album-Releases ohne Compilation werden akzeptiert; wenn kein passendes Album gefunden wird, bleibt RadioMonitor.Album leer.

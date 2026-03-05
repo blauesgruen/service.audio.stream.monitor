@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.3">
+<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.4">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
@@ -18,6 +18,6 @@
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
     <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
     <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
-    <news>v1.0.3: Album-Ermittlung auf Best-Recording begrenzt, FirstRelease vom Best-Recording, nur echte Nicht-Compilation-Alben; bei fehlendem Treffer bleibt Album leer. Tie-Breaker bevorzugt Basisalbum vor Sondereditionen.</news>
+    <news>v1.0.4: RadioMonitor.Genre via MusicBrainz befüllt (meistgewähltes Genre nach Community-Vote). Genre-Löschung bei fehlendem StreamTitle vervollständigt.</news>
   </extension>
 </addon>

@@ -35,7 +35,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
-| `RadioMonitor.Genre` | Genre des Senders | "Pop" |
+| `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed` | Gründungsjahr (nur bei Bands) | "1995" |
 | `RadioMonitor.BandMembers` | Aktuelle Mitglieder (nur bei Bands) | "Chad Kroeger, Mike Kroeger, Ryan Peake, Daniel Adair" |
