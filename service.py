@@ -20,6 +20,7 @@ ADDON_VERSION = ADDON.getAddonInfo('version')
 MUSICBRAINZ_API_URL = "https://musicbrainz.org/ws/2/recording/"
 RADIODE_SEARCH_API_URL = "https://prod.radio-api.net/stations/search"
 RADIODE_NOWPLAYING_API_URL = "https://api.radio.de/stations/now-playing"
+RADIODE_DETAILS_API_URL = "https://prod.radio-api.net/stations/details"
 
 # Header für API-Anfragen
 MUSICBRAINZ_HEADERS = {
@@ -1344,6 +1345,48 @@ class RadioMonitor(xbmc.Monitor):
     def get_radiode_api_nowplaying(self, station_name):
         """Holt aktuelle Song-Info direkt von der radio.de API"""
         try:
+            # Shortcut: Station-ID direkt aus Logo-URL extrahieren (radio.de Addon setzt logo300x300-kompatible URL)
+            if self.station_logo:
+                logo_match = re.search(r'radio-assets\.com/\d+/([^./?]+)', self.station_logo)
+                if logo_match:
+                    logo_station_id = logo_match.group(1)
+                    xbmc.log(f"[{ADDON_NAME}] Station-ID aus Logo-URL: '{logo_station_id}' (überspringe Suche)", xbmc.LOGDEBUG)
+                    try:
+                        # Stationsname aus Details-API holen
+                        det_response = requests.get(RADIODE_DETAILS_API_URL, params={'stationIds': logo_station_id}, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                        xbmc.log(f"[{ADDON_NAME}] Details-API Status: {det_response.status_code}, URL: {det_response.url}", xbmc.LOGDEBUG)
+                        if det_response.status_code == 200:
+                            det_data = det_response.json()
+                            xbmc.log(f"[{ADDON_NAME}] Details-API Response: {str(det_data)[:300]}", xbmc.LOGDEBUG)
+                            if isinstance(det_data, list) and len(det_data) > 0:
+                                proper_name = det_data[0].get('name', '')
+                                if proper_name:
+                                    self.set_property_safe('RadioMonitor.Station', proper_name)
+                                    xbmc.log(f"[{ADDON_NAME}] Station-Name aus Details-API: '{proper_name}'", xbmc.LOGINFO)
+                                else:
+                                    xbmc.log(f"[{ADDON_NAME}] Details-API: kein 'name'-Feld, Keys: {list(det_data[0].keys())[:10]}", xbmc.LOGDEBUG)
+                            else:
+                                xbmc.log(f"[{ADDON_NAME}] Details-API: unerwartetes Format (type={type(det_data).__name__})", xbmc.LOGDEBUG)
+                    except Exception as e:
+                        xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API: {e}", xbmc.LOGDEBUG)
+
+                    try:
+                        params = {'stationIds': logo_station_id}
+                        np_response = requests.get(RADIODE_NOWPLAYING_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                        if np_response.status_code == 200:
+                            np_data = np_response.json()
+                            xbmc.log(f"[{ADDON_NAME}] now-playing API Response (Logo-ID): {np_data}", xbmc.LOGDEBUG)
+                            if isinstance(np_data, list) and len(np_data) > 0:
+                                full_title = np_data[0].get('title', '')
+                                if full_title and ' - ' in full_title:
+                                    artist, title = _parse_radiode_api_title(full_title, station_name)
+                                    if artist or title:
+                                        xbmc.log(f"[{ADDON_NAME}] ✓ now-playing via Logo-ID: {artist} - {title}", xbmc.LOGINFO)
+                                        return artist, title
+                    except Exception as e:
+                        xbmc.log(f"[{ADDON_NAME}] Fehler bei now-playing via Logo-ID: {e}", xbmc.LOGDEBUG)
+                    # Logo-ID lieferte kein Ergebnis → weiter mit normaler Suche
+
             # Bereinige den Sendernamen FÜR DIE SUCHE
             search_name = station_name
             
@@ -1593,7 +1636,137 @@ class RadioMonitor(xbmc.Monitor):
             xbmc.log(f"[{ADDON_NAME}] Fehler im API Metadata Worker: {str(e)}", xbmc.LOGERROR)
         finally:
             xbmc.log(f"[{ADDON_NAME}] API Metadata Worker beendet", xbmc.LOGDEBUG)
-    
+
+    def _musicplayer_metadata_fallback(self, generation):
+        """Fallback für Streams ohne ICY und ohne radio.de-API.
+        Pollt MusicPlayer.Artist/Title auf Änderungen (wie api_metadata_worker die radio.de API).
+        Titelwechsel auf Live-Streams (z.B. Mother Earth Radio) werden so erkannt.
+        Für Library-Streams (Ampache) beendet sich die Schleife beim nächsten onAVStarted
+        automatisch via metadata_generation-Check.
+        Wenn MusicPlayer leer bleibt, wird RadioMonitor.Playing gecleart.
+        Station wird nicht gesetzt – es gibt keinen ICY-Stationsnamen.
+        """
+        xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback aktiv (kein ICY, kein API-Fallback)", xbmc.LOGDEBUG)
+
+        last_artist = ''
+        last_title = ''
+        poll_interval = 5  # Sekunden zwischen MusicPlayer-Checks
+
+        try:
+            while (
+                not self.stop_thread
+                and self.is_playing
+                and generation == self.metadata_generation
+            ):
+                # MusicPlayer-Metadaten lesen
+                try:
+                    if not self.player.isPlayingAudio():
+                        WINDOW.clearProperty('RadioMonitor.Playing')
+                        xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: kein Audio - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
+                        return
+                    info_tag = self.player.getMusicInfoTag()
+                    mp_artist = (info_tag.getArtist() or '').strip()
+                    mp_title = (info_tag.getTitle() or '').strip()
+                except Exception as e:
+                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: Fehler beim Lesen der Metadaten: {e}", xbmc.LOGDEBUG)
+                    WINDOW.clearProperty('RadioMonitor.Playing')
+                    return
+
+                # Erster Durchlauf und beide leer → deaktivieren
+                if not last_artist and not last_title and not mp_artist and not mp_title:
+                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: Artist und Title leer - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
+                    WINDOW.clearProperty('RadioMonitor.Playing')
+                    return
+
+                # Titelwechsel (oder erster Durchlauf mit Inhalt)?
+                if mp_artist != last_artist or mp_title != last_title:
+                    last_artist = mp_artist
+                    last_title = mp_title
+
+                    if generation != self.metadata_generation:
+                        return
+
+                    xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: Artist='{mp_artist}', Title='{mp_title}'", xbmc.LOGINFO)
+
+                    # MusicBrainz-Lookup
+                    _, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release = \
+                        _musicbrainz_query_recording(mp_title, mp_artist)
+
+                    artist = mb_artist or mp_artist
+                    title = mb_title or mp_title
+
+                    if generation != self.metadata_generation:
+                        return
+
+                    # Properties setzen – MBID vor Artist (AS-Trigger)
+                    if title:
+                        self.set_property_safe('RadioMonitor.Title', title)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.Title')
+                    if mb_album:
+                        self.set_property_safe('RadioMonitor.Album', mb_album)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.Album')
+                    if mb_album_date:
+                        self.set_property_safe('RadioMonitor.AlbumDate', mb_album_date)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.AlbumDate')
+                    if mbid:
+                        self.set_property_safe('RadioMonitor.MBID', mbid)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.MBID')
+                    if mb_first_release:
+                        self.set_property_safe('RadioMonitor.FirstRelease', mb_first_release)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.FirstRelease')
+                    if artist:
+                        self.set_property_safe('RadioMonitor.Artist', artist)
+                        xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback gesetzt: Artist='{artist}', Title='{title}', MBID='{mbid}'", xbmc.LOGINFO)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.Artist')
+                        WINDOW.clearProperty('RadioMonitor.Playing')
+                        xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback: kein Artist ermittelbar - deaktiviere RadioMonitor", xbmc.LOGDEBUG)
+                        return
+
+                    # Player.Icon bei Titelwechsel neu lesen (z.B. AzuraCast liefert pro Song anderes Album-Cover)
+                    try:
+                        current_icon = xbmc.getInfoLabel('Player.Icon')
+                        if current_icon and self.is_real_logo(current_icon):
+                            self.station_logo = current_icon
+                    except Exception:
+                        pass
+                    self.set_logo_safe()
+
+                    if mbid and artist:
+                        time.sleep(1)
+                        band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
+                        if band_formed:
+                            self.set_property_safe('RadioMonitor.BandFormed', band_formed)
+                        else:
+                            WINDOW.clearProperty('RadioMonitor.BandFormed')
+                        if band_members:
+                            self.set_property_safe('RadioMonitor.BandMembers', band_members)
+                        else:
+                            WINDOW.clearProperty('RadioMonitor.BandMembers')
+                        if mb_genre:
+                            self.set_property_safe('RadioMonitor.Genre', mb_genre)
+                    else:
+                        WINDOW.clearProperty('RadioMonitor.BandFormed')
+                        WINDOW.clearProperty('RadioMonitor.BandMembers')
+
+                # Warte vor nächster Abfrage (in 0.5s-Schritten für schnelles Beenden)
+                for _ in range(poll_interval * 2):
+                    if (
+                        self.stop_thread
+                        or not self.is_playing
+                        or generation != self.metadata_generation
+                    ):
+                        break
+                    time.sleep(0.5)
+
+        finally:
+            xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback beendet", xbmc.LOGDEBUG)
+
     def parse_icy_metadata(self, url):
         """Liest ICY-Metadaten aus dem Stream"""
         try:
@@ -1611,21 +1784,11 @@ class RadioMonitor(xbmc.Monitor):
             icy_name = response.headers.get('icy-name', '')
             icy_genre = response.headers.get('icy-genre', '')
             
-            # Hole den korrekten Stationsnamen (bevorzuge MusicPlayer.Album vom Addon)
-            station_name = icy_name  # Fallback
-            try:
-                if self.player.isPlayingAudio():
-                    info_tag = self.player.getMusicInfoTag()
-                    album_name = info_tag.getAlbum()
-                    if album_name and album_name.strip():
-                        station_name = album_name.strip()
-                        xbmc.log(f"[{ADDON_NAME}] Verwende MusicPlayer.Album als Station: '{station_name}' (statt ICY: '{icy_name}')", xbmc.LOGINFO)
-            except Exception as e:
-                xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen von MusicPlayer.Album: {str(e)}", xbmc.LOGDEBUG)
-            
+            # Station ausschließlich aus ICY-Header icy-name
+            station_name = icy_name
             if station_name:
                 self.set_property_safe('RadioMonitor.Station', station_name)
-                xbmc.log(f"[{ADDON_NAME}] Station: {station_name}", xbmc.LOGDEBUG)
+                xbmc.log(f"[{ADDON_NAME}] Station (ICY): {station_name}", xbmc.LOGDEBUG)
             
             if icy_genre:
                 self.set_property_safe('RadioMonitor.Genre', icy_genre)
@@ -1842,10 +2005,11 @@ class RadioMonitor(xbmc.Monitor):
         
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
-            xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu API-Fallback", xbmc.LOGWARNING)
-            # Starte API-Fallback Worker
+            xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu Fallback", xbmc.LOGWARNING)
             if self.use_api_fallback and generation == self.metadata_generation:
                 self.api_metadata_worker(generation)
+            elif generation == self.metadata_generation:
+                self._musicplayer_metadata_fallback(generation)
             return
             
         metaint = stream_info['metaint']
@@ -1892,18 +2056,8 @@ class RadioMonitor(xbmc.Monitor):
                             
                             xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
                             
-                            # Hole den korrekten Stationsnamen vom MusicPlayer
-                            station_name = stream_info.get('station', '')  # Fallback: ICY-Name
-                            try:
-                                if self.player.isPlayingAudio():
-                                    info_tag = self.player.getMusicInfoTag()
-                                    album_name = info_tag.getAlbum()
-                                    if album_name and album_name.strip():
-                                        station_name = album_name.strip()
-                                        xbmc.log(f"[{ADDON_NAME}] Verwende MusicPlayer.Album als Stationsname: '{station_name}'", xbmc.LOGDEBUG)
-                            except Exception as e:
-                                xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen von MusicPlayer.Album: {str(e)}", xbmc.LOGDEBUG)
-                            
+                            # Station ausschließlich aus ICY-Header (bereits in parse_icy_metadata gesetzt)
+                            station_name = stream_info.get('station', '')
                             xbmc.log(f"[{ADDON_NAME}] ICY-Daten: station='{station_name}', stream_title='{stream_title}'", xbmc.LOGINFO)
 
                             # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
