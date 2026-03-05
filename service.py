@@ -784,29 +784,31 @@ def _musicbrainz_query_title_only(title_part, artist_hints=None):
 
 
 # Cache: verhindert wiederholte API-Aufrufe für dieselbe MBID innerhalb einer Session.
-# Key: mbid (str), Value: (band_formed, band_members) – beide können leer sein.
+# Key: mbid (str), Value: (band_formed, band_members, genre) – alle können leer sein.
 _artist_info_cache = {}
 
 def _musicbrainz_query_artist_info(mbid):
     """
-    Holt Gründungsjahr und Bandmitglieder für eine bekannte Artist-MBID.
+    Holt Gründungsjahr, Bandmitglieder und Genre für eine bekannte Artist-MBID.
 
     Nutzt einen In-Memory-Cache damit pro Song-Wechsel beim selben Künstler
     kein erneuter API-Call erfolgt.
 
-    Endpunkt: /ws/2/artist/{mbid}?inc=artist-rels&fmt=json
+    Endpunkt: /ws/2/artist/{mbid}?inc=artist-rels+genres&fmt=json
     Liefert:
       - life-span.begin → Gründungsjahr (Band) oder Geburtsjahr (Solo)
       - relations[type="member of band", direction="backward"] → Mitglieder
         Nur aktuelle Mitglieder (ended=False) werden aufgenommen; bei Bands
         ohne ended-Flag werden alle gelistet.
+      - genres → nach Vote-Count sortiert, Top-Genre als String
 
-    Rückgabe: (band_formed, band_members)
+    Rückgabe: (band_formed, band_members, genre)
       band_formed  … Jahr als String, z.B. "1970", oder ''
       band_members … kommagetrennte Namen, z.B. "Freddie Mercury, Brian May", oder ''
+      genre        … meistgewähltes Genre, z.B. "rock", oder ''
     """
     if not mbid:
-        return '', ''
+        return '', '', ''
 
     if mbid in _artist_info_cache:
         xbmc.log(
@@ -816,15 +818,24 @@ def _musicbrainz_query_artist_info(mbid):
         return _artist_info_cache[mbid]
 
     url = f"https://musicbrainz.org/ws/2/artist/{mbid}"
-    params = {"inc": "artist-rels", "fmt": "json"}
+    params = {"inc": "artist-rels+genres", "fmt": "json"}
 
     try:
         data = _mb_get(url, params=params).json()
 
-        # Nur Bands (Groups) – Solo-Künstler haben kein Gründungsjahr/Mitglieder
+        # Genre: nach Vote-Count sortiert, Top-Genre verwenden (für alle Artist-Typen)
+        genres = data.get("genres", [])
+        if genres:
+            top_genre = sorted(genres, key=lambda g: g.get("count", 0), reverse=True)[0]
+            genre = top_genre.get("name", "")
+        else:
+            genre = ""
+
+        # Gründungsjahr und Mitglieder nur für Bands (Groups)
         if data.get("type") != "Group":
-            _artist_info_cache[mbid] = ('', '')
-            return '', ''
+            result = ('', '', genre)
+            _artist_info_cache[mbid] = result
+            return result
 
         # Gründungsjahr: nur die ersten 4 Zeichen (Jahr) übernehmen
         life_span = data.get("life-span", {})
@@ -850,11 +861,11 @@ def _musicbrainz_query_artist_info(mbid):
 
         xbmc.log(
             f"[{ADDON_NAME}] Artist-Info für MBID={mbid}: "
-            f"BandFormed='{band_formed}', Members='{band_members}'",
+            f"BandFormed='{band_formed}', Members='{band_members}', Genre='{genre}'",
             xbmc.LOGINFO
         )
 
-        result = (band_formed, band_members)
+        result = (band_formed, band_members, genre)
         _artist_info_cache[mbid] = result
         return result
 
@@ -864,8 +875,8 @@ def _musicbrainz_query_artist_info(mbid):
             xbmc.LOGWARNING
         )
         # Negativen Cache-Eintrag setzen um Wiederholungs-Requests zu vermeiden
-        _artist_info_cache[mbid] = ('', '')
-        return '', ''
+        _artist_info_cache[mbid] = ('', '', '')
+        return '', '', ''
 
 
 def _identify_artist_title_via_musicbrainz(part1, part2):
@@ -1531,7 +1542,7 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
                             if mbid and artist:
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
-                                band_formed, band_members = _musicbrainz_query_artist_info(mbid)
+                                band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                                 if band_formed:
                                     self.set_property_safe('RadioMonitor.BandFormed', band_formed)
                                 else:
@@ -1540,10 +1551,12 @@ class RadioMonitor(xbmc.Monitor):
                                     self.set_property_safe('RadioMonitor.BandMembers', band_members)
                                 else:
                                     WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                if mb_genre:
+                                    self.set_property_safe('RadioMonitor.Genre', mb_genre)
                             else:
                                 WINDOW.clearProperty('RadioMonitor.BandFormed')
                                 WINDOW.clearProperty('RadioMonitor.BandMembers')
-                             
+
                             # Aktualisiere Kodi Player Metadaten
                             logo = WINDOW.getProperty('RadioMonitor.Logo')
                             self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
@@ -1908,6 +1921,7 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty('RadioMonitor.FirstRelease')
                                 WINDOW.clearProperty('RadioMonitor.BandFormed')
                                 WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                WINDOW.clearProperty('RadioMonitor.Genre')
                                 WINDOW.clearProperty('RadioMonitor.StreamTitle')
                                 continue
                             
@@ -1962,7 +1976,7 @@ class RadioMonitor(xbmc.Monitor):
                             # ein verlässlicher Indikator für einen validen Artist-Match.
                             if mbid and artist:
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
-                                band_formed, band_members = _musicbrainz_query_artist_info(mbid)
+                                band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                                 if band_formed:
                                     self.set_property_safe('RadioMonitor.BandFormed', band_formed)
                                     xbmc.log(f"[{ADDON_NAME}] BandFormed: {band_formed}", xbmc.LOGDEBUG)
@@ -1973,6 +1987,9 @@ class RadioMonitor(xbmc.Monitor):
                                     xbmc.log(f"[{ADDON_NAME}] BandMembers: {band_members}", xbmc.LOGDEBUG)
                                 else:
                                     WINDOW.clearProperty('RadioMonitor.BandMembers')
+                                if mb_genre:
+                                    self.set_property_safe('RadioMonitor.Genre', mb_genre)
+                                    xbmc.log(f"[{ADDON_NAME}] Genre (MB): {mb_genre}", xbmc.LOGDEBUG)
                             else:
                                 WINDOW.clearProperty('RadioMonitor.BandFormed')
                                 WINDOW.clearProperty('RadioMonitor.BandMembers')
