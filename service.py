@@ -2274,6 +2274,7 @@ class RadioMonitor(xbmc.Monitor):
                         album = None
                         WINDOW.clearProperty('RadioMonitor.MBID')
                         WINDOW.clearProperty('RadioMonitor.Album')
+                        WINDOW.clearProperty('RadioMonitor.Station')
                         
                         # Basis-Informationen aus dem Player
                         try:
