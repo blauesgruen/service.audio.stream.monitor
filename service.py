@@ -39,19 +39,19 @@ MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 
 # Window-Property-Namen als Konstanten (verhindert Tippfehler, vereinfacht Umbenennung)
 class _P:
-    STATION    = _P.STATION
-    TITLE      = _P.TITLE
-    ARTIST     = _P.ARTIST
-    ALBUM      = _P.ALBUM
-    ALBUM_DATE = _P.ALBUM_DATE
-    GENRE      = _P.GENRE
-    MBID       = _P.MBID
-    FIRST_REL  = _P.FIRST_REL
-    STREAM_TTL = _P.STREAM_TTL
-    PLAYING    = _P.PLAYING
-    LOGO       = _P.LOGO
-    BAND_FORM  = _P.BAND_FORM
-    BAND_MEM   = _P.BAND_MEM
+    STATION    = 'RadioMonitor.Station'
+    TITLE      = 'RadioMonitor.Title'
+    ARTIST     = 'RadioMonitor.Artist'
+    ALBUM      = 'RadioMonitor.Album'
+    ALBUM_DATE = 'RadioMonitor.AlbumDate'
+    GENRE      = 'RadioMonitor.Genre'
+    MBID       = 'RadioMonitor.MBID'
+    FIRST_REL  = 'RadioMonitor.FirstRelease'
+    STREAM_TTL = 'RadioMonitor.StreamTitle'
+    PLAYING    = 'RadioMonitor.Playing'
+    LOGO       = 'RadioMonitor.Logo'
+    BAND_FORM  = 'RadioMonitor.BandFormed'
+    BAND_MEM   = 'RadioMonitor.BandMembers'
 
 # Regex für numerische IDs (z.B. "123 - 456") – an mehreren Stellen verwendet
 _NUMERIC_ID_RE = re.compile(r'^\d+\s*-\s*\d+$')
