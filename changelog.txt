@@ -1,4 +1,13 @@
-﻿v1.0.5 (2026-03-05)
+﻿v1.0.6 (2026-03-06)
+- Fix: NameError 'name _P is not defined' beim Addon-Start behoben – _P-Klasse referenzierte sich selbst während der Definition (Refactoring-Fehler aus v1.0.5).
+- Fix: RadioMonitor.Station wurde bei Senderwechsel nicht aktualisiert – Station-Property wird nun bei jedem neuen Stream korrekt neu gesetzt.
+- Fix: station_name wird im API-Worker-Loop bei jedem Durchlauf aus der Window-Property aktualisiert (frischer Sendername wenn Details-API nachträglich gesetzt hat).
+- Fix: Station-Property wird geleert wenn kein ICY-Name vorhanden ist (kein veralteter Sendername nach Senderwechsel).
+- Refactoring: Window-Property-Namen in _P-Klasse als benannte Konstanten zusammengefasst (verhindert Tippfehler, vereinfacht Umbenennung).
+- Refactoring: _frd_year() als Modulfunktion ausgelagert (vorher inline an mehreren Stellen).
+- Refactoring: _NUMERIC_ID_RE als Modul-Konstante (vorher mehrfach kompiliert).
+
+v1.0.5 (2026-03-05)
 - MusicPlayer-Fallback: Neue Polling-Methode für Streams ohne ICY-Metaint und ohne radio.de API (z.B. AzuraCast-Streams wie Mother Earth Radio, Ampache-Library-Streams). Erkennt Titelwechsel bei Live-Streams und verarbeitet Artist/Title via MusicBrainz. RadioMonitor.Playing wird geleert wenn kein Artist ermittelbar (z.B. Podcast ohne Interpret).
 - Station ausschließlich aus ICY icy-name: MusicPlayer.Album wird nicht mehr als Stationsquelle verwendet.
 - Station-ID direkt aus Logo-URL: Bei radio.de-Streams wird die Station-ID aus der Logo-URL extrahiert (z.B. radio-assets.com/300/energyclubbin.jpeg → energyclubbin). Die radio.de-Suche wird übersprungen – kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin').
