@@ -1112,6 +1112,7 @@ class PlayerMonitor(xbmc.Player):
     
     def onPlayBackStarted(self):
         """Liest Plugin-Slug aus radio.de light URL – vor Stream-Auflösung verfügbar"""
+        self.radio_monitor.plugin_slug = None  # immer zurücksetzen, auch bei Nicht-radio.de-Streams
         try:
             playing_file = self.getPlayingFile()
             if 'plugin.audio.radio_de_light' in playing_file:
@@ -1571,7 +1572,7 @@ class RadioMonitor(xbmc.Monitor):
             while (
                 not self.stop_thread
                 and self.is_playing
-                and self.use_api_fallback
+                and (self.use_api_fallback or self.plugin_slug)
                 and generation == self.metadata_generation
             ):
                 # station_name aktualisieren falls API in get_radiode_api_nowplaying
@@ -1580,8 +1581,8 @@ class RadioMonitor(xbmc.Monitor):
                 if fresh_station:
                     station_name = fresh_station
 
-                # Versuche verschiedene APIs
-                if station_name:
+                # Versuche verschiedene APIs (plugin_slug erlaubt Abfrage ohne station_name)
+                if station_name or self.plugin_slug:
                     artist, title = self.get_nowplaying_from_apis(station_name, stream_url)
                     
                     if title and title != last_title:
@@ -2121,7 +2122,7 @@ class RadioMonitor(xbmc.Monitor):
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
             xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu Fallback", xbmc.LOGWARNING)
-            if self.use_api_fallback and generation == self.metadata_generation:
+            if (self.use_api_fallback or self.plugin_slug) and generation == self.metadata_generation:
                 self.api_metadata_worker(generation)
             elif generation == self.metadata_generation:
                 self._musicplayer_metadata_fallback(generation)
