@@ -1487,7 +1487,29 @@ class RadioMonitor(xbmc.Monitor):
                         self.station_logo = station_logo
                         self.set_property_safe(_P.LOGO, station_logo)
                         xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
-                    
+
+                    # Sendername via Logo-Slug aus Details-API (überschreibt ICY-Platzhalter)
+                    if station_logo:
+                        logo_slug_match = re.search(r'radio-assets\.com/\d+/([^./?]+)', station_logo)
+                        if logo_slug_match:
+                            logo_slug = logo_slug_match.group(1)
+                            try:
+                                det_response = requests.get(
+                                    RADIODE_DETAILS_API_URL,
+                                    params={'stationIds': logo_slug},
+                                    headers=DEFAULT_HTTP_HEADERS,
+                                    timeout=5
+                                )
+                                if det_response.status_code == 200:
+                                    det_data = det_response.json()
+                                    if isinstance(det_data, list) and len(det_data) > 0:
+                                        proper_name = det_data[0].get('name', '')
+                                        if proper_name:
+                                            self.set_property_safe(_P.STATION, proper_name)
+                                            xbmc.log(f"[{ADDON_NAME}] Station aus Details-API (Logo-Slug): '{proper_name}'", xbmc.LOGINFO)
+                            except Exception as e:
+                                xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API (Logo-Slug): {e}", xbmc.LOGDEBUG)
+
                     xbmc.log(f"[{ADDON_NAME}] Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
                     
                     # Schritt 2: Station-ID für now-playing API verwenden
@@ -1873,7 +1895,7 @@ class RadioMonitor(xbmc.Monitor):
             icy_name = response.headers.get('icy-name', '')
             icy_genre = response.headers.get('icy-genre', '')
             
-            # Station ausschließlich aus ICY-Header icy-name
+            # Station initial aus ICY-Header icy-name (wird von API überschrieben falls verfügbar)
             station_name = icy_name
             if station_name:
                 self.set_property_safe(_P.STATION, station_name)
