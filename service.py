@@ -8,6 +8,7 @@ import threading
 import json
 import random
 from difflib import SequenceMatcher
+from urllib.parse import urlparse, parse_qs, unquote
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
@@ -1109,6 +1110,24 @@ class PlayerMonitor(xbmc.Player):
         super(PlayerMonitor, self).__init__()
         self.radio_monitor = radio_monitor
     
+    def onPlayBackStarted(self):
+        """Liest Plugin-Slug aus radio.de light URL – vor Stream-Auflösung verfügbar"""
+        try:
+            playing_file = self.getPlayingFile()
+            if 'plugin.audio.radio_de_light' in playing_file:
+                parsed = urlparse(playing_file)
+                params = parse_qs(parsed.query)
+                iconimage_list = params.get('iconimage', [])
+                if iconimage_list:
+                    iconimage = unquote(iconimage_list[0])
+                    slug_match = re.search(r'/([^/]+)\.[a-z]+(?:\?|$)', iconimage)
+                    if slug_match:
+                        slug = slug_match.group(1)
+                        self.radio_monitor.plugin_slug = slug
+                        xbmc.log(f"[{ADDON_NAME}] Plugin-Slug aus iconimage: '{slug}'", xbmc.LOGINFO)
+        except Exception as e:
+            xbmc.log(f"[{ADDON_NAME}] Fehler in onPlayBackStarted: {e}", xbmc.LOGDEBUG)
+
     def onAVStarted(self):
         """Wird aufgerufen SOFORT wenn Stream startet - ListItem.Icon ist noch verfügbar!"""
         try:
@@ -1159,6 +1178,7 @@ class RadioMonitor(xbmc.Monitor):
         self.station_id = None    # radio.de Station ID
         self.station_logo = None  # Logo URL von radio.de API
         self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
+        self.plugin_slug = None   # Sender-Slug aus radio.de light Plugin-URL (iconimage)
         self.use_api_fallback = False  # Flag für API-Fallback
         
         # Event-Handler für Player-Events
@@ -1168,8 +1188,9 @@ class RadioMonitor(xbmc.Monitor):
         
     def clear_properties(self):
         """Löscht alle Radio-Properties"""
-        # Reset Logo
+        # Reset Logo und Plugin-Slug
         self.station_logo = None
+        self.plugin_slug = None
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -1370,47 +1391,44 @@ class RadioMonitor(xbmc.Monitor):
     def get_radiode_api_nowplaying(self, station_name):
         """Holt aktuelle Song-Info direkt von der radio.de API"""
         try:
-            # Shortcut: Station-ID direkt aus Logo-URL extrahieren (radio.de Addon setzt logo300x300-kompatible URL)
-            if self.station_logo:
+            # Slug-Quelle: Plugin-URL hat Priorität, Logo-URL als Fallback
+            slug = self.plugin_slug
+            if not slug and self.station_logo:
                 logo_match = re.search(r'radio-assets\.com/\d+/([^./?]+)', self.station_logo)
                 if logo_match:
-                    logo_station_id = logo_match.group(1)
-                    xbmc.log(f"[{ADDON_NAME}] Station-ID aus Logo-URL: '{logo_station_id}' (überspringe Suche)", xbmc.LOGDEBUG)
-                    try:
-                        # Stationsname aus Details-API holen
-                        det_response = requests.get(RADIODE_DETAILS_API_URL, params={'stationIds': logo_station_id}, headers=DEFAULT_HTTP_HEADERS, timeout=5)
-                        xbmc.log(f"[{ADDON_NAME}] Details-API Status: {det_response.status_code}, URL: {det_response.url}", xbmc.LOGDEBUG)
-                        if det_response.status_code == 200:
-                            det_data = det_response.json()
-                            xbmc.log(f"[{ADDON_NAME}] Details-API Response: {str(det_data)[:300]}", xbmc.LOGDEBUG)
-                            if isinstance(det_data, list) and len(det_data) > 0:
-                                proper_name = det_data[0].get('name', '')
-                                if proper_name:
-                                    self.set_property_safe(_P.STATION, proper_name)
-                                    xbmc.log(f"[{ADDON_NAME}] Station-Name aus Details-API: '{proper_name}'", xbmc.LOGINFO)
-                                else:
-                                    xbmc.log(f"[{ADDON_NAME}] Details-API: kein 'name'-Feld, Keys: {list(det_data[0].keys())[:10]}", xbmc.LOGDEBUG)
-                            else:
-                                xbmc.log(f"[{ADDON_NAME}] Details-API: unerwartetes Format (type={type(det_data).__name__})", xbmc.LOGDEBUG)
-                    except Exception as e:
-                        xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API: {e}", xbmc.LOGDEBUG)
+                    slug = logo_match.group(1)
 
-                    try:
-                        params = {'stationIds': logo_station_id}
-                        np_response = requests.get(RADIODE_NOWPLAYING_API_URL, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
-                        if np_response.status_code == 200:
-                            np_data = np_response.json()
-                            xbmc.log(f"[{ADDON_NAME}] now-playing API Response (Logo-ID): {np_data}", xbmc.LOGDEBUG)
-                            if isinstance(np_data, list) and len(np_data) > 0:
-                                full_title = np_data[0].get('title', '')
-                                if full_title and ' - ' in full_title:
-                                    artist, title = _parse_radiode_api_title(full_title, station_name)
-                                    if artist or title:
-                                        xbmc.log(f"[{ADDON_NAME}] ✓ now-playing via Logo-ID: {artist} - {title}", xbmc.LOGINFO)
-                                        return artist, title
-                    except Exception as e:
-                        xbmc.log(f"[{ADDON_NAME}] Fehler bei now-playing via Logo-ID: {e}", xbmc.LOGDEBUG)
-                    # Logo-ID lieferte kein Ergebnis → weiter mit normaler Suche
+            if slug:
+                xbmc.log(f"[{ADDON_NAME}] Station-Slug: '{slug}' (plugin={bool(self.plugin_slug)})", xbmc.LOGDEBUG)
+                try:
+                    det_response = requests.get(RADIODE_DETAILS_API_URL, params={'stationIds': slug}, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                    xbmc.log(f"[{ADDON_NAME}] Details-API Status: {det_response.status_code}, URL: {det_response.url}", xbmc.LOGDEBUG)
+                    if det_response.status_code == 200:
+                        det_data = det_response.json()
+                        xbmc.log(f"[{ADDON_NAME}] Details-API Response: {str(det_data)[:300]}", xbmc.LOGDEBUG)
+                        if isinstance(det_data, list) and len(det_data) > 0:
+                            proper_name = det_data[0].get('name', '')
+                            if proper_name:
+                                self.set_property_safe(_P.STATION, proper_name)
+                                xbmc.log(f"[{ADDON_NAME}] Station aus Details-API: '{proper_name}'", xbmc.LOGINFO)
+                except Exception as e:
+                    xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API: {e}", xbmc.LOGDEBUG)
+
+                try:
+                    np_response = requests.get(RADIODE_NOWPLAYING_API_URL, params={'stationIds': slug}, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                    if np_response.status_code == 200:
+                        np_data = np_response.json()
+                        xbmc.log(f"[{ADDON_NAME}] now-playing API Response (Slug): {np_data}", xbmc.LOGDEBUG)
+                        if isinstance(np_data, list) and len(np_data) > 0:
+                            full_title = np_data[0].get('title', '')
+                            if full_title and ' - ' in full_title:
+                                artist, title = _parse_radiode_api_title(full_title, station_name)
+                                if artist or title:
+                                    xbmc.log(f"[{ADDON_NAME}] ✓ now-playing via Slug: {artist} - {title}", xbmc.LOGINFO)
+                                    return artist, title
+                        xbmc.log(f"[{ADDON_NAME}] ✗ Slug-Abfrage ohne Ergebnis – weiter mit Suche", xbmc.LOGDEBUG)
+                except Exception as e:
+                    xbmc.log(f"[{ADDON_NAME}] Fehler bei now-playing via Slug: {e}", xbmc.LOGDEBUG)
 
             # Bereinige den Sendernamen FÜR DIE SUCHE
             search_name = station_name
@@ -1481,34 +1499,12 @@ class RadioMonitor(xbmc.Monitor):
                     station_found = best_match.get('name', '')
                     station_id = best_match.get('id', '')
                     station_logo = best_match.get('logo300x300', '')  # Logo aus API
-                    
+
                     # Speichere Logo für spätere Verwendung
                     if station_logo:
                         self.station_logo = station_logo
                         self.set_property_safe(_P.LOGO, station_logo)
                         xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
-
-                    # Sendername via Logo-Slug aus Details-API (überschreibt ICY-Platzhalter)
-                    if station_logo:
-                        logo_slug_match = re.search(r'radio-assets\.com/\d+/([^./?]+)', station_logo)
-                        if logo_slug_match:
-                            logo_slug = logo_slug_match.group(1)
-                            try:
-                                det_response = requests.get(
-                                    RADIODE_DETAILS_API_URL,
-                                    params={'stationIds': logo_slug},
-                                    headers=DEFAULT_HTTP_HEADERS,
-                                    timeout=5
-                                )
-                                if det_response.status_code == 200:
-                                    det_data = det_response.json()
-                                    if isinstance(det_data, list) and len(det_data) > 0:
-                                        proper_name = det_data[0].get('name', '')
-                                        if proper_name:
-                                            self.set_property_safe(_P.STATION, proper_name)
-                                            xbmc.log(f"[{ADDON_NAME}] Station aus Details-API (Logo-Slug): '{proper_name}'", xbmc.LOGINFO)
-                            except Exception as e:
-                                xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API (Logo-Slug): {e}", xbmc.LOGDEBUG)
 
                     xbmc.log(f"[{ADDON_NAME}] Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
                     
