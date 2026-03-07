@@ -1415,7 +1415,7 @@ class RadioMonitor(xbmc.Monitor):
                             det_logo = det_data[0].get('logo300x300', '')
                             if det_logo and not self.station_logo:
                                 self.station_logo = det_logo
-                                self.set_property_safe(_P.LOGO, det_logo)
+                                self.set_logo_safe()
                                 xbmc.log(f"[{ADDON_NAME}] Logo aus Details-API: '{det_logo}'", xbmc.LOGINFO)
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API: {e}", xbmc.LOGDEBUG)
@@ -1509,7 +1509,7 @@ class RadioMonitor(xbmc.Monitor):
                     # Speichere Logo für spätere Verwendung
                     if station_logo:
                         self.station_logo = station_logo
-                        self.set_property_safe(_P.LOGO, station_logo)
+                        self.set_logo_safe()
                         xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
 
                     xbmc.log(f"[{ADDON_NAME}] Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})", xbmc.LOGDEBUG)
