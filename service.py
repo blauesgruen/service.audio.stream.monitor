@@ -1412,6 +1412,11 @@ class RadioMonitor(xbmc.Monitor):
                             if proper_name:
                                 self.set_property_safe(_P.STATION, proper_name)
                                 xbmc.log(f"[{ADDON_NAME}] Station aus Details-API: '{proper_name}'", xbmc.LOGINFO)
+                            det_logo = det_data[0].get('logo300x300', '')
+                            if det_logo and not self.station_logo:
+                                self.station_logo = det_logo
+                                self.set_property_safe(_P.LOGO, det_logo)
+                                xbmc.log(f"[{ADDON_NAME}] Logo aus Details-API: '{det_logo}'", xbmc.LOGINFO)
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler bei Details-API: {e}", xbmc.LOGDEBUG)
 
