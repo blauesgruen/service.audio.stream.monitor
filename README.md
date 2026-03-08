@@ -15,12 +15,12 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Erweitertes Artist-Matching: CamelCase-Splitting ("DeBurgh" → "De Burgh"), Komma-Umkehr, Apostroph-Normalisierung und tokenbasierter Fallback
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
-- ✅ radio.de Now-Playing API als Fallback bei fehlenden ICY-Metadaten
-- ✅ Aktualitäts-Check für API-Daten: veraltete API-Antworten (noch alter Song) werden verworfen
+- ✅ radio.de Now-Playing API als primäre Metadaten-Quelle: wird vor dem ICY-StreamTitle ausgewertet, ICY dient als Fallback
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
 - ✅ MusicPlayer-Fallback für Streams ohne ICY und ohne radio.de API (AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
+- ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge + 90s Puffer, Fallback 7 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
