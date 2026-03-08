@@ -1,3 +1,13 @@
+v1.0.7 (2026-03-08)
+- Refactoring: Codebasis in eigenständige Module aufgeteilt – constants.py, logger.py, cache.py, api_client.py, musicbrainz.py, radiode.py.
+- Refactoring: Alle MusicBrainz-Funktionen (Query-Recording, Title-Only-Fallback, Work-Kontext, Artist-Info, Artist-Varianten, Album-Extraktion, Similarity) in musicbrainz.py ausgelagert.
+- Refactoring: radio.de-Titel-Parser in radiode.py ausgelagert.
+- Refactoring: Thread-safe MusicBrainz-Cache mit TTL (MusicBrainzCache) in cache.py.
+- Refactoring: HTTP-Client mit Retry und Exponential-Backoff (APIClient) in api_client.py.
+- Refactoring: Logging-Wrapper (log_debug/info/warning/error) in logger.py – einheitliches Präfix ohne Duplikation.
+- Refactoring: Konstanten, API-URLs und Property-Namen (_P) in constants.py zentralisiert.
+- service.py von 2570 auf 1483 Zeilen reduziert (kein funktionaler Unterschied).
+
 ﻿v1.0.6 (2026-03-06)
 - Fix: NameError 'name _P is not defined' beim Addon-Start behoben – _P-Klasse referenzierte sich selbst während der Definition (Refactoring-Fehler aus v1.0.5).
 - Fix: RadioMonitor.Station wurde bei Senderwechsel nicht aktualisiert – Station-Property wird nun bei jedem neuen Stream korrekt neu gesetzt.

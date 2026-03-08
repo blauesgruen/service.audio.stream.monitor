@@ -100,6 +100,18 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - ` | ` (Pipe)
 - `: ` (Doppelpunkt)
 
+### Modulstruktur
+
+| Modul | Inhalt |
+|-------|--------|
+| `service.py` | PlayerMonitor, RadioMonitor, ICY-Stream-Handling, Property-Management |
+| `musicbrainz.py` | Alle MusicBrainz-API-Funktionen, Artist/Title-Erkennung, Album-Auswahl |
+| `radiode.py` | radio.de API Titel-Parser |
+| `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
+| `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
+| `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
+| `api_client.py` | HTTP-Client mit Retry und Exponential-Backoff |
+
 ### Performance
 - Überprüft alle 2 Sekunden, ob ein Stream läuft
 - Metadaten-Parsing läuft in separatem Thread
