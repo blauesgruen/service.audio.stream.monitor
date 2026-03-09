@@ -7,8 +7,11 @@ v1.0.7 (2026-03-08)
 - Refactoring: Logging-Wrapper (log_debug/info/warning/error) in logger.py – einheitliches Präfix ohne Duplikation.
 - Refactoring: Konstanten, API-URLs und Property-Namen (_P) in constants.py zentralisiert.
 - service.py von 2570 auf 1483 Zeilen reduziert (kein funktionaler Unterschied).
+- Fix: Vermeidung veralteter Artist/Title-Properties bei Titelwechsel: MusicBrainz-Cache wird bei ICY-StreamTitle-Wechsel invalidiert.
+- Fix: radio.de-API-Ergebnisse werden nur akzeptiert, wenn sie mit dem aktuellen ICY-StreamTitle übereinstimmen (ähnlichkeitsbasiert), verzögerte API-Antworten werden verworfen.
+- Fix: Song-Timeout-Handling verbessert: MB-Länge wird für Song-Timeout verwendet, damit veraltete Properties nach Ende des Songs zuverlässig gelöscht werden.
 
-﻿v1.0.6 (2026-03-06)
+v1.0.6 (2026-03-06)
 - Fix: NameError 'name _P is not defined' beim Addon-Start behoben – _P-Klasse referenzierte sich selbst während der Definition (Refactoring-Fehler aus v1.0.5).
 - Fix: RadioMonitor.Station wurde bei Senderwechsel nicht aktualisiert – Station-Property wird nun bei jedem neuen Stream korrekt neu gesetzt.
 - Fix: station_name wird im API-Worker-Loop bei jedem Durchlauf aus der Window-Property aktualisiert (frischer Sendername wenn Details-API nachträglich gesetzt hat).

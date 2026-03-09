@@ -24,6 +24,13 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
+## Release Notes (kurz)
+
+- v1.0.7 (Hotfix 2026-03-09): Kleinere Bugfixes
+   - MusicBrainz-Cache wird nun bei jedem ICY-StreamTitle-Wechsel invalidiert, um zu verhindern, dass veraltete MBID/Artist-Werte erhalten bleiben.
+   - radio.de-API-Ergebnisse werden nur akzeptiert, wenn sie mit dem aktuellen ICY-StreamTitle übereinstimmen; verzögerte API-Antworten werden ignoriert.
+   - Song-Timeout-Logik verbessert: MB-Länge wird verwendet, damit Properties nach Song-Ende zuverlässig gelöscht werden.
+
 ## Verfügbare Window Properties
 
 Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werden können:
