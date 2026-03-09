@@ -893,12 +893,19 @@ class RadioMonitor(xbmc.Monitor):
             if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
                 # Prüfe Übereinstimmung API <-> ICY
                 api_combined = f"{api_artist} - {api_title}".strip()
+                # Wenn der StreamTitle rein numerisch ist (z.B. "280220 - 391495"),
+                # behandeln wir ihn hier als "kein ICY", damit gültige API-Daten
+                # angenommen werden können.
+                is_numeric_icy = bool(stream_title and _NUMERIC_ID_RE.match(stream_title))
+                effective_stream_title = None if is_numeric_icy else stream_title
                 try:
-                    sim = _mb_similarity((stream_title or '').strip(), api_combined)
+                    sim = _mb_similarity((effective_stream_title or '').strip(), api_combined)
                 except Exception:
                     sim = 0.0
-                # Akzeptieren wenn sehr ähnlich oder kein ICY-String vorhanden
-                if (stream_title and sim >= 0.9) or (not stream_title):
+
+                # Akzeptieren wenn sehr ähnlich (bei vorhandenem, nicht-numerischem ICY)
+                # oder wenn kein ICY / numerischer ICY vorliegt (API nutzen)
+                if (effective_stream_title and sim >= 0.9) or (not effective_stream_title):
                     xbmc.log(
                         f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', "
                         f"Title='{api_title}' → MB entscheidet Reihenfolge (sim={sim:.2f})",
