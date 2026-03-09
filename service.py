@@ -21,6 +21,7 @@ from musicbrainz import (
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
     musicbrainz_query_recording as _musicbrainz_query_recording,
     mb_similarity as _mb_similarity,
+    _mb_cache,
 )
 from radiode import parse_radiode_api_title as _parse_radiode_api_title
 
@@ -105,6 +106,9 @@ class RadioMonitor(xbmc.Monitor):
         self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
         self.plugin_slug = None   # Sender-Slug aus radio.de light Plugin-URL (iconimage)
         self.use_api_fallback = False  # Flag für API-Fallback
+        # Zentrale Song-Timeout-Status (wird von Metadata-Workern geteilt)
+        self._last_song_time = 0.0
+        self._song_timeout = SONG_TIMEOUT_FALLBACK_S
         
         # Event-Handler für Player-Events
         self.player_monitor = PlayerMonitor(self)
@@ -494,8 +498,6 @@ class RadioMonitor(xbmc.Monitor):
         poll_interval = 10  # Sekunden zwischen API-Abfragen
         station_name = WINDOW.getProperty(_P.STATION)
         stream_url = self.current_url or ''
-        last_song_time = 0.0
-        song_timeout   = SONG_TIMEOUT_FALLBACK_S
 
         try:
             while (
@@ -563,7 +565,6 @@ class RadioMonitor(xbmc.Monitor):
                             else:
                                 WINDOW.clearProperty(_P.FIRST_REL)
                             # Artist-Trigger zuerst setzen, dann Artist-Info nachziehen.
-                            # MBID ist nur gesetzt wenn MB den Artist sicher bestimmt hat.
                             self.set_property_safe(_P.ARTIST, artist)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
                             if mbid and artist:
@@ -582,6 +583,17 @@ class RadioMonitor(xbmc.Monitor):
                             else:
                                 WINDOW.clearProperty(_P.BAND_FORM)
                                 WINDOW.clearProperty(_P.BAND_MEM)
+
+                            # Logo sofort nach Artist setzen
+                            self.set_logo_safe()
+
+                            # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
+                            self._last_song_time = time.time()
+                            self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
+                            xbmc.log(
+                                f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
+                                xbmc.LOGDEBUG
+                            )
 
                             # Aktualisiere Kodi Player Metadaten
                             logo = WINDOW.getProperty(_P.LOGO)
@@ -606,17 +618,17 @@ class RadioMonitor(xbmc.Monitor):
                             self.update_player_metadata(None, title, station_name, logo if logo else None, None)
 
                         # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                        last_song_time = time.time()
-                        song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
+                        self._last_song_time = time.time()
+                        self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
                         xbmc.log(
-                            f"[{ADDON_NAME}] Song-Timeout: {song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
+                            f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
                             xbmc.LOGDEBUG
                         )
 
                 # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
-                if last_song_time and time.time() - last_song_time > song_timeout:
+                if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                     xbmc.log(
-                        f"[{ADDON_NAME}] Song-Timeout abgelaufen ({song_timeout:.0f}s) – lösche Song-Properties",
+                        f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
                         xbmc.LOGDEBUG
                     )
                     WINDOW.clearProperty(_P.ARTIST)
@@ -629,7 +641,7 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
                     WINDOW.clearProperty(_P.STREAM_TTL)
-                    last_song_time = 0.0
+                    self._last_song_time = 0.0
 
                 # Warte vor nächster Abfrage
                 for _ in range(poll_interval * 2):  # 10 Sekunden in 0.5s Schritten
@@ -660,8 +672,6 @@ class RadioMonitor(xbmc.Monitor):
         last_artist = ''
         last_title = ''
         poll_interval = 5  # Sekunden zwischen MusicPlayer-Checks
-        last_song_time = 0.0
-        song_timeout   = SONG_TIMEOUT_FALLBACK_S
 
         try:
             while (
@@ -766,17 +776,17 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_MEM)
 
                     # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                    last_song_time = time.time()
-                    song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
+                    self._last_song_time = time.time()
+                    self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
                     xbmc.log(
-                        f"[{ADDON_NAME}] Song-Timeout: {song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
+                        f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
                         xbmc.LOGDEBUG
                     )
 
                 # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
-                if last_song_time and time.time() - last_song_time > song_timeout:
+                if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                     xbmc.log(
-                        f"[{ADDON_NAME}] Song-Timeout abgelaufen ({song_timeout:.0f}s) – lösche Song-Properties",
+                        f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
                         xbmc.LOGDEBUG
                     )
                     WINDOW.clearProperty(_P.ARTIST)
@@ -789,7 +799,7 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
                     WINDOW.clearProperty(_P.STREAM_TTL)
-                    last_song_time = 0.0
+                    self._last_song_time = 0.0
 
                 # Warte vor nächster Abfrage (in 0.5s-Schritten für schnelles Beenden)
                 for _ in range(poll_interval * 2):
@@ -881,25 +891,35 @@ class RadioMonitor(xbmc.Monitor):
         if station_name and stream_url:
             api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
             if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
-                xbmc.log(
-                    f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', "
-                    f"Title='{api_title}' → MB entscheidet Reihenfolge",
-                    xbmc.LOGINFO
-                )
-                mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = \
-                    _identify_artist_title_via_musicbrainz(api_artist, api_title)
-                if uncertain:
+                # Prüfe Übereinstimmung API <-> ICY
+                api_combined = f"{api_artist} - {api_title}".strip()
+                try:
+                    sim = _mb_similarity((stream_title or '').strip(), api_combined)
+                except Exception:
+                    sim = 0.0
+                # Akzeptieren wenn sehr ähnlich oder kein ICY-String vorhanden
+                if (stream_title and sim >= 0.9) or (not stream_title):
                     xbmc.log(
-                        f"[{ADDON_NAME}] MusicBrainz unentschieden (API-Quelle), "
-                        f"nutze API-Reihenfolge: Artist='{api_artist}', Title='{api_title}'",
-                        xbmc.LOGDEBUG
+                        f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', "
+                        f"Title='{api_title}' → MB entscheidet Reihenfolge (sim={sim:.2f})",
+                        xbmc.LOGINFO
                     )
-                    mb_artist, mb_title = api_artist, api_title
-                    mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
-                if mb_artist in invalid: mb_artist = None
-                if mb_title in invalid:  mb_title  = None
-                if mb_artist or mb_title:
-                    return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
+                    mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = \
+                        _identify_artist_title_via_musicbrainz(api_artist, api_title)
+                    if uncertain:
+                        xbmc.log(
+                            f"[{ADDON_NAME}] MusicBrainz unentschieden (API-Quelle), "
+                            f"nutze API-Reihenfolge: Artist='{api_artist}', Title='{api_title}'",
+                            xbmc.LOGDEBUG
+                        )
+                        mb_artist, mb_title = api_artist, api_title
+                        mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
+                    if mb_artist in invalid: mb_artist = None
+                    if mb_title in invalid:  mb_title  = None
+                    if mb_artist or mb_title:
+                        return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
+                else:
+                    xbmc.log(f"[{ADDON_NAME}] API-Ergebnis weicht von ICY ab (sim={sim:.2f}) — ignoriere API", xbmc.LOGDEBUG)
 
         # --- ICY-Fallback ---
         if not stream_title or stream_title in INVALID_METADATA_VALUES or _NUMERIC_ID_RE.match(stream_title):
@@ -1043,8 +1063,9 @@ class RadioMonitor(xbmc.Monitor):
         metaint = stream_info['metaint']
         response = stream_info.get('response')
         last_title = ""
-        last_song_time = 0.0        # Zeitpunkt des letzten gültigen Titelwechsels
-        song_timeout   = SONG_TIMEOUT_FALLBACK_S  # wird überschrieben wenn MB eine Länge liefert
+        # Nutze zentrale Shared-Timer im RadioMonitor-Objekt
+        self._last_song_time = 0.0        # Zeitpunkt des letzten gültigen Titelwechsels
+        self._song_timeout   = SONG_TIMEOUT_FALLBACK_S  # wird überschrieben wenn MB eine Länge liefert
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
@@ -1082,6 +1103,12 @@ class RadioMonitor(xbmc.Monitor):
                         
                         # Prüfe ob sich etwas geändert hat (auch leerer Titel zählt)
                         if stream_title != last_title:
+                            # Bei neuem StreamTitle: MusicBrainz-Cache invalidieren
+                            try:
+                                _mb_cache.clear()
+                                xbmc.log(f"[{ADDON_NAME}] MB-Cache invalidiert wegen Titelwechsel", xbmc.LOGDEBUG)
+                            except Exception:
+                                pass
                             last_title = stream_title
                             
                             xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
@@ -1107,7 +1134,7 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.BAND_MEM)
                                 WINDOW.clearProperty(_P.GENRE)
                                 WINDOW.clearProperty(_P.STREAM_TTL)
-                                last_song_time = 0.0  # kein gültiger Song → Timer deaktivieren
+                                self._last_song_time = 0.0  # kein gültiger Song → Timer deaktivieren
                                 continue
                             
                             if stream_title not in INVALID_METADATA_VALUES:
@@ -1157,10 +1184,10 @@ class RadioMonitor(xbmc.Monitor):
                             # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
                             # Bei MB-Länge: Länge + Puffer; sonst Fallback.
                             if title:
-                                last_song_time = time.time()
-                                song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
+                                self._last_song_time = time.time()
+                                self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
                                 xbmc.log(
-                                    f"[{ADDON_NAME}] Song-Timeout: {song_timeout:.0f}s "
+                                    f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s "
                                     f"(MB-Länge: {duration_ms}ms)",
                                     xbmc.LOGDEBUG
                                 )
@@ -1253,9 +1280,9 @@ class RadioMonitor(xbmc.Monitor):
 
                     # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
                     # Läuft jede Iteration (~1s) – kein extra Thread notwendig.
-                    if last_song_time and time.time() - last_song_time > song_timeout:
+                    if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                         xbmc.log(
-                            f"[{ADDON_NAME}] Song-Timeout abgelaufen ({song_timeout:.0f}s) – lösche Song-Properties",
+                            f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
                             xbmc.LOGDEBUG
                         )
                         WINDOW.clearProperty(_P.ARTIST)
@@ -1268,7 +1295,7 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_MEM)
                         WINDOW.clearProperty(_P.GENRE)
                         WINDOW.clearProperty(_P.STREAM_TTL)
-                        last_song_time = 0.0  # Verhindert wiederholtes Löschen
+                        self._last_song_time = 0.0  # Verhindert wiederholtes Löschen
 
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata-Loop (Thread läuft weiter): {str(e)}", xbmc.LOGERROR)
