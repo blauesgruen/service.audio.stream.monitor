@@ -27,3 +27,11 @@ Die Reihenfolge der `xbmcgui.Window.setProperty()`-Aufrufe nicht ohne Grund änd
 ### Stationsname-Filterung ist kein Bug
 ICY-Strings, die nur den Sendernamen enthalten, werden absichtlich verworfen
 → leere Artist/Title-Properties. Das ist korrekt.
+
+### Numerische ICY-Strings
+Numerische StreamTitle-Formate (z.B. "280220 - 391495") werden intern als "kein ICY" behandelt,
+sodass valide API-NowPlaying-Ergebnisse (z.B. von radio.de) angenommen werden können.
+
+### MusicBrainz-Cache
+Bei einer Änderung des `StreamTitle` wird der MusicBrainz-Cache invalidiert (MB-Cache `clear()`),
+um das Weiterverwenden veralteter MBIDs zu verhindern.
