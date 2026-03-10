@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.7">
+<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.0.8">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
@@ -18,8 +18,12 @@
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
     <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
     <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
-    <news>v1.0.7
-- Refactoring: MusicBrainz-Logik, radio.de-Parser, Konstanten, Logging, Cache und HTTP-Client in eigenständige Module ausgelagert. service.py von 2570 auf 1483 Zeilen reduziert. Kein funktionaler Unterschied.
-- Bugfixes zur Vermeidung veralteter Artist/Title-Properties bei Titelwechsel: MusicBrainz-Cache wird bei ICY-StreamTitle-Wechsel invalidiert; radio.de-API-Ergebnisse werden nur akzeptiert, wenn sie mit dem aktuellen ICY-StreamTitle übereinstimmen; Song-Timeouts nutzen MusicBrainz-Länge zur zuverlässigen Löschung alter Properties.</news>
+    <news>v1.0.8 (2026-03-09)
+  - Verbesserung: Numerische StreamTitle-Formate (z. B. "280220 - 391495") werden als kein ICY behandelt, sodass gültige API-NowPlaying-Ergebnisse statt numerischer ICY-Strings akzeptiert werden.
+  - Dokumentation: CLAUDE.md um Hinweise zur Behandlung numerischer ICY-Strings und zur Invalidierung des MusicBrainz-Caches bei Änderungen des StreamTitle ergänzt.
+
+  v1.0.7
+  - Refactoring: MusicBrainz-Logik, radio.de-Parser, Konstanten, Logging, Cache und HTTP-Client in eigenständige Module ausgelagert. service.py von 2570 auf 1483 Zeilen reduziert. Kein funktionaler Unterschied.
+  - Bugfixes zur Vermeidung veralteter Artist/Title-Properties bei Titelwechsel: MusicBrainz-Cache wird bei ICY-StreamTitle-Wechsel invalidiert; radio.de-API-Ergebnisse werden nur akzeptiert, wenn sie mit dem aktuellen ICY-StreamTitle übereinstimmen; Song-Timeouts nutzen MusicBrainz-Länge zur zuverlässigen Löschung alter Properties.</news>
   </extension>
 </addon>

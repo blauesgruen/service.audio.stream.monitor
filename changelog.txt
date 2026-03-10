@@ -1,3 +1,7 @@
+-v1.0.8 (2026-03-09)
+- Verbesserung: Numerische StreamTitle-Formate (z. B. "280220 - 391495") werden als Nicht-ICY behandelt, sodass gültige API-NowPlaying-Ergebnisse angenommen werden, anstatt numerische ICY-Strings zu verwenden.
+- Dokumentation: CLAUDE.md ergänzt mit Hinweisen zur Behandlung numerischer ICY-Strings und zur Invalidierung des MusicBrainz-Caches bei Änderungen des StreamTitle.
+
 v1.0.7 (2026-03-08)
 - Refactoring: Codebasis in eigenständige Module aufgeteilt – constants.py, logger.py, cache.py, api_client.py, musicbrainz.py, radiode.py.
 - Refactoring: Alle MusicBrainz-Funktionen (Query-Recording, Title-Only-Fallback, Work-Kontext, Artist-Info, Artist-Varianten, Album-Extraktion, Similarity) in musicbrainz.py ausgelagert.
