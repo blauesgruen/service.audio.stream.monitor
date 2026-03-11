@@ -24,6 +24,12 @@ from musicbrainz import (
     _mb_cache,
 )
 from radiode import parse_radiode_api_title as _parse_radiode_api_title
+from metadata import (
+    extract_stream_title as _extract_stream_title,
+    parse_stream_title_simple as _parse_stream_title_simple,
+    parse_stream_title_complex as _parse_metadata_complex,
+    get_last_separator_variant as _get_last_separator_variant
+)
 
 
 # Window-Properties für die Skin
@@ -300,22 +306,8 @@ class RadioMonitor(xbmc.Monitor):
         return None, None
     
     def parse_stream_title_simple(self, stream_title):
-        """Einfache Trennung ohne API-Aufrufe (für Rekursion)"""
-        if not stream_title or stream_title == "":
-            return None, None
-        
-        # Verschiedene Trennzeichen versuchen
-        separators = [' - ', ' – ', ' — ', ' | ', ': ']
-        
-        for sep in separators:
-            if sep in stream_title:
-                parts = stream_title.split(sep, 1)
-                if len(parts) == 2:
-                    artist = parts[0].strip()
-                    title = parts[1].strip()
-                    return artist, title
-        
-        return None, stream_title.strip()
+        """Einfache Trennung ohne API-Aufrufe (Nutzt zentrales metadata Modul)"""
+        return _parse_stream_title_simple(stream_title)
     
     def get_radiode_api_nowplaying(self, station_name):
         """Holt aktuelle Song-Info direkt von der radio.de API"""
@@ -863,16 +855,8 @@ class RadioMonitor(xbmc.Monitor):
             return None
             
     def extract_stream_title(self, metadata_raw):
-        """Extrahiert den StreamTitle aus den rohen Metadaten"""
-        try:
-            # Format: StreamTitle='Artist - Title';
-            # Wichtig: Non-greedy .*? bis zum letzten ' vor ; um Apostrophe in Titeln zu unterstützen
-            match = re.search(r"StreamTitle='(.*?)';", metadata_raw)
-            if match:
-                return match.group(1)
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler beim Extrahieren des StreamTitle: {str(e)}", xbmc.LOGERROR)
-        return None
+        """Extrahiert den StreamTitle aus den rohen Metadaten (Nutzt zentrales metadata Modul)"""
+        return _extract_stream_title(metadata_raw)
         
     def parse_stream_title(self, stream_title, station_name=None, stream_url=None):
         """
@@ -886,16 +870,11 @@ class RadioMonitor(xbmc.Monitor):
         invalid = INVALID_METADATA_VALUES + ["", station_name]
 
         # --- API als erste Quelle ---
-        # Nebeneffekte: get_nowplaying_from_apis() → get_radiode_api_nowplaying()
-        # setzt _P.STATION und self.station_logo.
         if station_name and stream_url:
             api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
             if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
                 # Prüfe Übereinstimmung API <-> ICY
                 api_combined = f"{api_artist} - {api_title}".strip()
-                # Wenn der StreamTitle rein numerisch ist (z.B. "280220 - 391495"),
-                # behandeln wir ihn hier als "kein ICY", damit gültige API-Daten
-                # angenommen werden können.
                 is_numeric_icy = bool(stream_title and _NUMERIC_ID_RE.match(stream_title))
                 effective_stream_title = None if is_numeric_icy else stream_title
                 try:
@@ -903,155 +882,48 @@ class RadioMonitor(xbmc.Monitor):
                 except Exception:
                     sim = 0.0
 
-                # Akzeptieren wenn sehr ähnlich (bei vorhandenem, nicht-numerischem ICY)
-                # oder wenn kein ICY / numerischer ICY vorliegt (API nutzen)
                 if (effective_stream_title and sim >= 0.9) or (not effective_stream_title):
-                    xbmc.log(
-                        f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', "
-                        f"Title='{api_title}' → MB entscheidet Reihenfolge (sim={sim:.2f})",
-                        xbmc.LOGINFO
-                    )
+                    xbmc.log(f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', Title='{api_title}' (sim={sim:.2f})", xbmc.LOGINFO)
                     mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = \
                         _identify_artist_title_via_musicbrainz(api_artist, api_title)
                     if uncertain:
-                        xbmc.log(
-                            f"[{ADDON_NAME}] MusicBrainz unentschieden (API-Quelle), "
-                            f"nutze API-Reihenfolge: Artist='{api_artist}', Title='{api_title}'",
-                            xbmc.LOGDEBUG
-                        )
                         mb_artist, mb_title = api_artist, api_title
                         mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
                     if mb_artist in invalid: mb_artist = None
                     if mb_title in invalid:  mb_title  = None
                     if mb_artist or mb_title:
                         return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
-                else:
-                    xbmc.log(f"[{ADDON_NAME}] API-Ergebnis weicht von ICY ab (sim={sim:.2f}) — ignoriere API", xbmc.LOGDEBUG)
 
-        # --- ICY-Fallback ---
-        if not stream_title or stream_title in INVALID_METADATA_VALUES or _NUMERIC_ID_RE.match(stream_title):
-            xbmc.log(f"[{ADDON_NAME}] StreamTitle leer/ungueltig und kein API-Ergebnis: '{stream_title}'", xbmc.LOGDEBUG)
+        # --- ICY-Analyse (via metadata Modul) ---
+        artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
+        if not artist and not title:
             return None, None, '', '', '', '', 0
 
-        # --- Stationsname-Check (ganzer StreamTitle) – VOR jedem Split ---
-        # Verhindert, dass reine ICY-Senderkennung (z.B. "NDR 90,3") als Artist landet.
-        # Vergleich direkt mit station_name aus der Quelle – kein Window-Property-Lookup nötig.
-        if station_name and _mb_similarity(stream_title.strip().lower(), station_name.strip().lower()) >= 0.8:
-            xbmc.log(
-                f"[{ADDON_NAME}] StreamTitle entspricht Stationsname → kein Song: '{stream_title}'",
-                xbmc.LOGDEBUG
-            )
-            return None, None, '', '', '', '', 0
-
-        # --- 'von'-Format → nur wenn Title in Anführungszeichen (sonst Programm-Ansage) ---
-        von_match = re.match(r'^"(.+?)"\s+von\s+(.+)$', stream_title, re.IGNORECASE)
-        if von_match:
-            title  = von_match.group(1).strip()
-            artist = von_match.group(2).strip()
-            xbmc.log(f"[{ADDON_NAME}] 'von' Format erkannt: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
-            if uncertain:
-                xbmc.log(f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze 'von'-Ergebnis: Artist='{artist}', Title='{title}'", xbmc.LOGDEBUG)
-                mb_artist, mb_title = artist, title
-                mb_first_release = ''
-                duration_ms = 0
-            if mb_artist in invalid: mb_artist = None
-            if mb_title in invalid:  mb_title  = None
-            return mb_artist or None, mb_title or None, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
-
-        # --- Trennzeichen → part1 / part2 ---
-        # Zusätzlich: last-separator Split als Alternative bei mehrfachem ' - '.
-        # Hintergrund: Titel wie "'74 - '75" enthalten selbst ein ' - ', was beim
-        # ersten Split zu falschem Artist "'74" und Title "'75 - Connells" führt.
-        # Künstlernamen hingegen verwenden nie ' - ' als Trenner (sondern &, feat., /).
-        # Daher ist der LETZTE ' - ' mit hoher Wahrscheinlichkeit der echte Separator.
-        part1, part2 = None, None
-        alt_part1, alt_part2 = None, None  # last-separator Variante
-        separators = [' - ', ' – ', ' — ', ' | ', ': ']
-        for sep in separators:
-            if sep in stream_title:
-                parts = stream_title.split(sep, 1)
-                if len(parts) == 2:
-                    part1 = parts[0].strip()
-                    part2 = parts[1].strip()
-                # Erzeuge last-separator Variante nur für ' - ' mit mehr als einem Vorkommen
-                if sep == ' - ' and stream_title.count(' - ') > 1:
-                    last_idx = stream_title.rfind(' - ')
-                    alt_part1 = stream_title[:last_idx].strip()  # alles vor dem letzten ' - '
-                    alt_part2 = stream_title[last_idx + 3:].strip()  # alles nach dem letzten ' - '
-                    xbmc.log(
-                        f"[{ADDON_NAME}] Mehrfaches ' - ' erkannt – zusätzliche Variante: "
-                        f"Title='{alt_part1}' / Artist='{alt_part2}'",
-                        xbmc.LOGDEBUG
-                    )
-                break
-
-        if not part1 or not part2:
-            # Kein Trennzeichen → ganzer String ist vermutlich nur Title
-            # Stationsname als Titel ausschließen
-            clean = stream_title.strip()
-            if clean in INVALID_METADATA_VALUES:
-                return None, None, '', '', '', '', 0
-            if station_name and _mb_similarity(clean.lower(), station_name.lower()) >= 0.8:
-                xbmc.log(f"[{ADDON_NAME}] Kein Trennzeichen, aber String aehnelt Stationsname -> ignoriert: '{clean}'", xbmc.LOGDEBUG)
-                return None, None, '', '', '', '', 0
-            return None, clean, '', '', '', '', 0
-
-        # Stationsname in part1 oder part2 → kein Song sondern Sender-Info
-        station_lower = (station_name or '').lower().strip()
-        if station_lower and (
-            _mb_similarity(part1.lower(), station_lower) >= 0.8 or
-            _mb_similarity(part2.lower(), station_lower) >= 0.8
-        ):
-            xbmc.log(f"[{ADDON_NAME}] Stationsname in ICY-Parts erkannt → kein Song: '{stream_title}'", xbmc.LOGDEBUG)
-            return None, None, '', '', '', '', 0
-
-        # --- MusicBrainz zur Reihenfolge-Bestimmung (ICY-Fallback) ---
-        # MB entscheidet bidirektional welcher Part Artist und welcher Title ist.
-        # Sonderfall: Bei mehrfachem ' - ' wird zuerst die last-separator Variante
-        # geprüft (alt_part1=Title, alt_part2=Artist). Nur bei uncertain=True wird
-        # auf die Standard-Variante (part1/part2) zurückgefallen.
+        # MusicBrainz zur Verifikation und Vervollständigung
         mb_first_release = ''
         duration_ms = 0
-        if alt_part1 and alt_part2:
-            # Last-separator Variante zuerst probieren: alt_part1=Title, alt_part2=Artist
-            xbmc.log(
-                f"[{ADDON_NAME}] MusicBrainz: prüfe last-separator Variante: "
-                f"Title='{alt_part1}', Artist='{alt_part2}'",
-                xbmc.LOGINFO
-            )
-            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(alt_part1, alt_part2)
+        
+        if has_multi:
+            # Mehrfaches ' - ' -> last-separator Variante prüfen
+            alt_p1, alt_p2 = _get_last_separator_variant(stream_title)
+            xbmc.log(f"[{ADDON_NAME}] MusicBrainz: prüfe last-separator Variante: Title='{alt_p1}', Artist='{alt_p2}'", xbmc.LOGINFO)
+            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(alt_p1, alt_p2)
             if uncertain:
-                xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz last-separator unentschieden – "
-                    f"fallback auf Standard-Split: Title='{part1}', Artist='{part2}'",
-                    xbmc.LOGINFO
-                )
-                mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(part1, part2)
-                if uncertain:
-                    mb_artist, mb_title = part1, part2
-                    mb_album, mb_album_date, mbid = '', '', ''
-                    mb_first_release = ''
-                    duration_ms = 0
+                # Fallback auf Standard-Split
+                mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
         else:
-            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(part1, part2)
-            if uncertain:
-                # ICY-Standard beibehalten: part1=Artist, part2=Title
-                # (nicht stream_title als Ganzes – das verliert die Trennung)
-                xbmc.log(
-                    f"[{ADDON_NAME}] MusicBrainz unentschieden, nutze ICY-Standard: "
-                    f"Artist='{part1}', Title='{part2}'",
-                    xbmc.LOGDEBUG
-                )
-                mb_artist, mb_title = part1, part2
-                mb_album, mb_album_date, mbid = '', '', ''
-                mb_first_release = ''
-                duration_ms = 0
+            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
 
+        if uncertain:
+            # ICY-Standard beibehalten
+            mb_artist, mb_title = artist or None, title or None
+            mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
+            
         if mb_artist in invalid: mb_artist = None
         if mb_title in invalid:  mb_title  = None
         if not mb_artist and not mb_title:
             return None, None, '', '', '', '', 0
+            
         return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
         
     def metadata_worker(self, url, generation):
