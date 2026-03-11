@@ -15,6 +15,7 @@ from constants import (
 from api_client import APIClient
 from cache import MusicBrainzCache
 from logger import log_debug, log_info, log_warning
+from metadata import clean_title_part as _clean_title_part, get_artist_variants as _get_artist_variants
 
 
 # --- Module-Level Singletons ---
@@ -266,51 +267,20 @@ def _musicbrainz_artist_variants(artist_part):
         seen.add(key)
         variants.append((label, candidate))
 
-    def normalize_apostrophes(value):
-        return value.replace("'", "'").replace("`", "'")
-
-    def remove_apostrophes(value):
-        return value.replace("'", "").replace("'", "")
-
-    def swap_comma_name(value):
-        match = re.match(r"^\s*([^,]+),\s*(.+)\s*$", value)
-        if not match:
-            return value
-        last_name = match.group(1).strip()
-        first_name = match.group(2).strip()
-        return f"{first_name} {last_name}".strip()
-
-    def split_camelcase(value):
-        # "DeBurgh" → "De Burgh", "McDonald" → "Mc Donald"
-        return re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', value)
-
     add_variant("original", original)
+    
+    # Nutze zentrale Normalisierungen aus metadata.py
+    for variant in _get_artist_variants(original):
+        if variant == original: continue
+        add_variant("normalized-variant", variant)
+
     if ' & ' in original:
         add_variant("and-for-ampersand", original.replace(' & ', ' and '))
-
-    add_variant("apostrophe-normalized", normalize_apostrophes(original))
-    add_variant("apostrophe-removed", remove_apostrophes(normalize_apostrophes(original)))
-
-    camelcase_split = split_camelcase(original)
-    if camelcase_split != original:
-        add_variant("camelcase-split", camelcase_split)
-
-    comma_swapped = swap_comma_name(original)
-    if comma_swapped != original:
-        add_variant("comma-swapped", comma_swapped)
-        comma_camel = split_camelcase(comma_swapped)
-        if comma_camel != comma_swapped:
-            add_variant("comma-swapped+camelcase-split", comma_camel)
-        if ' & ' in comma_swapped:
-            add_variant("comma-swapped+and-for-ampersand", comma_swapped.replace(' & ', ' and '))
-        add_variant("comma-swapped+apostrophe-normalized", normalize_apostrophes(comma_swapped))
-        add_variant("comma-swapped+apostrophe-removed", remove_apostrophes(normalize_apostrophes(comma_swapped)))
 
     # Erster Künstler vor & / feat. / ft. / with
     first_artist = re.split(r'\s*(?:&|feat\.?|ft\.?|with)\s+', original, maxsplit=1)[0].strip()
     if first_artist != original:
         add_variant("first-artist", first_artist)
-        add_variant("first-artist+apostrophe-normalized", normalize_apostrophes(first_artist))
 
     # Letzter Fallback: Token-Query ohne Anführungszeichen.
     add_variant("no-quotes", original)
@@ -719,27 +689,8 @@ def _identify_artist_title_via_musicbrainz(part1, part2):
         return part1, part2, '', '', '', '', True, 0
 
     # --- Bereinigung der Titel-Parts für die MusicBrainz-Suche ---
-    def clean_title_part(part):
-        """
-        Entfernt bekannte Metadaten-Tags in Klammern (Radio Edit, Remaster, feat. ...).
-        Iterativ, um gestapelte Klammern zu erfassen.
-        Führende Klammern wie "(I've Had) The Time of My Life" bleiben unberührt.
-        """
-        keywords = [
-            'Official', 'Radio', 'Original', 'Live', 'Remix', 'Edit',
-            'Version', 'Mix', 'Acoustic', 'feat', 'ft', 'with', 'TM',
-            'Remaster', 'Remastered', 'Bonus', 'Deluxe', 'Extended',
-        ]
-        keyword_pattern = r'\s*[\(\[][^\)\]]*(' + '|'.join(keywords) + r')[^\)\]]*[\)\]]'
-        prev = None
-        cleaned = part
-        while prev != cleaned:
-            prev = cleaned
-            cleaned = re.sub(keyword_pattern, '', cleaned, flags=re.IGNORECASE).strip()
-        return cleaned
-
-    p1_cleaned = clean_title_part(part1)
-    p2_cleaned = clean_title_part(part2)
+    p1_cleaned = _clean_title_part(part1)
+    p2_cleaned = _clean_title_part(part2)
 
     log_debug(f"MusicBrainz: Suche Recording für '{part1}' / '{part2}'")
     if p1_cleaned != part1 or p2_cleaned != part2:
