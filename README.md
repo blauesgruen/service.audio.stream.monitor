@@ -24,13 +24,6 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
-## Release Notes (kurz)
-
-- v1.0.7 (Hotfix 2026-03-09): Kleinere Bugfixes
-   - MusicBrainz-Cache wird nun bei jedem ICY-StreamTitle-Wechsel invalidiert, um zu verhindern, dass veraltete MBID/Artist-Werte erhalten bleiben.
-   - radio.de-API-Ergebnisse werden nur akzeptiert, wenn sie mit dem aktuellen ICY-StreamTitle übereinstimmen; verzögerte API-Antworten werden ignoriert.
-   - Song-Timeout-Logik verbessert: MB-Länge wird verwendet, damit Properties nach Song-Ende zuverlässig gelöscht werden.
-
 ## Verfügbare Window Properties
 
 Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werden können:
@@ -111,8 +104,9 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 
 | Modul | Inhalt |
 |-------|--------|
-| `service.py` | PlayerMonitor, RadioMonitor, ICY-Stream-Handling, Property-Management |
-| `musicbrainz.py` | Alle MusicBrainz-API-Funktionen, Artist/Title-Erkennung, Album-Auswahl |
+| `metadata.py` | Metadaten-Parsing & Normalisierung, ICY-Extraktion, Artist-Varianten |
+| `service.py` | PlayerMonitor, RadioMonitor, Service-Steuerung, Property-Management |
+| `musicbrainz.py` | Alle MusicBrainz-API-Funktionen, Album-Auswahl, Artist-Info |
 | `radiode.py` | radio.de API Titel-Parser |
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
