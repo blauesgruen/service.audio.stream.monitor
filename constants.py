@@ -39,7 +39,7 @@ MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 # Song-Timeout: Wie lange Properties nach dem letzten Titelwechsel behalten werden.
 # Wenn MB eine Songlänge liefert, wird diese + BUFFER verwendet; sonst FALLBACK.
 SONG_TIMEOUT_FALLBACK_S = 7 * 60  # Sekunden (Fallback wenn MB keine Länge liefert)
-SONG_TIMEOUT_BUFFER_S = 90         # Sekunden Puffer nach erwartetem Songerende
+SONG_TIMEOUT_BUFFER_S = 30         # Sekunden Puffer nach erwartetem Songerende
 
 # --- Window Property-Namen ---
 
