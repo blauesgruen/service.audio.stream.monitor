@@ -9,7 +9,7 @@ Das Service-Addon beobachtet aktive HTTP/HTTPS-Audio-Streams in Kodi und schreib
 Window-Properties `RadioMonitor.*`.
 
 Kernziele:
-- robuste Erkennung von Artist/Title aus ICY, radio.de API und Kodi MusicPlayer
+- robuste Erkennung von Artist/Title aus ICY, radio.de API, TuneIn API und Kodi MusicPlayer
 - Validierung/Anreicherung ueber MusicBrainz (MBID, Album, FirstRelease, Genre, Banddaten)
 - stabile Property-Updates fuer konsumierende Skins/Addons (insb. Artist Slideshow Trigger-Verhalten)
 
@@ -40,13 +40,17 @@ Startpunkt:
 Event-/Polling-Quellen:
 - `PlayerMonitor` (Kodi `xbmc.Player`):
   - `onPlayBackStarted()`: versucht frueh `plugin_slug` aus radio.de-light Plugin-URL zu extrahieren
+  - zentrale API-Source-Erkennung (Whitelist):
+    - `plugin.audio.radiode`
+    - `plugin.audio.radio_de_light`
+    - `plugin.audio.tunein2017`
   - `onAVStarted()`: behandelt Video/Lokaldateien als harte Stop-Szenarien und liest frueh Logo aus `ListItem.Icon`
 - `RadioMonitor.run()`:
   - Polling alle 2 Sekunden (`check_playing()`)
 
 Worker:
 - `metadata_worker(url, generation)` fuer ICY-Streams
-- `api_metadata_worker(generation)` als Fallback bei fehlendem ICY
+- `api_metadata_worker(generation)` als Fallback bei fehlendem ICY (radio.de / TuneIn)
 - `_musicplayer_metadata_fallback(generation)` als Fallback ohne ICY und ohne API-Basis
 
 ## 4) Zustandsmodell und Thread-Sicherheit
@@ -134,7 +138,7 @@ Im Loop:
 ### 6.3 API-Fallback-Worker
 
 `api_metadata_worker()` (Intervall 10s):
-- aktiviert wenn kein ICY und `use_api_fallback` oder `plugin_slug` vorhanden
+- aktiviert nur wenn `api_source` aus der Whitelist stammt und `use_api_fallback` oder `plugin_slug` oder `tunein_station_id` vorhanden
 - holt Titel via `get_nowplaying_from_apis()`
 - bei Artist+Title:
   - MB-Validierung/Anreicherung
@@ -218,6 +222,15 @@ Wenn Timeout ablaeuft:
 - bevorzugt Slug aus Plugin-URL (`plugin_slug`), alternativ aus Logo-URL
 - Details-API kann kanonischen Stationsnamen + Logo setzen
 - now-playing API erst ueber Slug/Station-ID, sonst Search-API mit Match-Scoring
+
+TuneIn:
+- TuneIn-ID-Erkennung aus Plugin-URL (`plugin.audio.tunein2017`) oder Stream-URL
+- API-Queries ueber OPML-Endpunkte (`Describe.ashx`, `Tune.ashx`)
+- Kandidatenfelder wie `playing`, `subtext`, `subtitle`, `title` werden heuristisch geparst
+
+API-Restriktion:
+- Keine radio.de- oder TuneIn-API-Calls fuer andere Addons/Streams
+- Steuerung zentral ueber `api_source` + Helper (`_is_api_source_allowed`, `_can_use_radiode_api`, `_can_use_tunein_api`)
 
 Schutzlogik:
 - numerische Titel werden verworfen

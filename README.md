@@ -1,8 +1,9 @@
-# Audio Stream Monitor
+﻿# Audio Stream Monitor
 
 Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die Metadaten (Titel, Interpret, etc.) korrekt aus.
 
-**Funktioniert mit jedem Addon**, das Audio-Streams abspielt (Radio.de, TuneIn, Musik-Streaming, etc.).
+Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspielt.
+**API-Now-Playing wird bewusst nur fuer folgende Quellen genutzt:** `plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`.
 
 ## Features
 
@@ -12,13 +13,14 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 - ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format, last-separator-Variante)
 - ✅ Stationsname-Filterung: ICY-Strings, die nur den Sendernamen enthalten, werden nicht als Artist/Title übernommen
 - ✅ MusicBrainz-Abgleich zur Validierung und Korrektur von Artist, Title, Album, AlbumDate, FirstRelease und MBID
+- ✅ Konservative MB-Entscheidung bei vertauschten Kandidaten über kombinierten Score (`MB score * artist similarity`) mit Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`)
 - ✅ Erweitertes Artist-Matching: CamelCase-Splitting ("DeBurgh" → "De Burgh"), Komma-Umkehr, Apostroph-Normalisierung und tokenbasierter Fallback
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
-- ✅ radio.de Now-Playing API als primäre Metadaten-Quelle: wird vor dem ICY-StreamTitle ausgewertet, ICY dient als Fallback
+- ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
-- ✅ MusicPlayer-Fallback für Streams ohne ICY und ohne radio.de API (AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
+- ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
 - ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge + 90s Puffer, Fallback 7 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
 - ✅ Automatisches Löschen der Properties beim Stoppen
@@ -100,6 +102,11 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - ` | ` (Pipe)
 - `: ` (Doppelpunkt)
 
+### API-Whitelist und MB-Schwelle
+- API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
+- Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
+- Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
+
 ### Modulstruktur
 
 | Modul | Inhalt |
@@ -133,11 +140,11 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 
 - Kodi 19 (Matrix) und höher
 - Alle Plattformen (Windows, Linux, Android, etc.)
-- Getestet mit: radio.de, radio.de light, Mother Earth Radio (AzuraCast), Intergalactic, I Love Music, Ampache
+- Getestet mit: radio.de, radio.de light, TuneIn, Mother Earth Radio (AzuraCast), Intergalactic, I Love Music, Ampache
 
 ## Bekannte Limitierungen
 
-- Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift der MusicPlayer-Fallback (AzuraCast) oder die radio.de API
+- Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift entweder die API (nur whitelisted Addons: radio.de/radio.de light/TuneIn) oder der MusicPlayer-Fallback
 - Manche Sender senden nur den Sendernamen statt Interpret/Titel – dieser wird korrekt gefiltert und nicht als Artist oder Title übernommen; alle Properties bleiben in diesem Fall leer
 - Bei verschlüsselten Streams (HTTPS) können manche Server keine ICY-Metadaten liefern
 - Künstler ohne Einträge in fanart.tv oder theaudiodb liefern keine Hintergrundbilder für Artist Slideshow
@@ -149,3 +156,4 @@ MIT License - siehe LICENSE.txt
 ## Danksagung
 
 Dieses Addon wurde ursprünglich für das "Radio.de light" Addon von Publish3r entwickelt und zu einem universellen Service für alle Audio-Streams erweitert.
+
