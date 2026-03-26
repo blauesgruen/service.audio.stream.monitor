@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from constants import (
     ADDON, ADDON_ID, ADDON_NAME, ADDON_VERSION,
     RADIODE_SEARCH_API_URL, RADIODE_NOWPLAYING_API_URL, RADIODE_DETAILS_API_URL,
+    TUNEIN_DESCRIBE_API_URL, TUNEIN_TUNE_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_BUFFER_S,
     PropertyNames as _P, NUMERIC_ID_PATTERN as _NUMERIC_ID_RE
@@ -43,10 +44,11 @@ class PlayerMonitor(xbmc.Player):
     
     def onPlayBackStarted(self):
         """Liest Plugin-Slug aus radio.de light URL – vor Stream-Auflösung verfügbar"""
-        self.radio_monitor.plugin_slug = None  # immer zurücksetzen, auch bei Nicht-radio.de-Streams
+        self.radio_monitor._reset_api_context()
         try:
             playing_file = self.getPlayingFile()
             if 'plugin.audio.radio_de_light' in playing_file:
+                self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_RADIODE)
                 parsed = urlparse(playing_file)
                 params = parse_qs(parsed.query)
                 iconimage_list = params.get('iconimage', [])
@@ -57,6 +59,19 @@ class PlayerMonitor(xbmc.Player):
                         slug = slug_match.group(1)
                         self.radio_monitor.plugin_slug = slug
                         xbmc.log(f"[{ADDON_NAME}] Plugin-Slug aus iconimage: '{slug}'", xbmc.LOGINFO)
+            elif 'plugin.audio.radiode' in playing_file:
+                self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_RADIODE)
+                xbmc.log(f"[{ADDON_NAME}] radio.de Addon erkannt (plugin.audio.radiode)", xbmc.LOGDEBUG)
+            elif 'plugin.audio.tunein2017' in playing_file:
+                self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_TUNEIN)
+                tunein_id = self.radio_monitor._extract_tunein_station_id(playing_file)
+                if tunein_id:
+                    self.radio_monitor.tunein_station_id = tunein_id
+                    xbmc.log(f"[{ADDON_NAME}] TuneIn Station-ID aus Plugin-URL: '{tunein_id}'", xbmc.LOGINFO)
+
+            # Fallback: Addon-Plugin-ID ist nicht immer im aufgeloesten PlayingFile enthalten.
+            # Dann Quelle aus URL-Hints (z.B. aggregator=tunein / aggregator=radio-de) ableiten.
+            self.radio_monitor._ensure_api_source_from_context(playing_file, 'onPlayBackStarted')
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler in onPlayBackStarted: {e}", xbmc.LOGDEBUG)
 
@@ -99,6 +114,14 @@ class RadioMonitor(xbmc.Monitor):
     Hauptklasse für das Monitoring und die Verwaltung von Radio-Streams, Metadaten und Player-Events.
     Verantwortlich für das Setzen und Löschen von Properties, das Aktualisieren von Metadaten und das Handling von API-Fallbacks.
     """
+    API_SOURCE_NONE = ''
+    API_SOURCE_RADIODE = 'radiode'
+    API_SOURCE_TUNEIN = 'tunein'
+    RADIODE_PLUGIN_IDS = ('plugin.audio.radiode', 'plugin.audio.radio_de_light')
+    TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
+    RADIODE_URL_HINTS = ('radio.de', 'radio-assets.com')
+    TUNEIN_URL_HINTS = ('tunein.com', 'radiotime.com', 'cdn-profiles.tunein.com')
+
     def __init__(self):
         super(RadioMonitor, self).__init__()
         self.player = xbmc.Player()
@@ -111,6 +134,9 @@ class RadioMonitor(xbmc.Monitor):
         self.station_logo = None  # Logo URL von radio.de API
         self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
         self.plugin_slug = None   # Sender-Slug aus radio.de light Plugin-URL (iconimage)
+        self.tunein_station_id = None  # TuneIn Station-ID (z.B. s12345)
+        self.api_source = self.API_SOURCE_NONE  # zentrale API-Quellsteuerung (radiode/tunein/none)
+        self._last_api_skip_log = None  # dedupliziert wiederholte "API uebersprungen"-Logs
         self.use_api_fallback = False  # Flag für API-Fallback
         # Zentrale Song-Timeout-Status (wird von Metadata-Workern geteilt)
         self._last_song_time = 0.0
@@ -120,12 +146,106 @@ class RadioMonitor(xbmc.Monitor):
         self.player_monitor = PlayerMonitor(self)
         
         xbmc.log(f"[{ADDON_NAME}] Service gestartet", xbmc.LOGINFO)
+
+    def _reset_api_context(self):
+        """Setzt API-relevanten Zustand zentral zurück."""
+        self.plugin_slug = None
+        self.station_slug = None
+        self.tunein_station_id = None
+        self.api_source = self.API_SOURCE_NONE
+        self._last_api_skip_log = None
+        self.use_api_fallback = False
+
+    def _set_api_source(self, source):
+        """Setzt die erlaubte API-Quelle zentral."""
+        if source in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+            self.api_source = source
+        else:
+            self.api_source = self.API_SOURCE_NONE
+        self._last_api_skip_log = None
+
+    def _infer_api_source_from_text(self, text):
+        """
+        Leitet die API-Quelle aus Plugin- oder Stream-URL ab.
+        Nutzt zentrale Hints (Plugin-IDs, Query-Parameter, Hostname).
+        """
+        if not text:
+            return self.API_SOURCE_NONE
+
+        try:
+            raw = str(text)
+            lowered = raw.lower()
+
+            for addon_id in self.RADIODE_PLUGIN_IDS:
+                if addon_id in lowered:
+                    return self.API_SOURCE_RADIODE
+            for addon_id in self.TUNEIN_PLUGIN_IDS:
+                if addon_id in lowered:
+                    return self.API_SOURCE_TUNEIN
+
+            parsed = urlparse(raw)
+            query = parse_qs(parsed.query)
+            aggregators = [str(v).lower() for v in query.get('aggregator', [])]
+            for value in aggregators:
+                if 'tunein' in value:
+                    return self.API_SOURCE_TUNEIN
+                if 'radio-de' in value or 'radiode' in value:
+                    return self.API_SOURCE_RADIODE
+
+            host = (parsed.netloc or '').lower()
+            if any(hint in host for hint in self.TUNEIN_URL_HINTS):
+                return self.API_SOURCE_TUNEIN
+            if any(hint in host for hint in self.RADIODE_URL_HINTS):
+                return self.API_SOURCE_RADIODE
+        except Exception:
+            pass
+
+        return self.API_SOURCE_NONE
+
+    def _ensure_api_source_from_context(self, text, context):
+        """
+        Setzt api_source nur dann automatisch, wenn noch keine whitelisted
+        Quelle erkannt wurde.
+        """
+        if self._is_api_source_allowed():
+            return self.api_source
+
+        inferred = self._infer_api_source_from_text(text)
+        if inferred in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+            self._set_api_source(inferred)
+            xbmc.log(
+                f"[{ADDON_NAME}] API-Source automatisch erkannt "
+                f"(context={context}, source={inferred})",
+                xbmc.LOGDEBUG
+            )
+        return self.api_source
+
+    def _is_api_source_allowed(self):
+        return self.api_source in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN)
+
+    def _can_use_radiode_api(self):
+        return self.api_source == self.API_SOURCE_RADIODE
+
+    def _can_use_tunein_api(self):
+        return self.api_source == self.API_SOURCE_TUNEIN
+
+    def _log_api_source_blocked(self, context):
+        """Einheitliches, dedupliziertes Log wenn API-Nutzung wegen Source-Whitelist geblockt wird."""
+        source = self.api_source if self.api_source else 'none'
+        key = f"{context}:{source}"
+        if self._last_api_skip_log == key:
+            return
+        self._last_api_skip_log = key
+        xbmc.log(
+            f"[{ADDON_NAME}] API uebersprungen: Source nicht whitelisted (context={context}, source={source})",
+            xbmc.LOGDEBUG
+        )
         
     def clear_properties(self):
         """Löscht alle Radio-Properties"""
-        # Reset Logo und Plugin-Slug
+        # Reset Logo und API-Kontext
         self.station_logo = None
-        self.plugin_slug = None
+        self._reset_api_context()
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -226,8 +346,13 @@ class RadioMonitor(xbmc.Monitor):
         das API-Fallback-Flag, wenn kein icy-metaint Header verfügbar ist.
         Wird aufgerufen wenn der Stream keine ICY-Metadaten liefert.
         """
+        if not self._is_api_source_allowed():
+            self._log_api_source_blocked('setup_api_fallback_from_url')
+            return None
+
         try:
-            if 'radiode' in url.lower() or 'radio.de' in url.lower() or 'radio-de' in url.lower():
+            if self._can_use_radiode_api():
+                self.use_api_fallback = True
                 xbmc.log(f"[{ADDON_NAME}] radio.de Stream erkannt, versuche Stationsnamen aus URL", xbmc.LOGDEBUG)
 
                 match = re.search(r'stream\.([^/]+)\.de/([^/]+)', url)
@@ -245,25 +370,212 @@ class RadioMonitor(xbmc.Monitor):
                     self.set_property_safe(_P.STATION, station_name)
                     xbmc.log(f"[{ADDON_NAME}] Station aus URL erkannt: {station_name}", xbmc.LOGDEBUG)
 
-                    self.use_api_fallback = True
                     self.station_slug = station_slug
 
                     return station_name
+
+            if self._can_use_tunein_api():
+                self.use_api_fallback = True
+                tunein_id = self._extract_tunein_station_id(url)
+                if tunein_id:
+                    self.tunein_station_id = tunein_id
+                    xbmc.log(f"[{ADDON_NAME}] TuneIn Stream erkannt, Station-ID aus URL: '{tunein_id}'", xbmc.LOGDEBUG)
+                else:
+                    xbmc.log(f"[{ADDON_NAME}] TuneIn Stream erkannt, aber keine Station-ID in URL gefunden", xbmc.LOGDEBUG)
         except Exception as e:
             xbmc.log(f"[{ADDON_NAME}] Fehler bei URL-Analyse fuer API-Fallback: {str(e)}", xbmc.LOGDEBUG)
         return None
+
+    def _extract_tunein_station_id(self, text):
+        """
+        Extrahiert eine TuneIn-ID (z.B. s24878, t109814382) aus Plugin- oder Stream-URLs.
+        Unterstützt auch verschachtelt URL-encodete fparams.
+        """
+        if not text:
+            return None
+
+        try:
+            decoded = str(text)
+            for _ in range(3):
+                new_decoded = unquote(decoded)
+                if new_decoded == decoded:
+                    break
+                decoded = new_decoded
+
+            patterns = [
+                r'[?&](?:sid|preset_id|id|stationId)=([sptufl]\d+(?:-\d+)?)',
+                r'["\'](?:sid|preset_id|id|stationId)["\']\s*:\s*["\']([sptufl]\d+(?:-\d+)?)["\']',
+                r'/([sptufl]\d+(?:-\d+)?)(?:[/?&]|$)',
+            ]
+
+            for pattern in patterns:
+                match = re.search(pattern, decoded, re.IGNORECASE)
+                if not match:
+                    continue
+                candidate = (match.group(1) or '').strip()
+                if '-' in candidate:
+                    candidate = candidate.split('-', 1)[0]
+                if re.match(r'^[sptufl]\d+$', candidate, re.IGNORECASE):
+                    return candidate
+        except Exception:
+            pass
+        return None
+
+    def _parse_tunein_nowplaying_candidate(self, value, station_name=None):
+        """Parst einen potenziellen TuneIn Now-Playing-String zu (artist, title)."""
+        if value is None:
+            return None, None
+
+        candidate = str(value).strip()
+        if not candidate:
+            return None, None
+        if candidate.lower().startswith('http'):
+            return None, None
+
+        invalid = INVALID_METADATA_VALUES + ['']
+        if station_name:
+            invalid.append(station_name)
+            invalid.append(station_name.lower())
+
+        if candidate in invalid or candidate.lower() in invalid:
+            return None, None
+
+        # "Song: Artist - Title" -> Prefix entfernen
+        candidate = re.sub(r'^\s*Song:\s*', '', candidate, flags=re.IGNORECASE).strip()
+        if not candidate:
+            return None, None
+
+        # Numerische IDs konsequent ignorieren
+        if _NUMERIC_ID_RE.match(candidate):
+            return None, None
+
+        if ' - ' in candidate:
+            artist, title = self.parse_stream_title_simple(candidate)
+            if title and _NUMERIC_ID_RE.match(title):
+                return None, None
+            if artist and re.match(r'^\d+$', artist):
+                artist = None
+            if title:
+                return artist, title
+
+        # Fallback: ungetrennter Kandidat als Title
+        if not _NUMERIC_ID_RE.match(candidate):
+            return None, candidate
+        return None, None
+
+    def _extract_tunein_from_json(self, payload, station_name=None):
+        """Durchsucht JSON rekursiv nach Now-Playing-Kandidaten."""
+        candidates = []
+        preferred_keys = {
+            'playing', 'song', 'subtitle', 'subtext', 'now_playing', 'nowplaying',
+            'current_song', 'currentsong', 'current_track', 'title', 'text'
+        }
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    k = str(key).lower()
+                    if k in preferred_keys and isinstance(value, (str, int, float)):
+                        candidates.append(str(value))
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(payload)
+
+        for candidate in candidates:
+            artist, title = self._parse_tunein_nowplaying_candidate(candidate, station_name)
+            if artist or title:
+                return artist, title
+        return None, None
+
+    def _extract_tunein_from_text(self, text, station_name=None):
+        """Fallback-Parser für XML/Plain-Text Antworten aus TuneIn OPML APIs."""
+        if not text:
+            return None, None
+
+        patterns = [
+            r'playing="([^"]+)"',
+            r'subtext="([^"]+)"',
+            r'"playing"\s*:\s*"([^"]+)"',
+            r'"subtitle"\s*:\s*"([^"]+)"',
+            r'"subtext"\s*:\s*"([^"]+)"',
+        ]
+
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                candidate = match.group(1).strip()
+                artist, title = self._parse_tunein_nowplaying_candidate(candidate, station_name)
+                if artist or title:
+                    return artist, title
+        return None, None
+
+    def get_tunein_api_nowplaying(self, station_name=None):
+        """Holt aktuelle Song-Info für TuneIn-Streams über OPML-Endpunkte."""
+        station_id = self.tunein_station_id
+        if not station_id:
+            return None, None
+
+        endpoints = [
+            (TUNEIN_DESCRIBE_API_URL, {'id': station_id, 'render': 'json'}),
+            (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json'}),
+            (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json', 'formats': 'mp3,aac,ogg,hls'}),
+        ]
+
+        for endpoint, params in endpoints:
+            try:
+                response = requests.get(endpoint, params=params, headers=DEFAULT_HTTP_HEADERS, timeout=5)
+                if response.status_code != 200:
+                    xbmc.log(
+                        f"[{ADDON_NAME}] TuneIn API Status {response.status_code} für {endpoint}",
+                        xbmc.LOGDEBUG
+                    )
+                    continue
+
+                try:
+                    payload = response.json()
+                except Exception:
+                    payload = None
+
+                if payload is not None:
+                    artist, title = self._extract_tunein_from_json(payload, station_name)
+                    if artist or title:
+                        xbmc.log(f"[{ADDON_NAME}] ✓ TuneIn API: {artist} - {title}", xbmc.LOGINFO)
+                        return artist, title
+
+                artist, title = self._extract_tunein_from_text(response.text, station_name)
+                if artist or title:
+                    xbmc.log(f"[{ADDON_NAME}] ✓ TuneIn API (Text): {artist} - {title}", xbmc.LOGINFO)
+                    return artist, title
+            except Exception as e:
+                xbmc.log(f"[{ADDON_NAME}] Fehler bei TuneIn API Abfrage ({endpoint}): {e}", xbmc.LOGDEBUG)
+
+        return None, None
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
         """Versucht nowPlaying von verschiedenen APIs zu holen"""
+        if not self._is_api_source_allowed():
+            self._log_api_source_blocked('get_nowplaying_from_apis')
+            return None, None
+
         xbmc.log(f"[{ADDON_NAME}] API-Fallback gestartet für Station: '{station_name}'", xbmc.LOGDEBUG)
 
-        # 1. Versuche radio.de API (sender-unabhängig, funktioniert für alle Stationen)
-        artist, title = self.get_radiode_api_nowplaying(station_name)
-        if artist or title:
-            xbmc.log(f"[{ADDON_NAME}] ✓ radio.de API: {artist} - {title}", xbmc.LOGINFO)
-            return artist, title
+        # 1. radio.de API nur wenn Source=radio.de
+        if self._can_use_radiode_api() and (station_name or self.plugin_slug):
+            artist, title = self.get_radiode_api_nowplaying(station_name)
+            if artist or title:
+                xbmc.log(f"[{ADDON_NAME}] ✓ radio.de API: {artist} - {title}", xbmc.LOGINFO)
+                return artist, title
 
-        # 2. Fallback: Kodi Player InfoTags
+        # 2. TuneIn API nur wenn Source=TuneIn
+        if self._can_use_tunein_api():
+            artist, title = self.get_tunein_api_nowplaying(station_name)
+            if artist or title:
+                xbmc.log(f"[{ADDON_NAME}] ✓ TuneIn API: {artist} - {title}", xbmc.LOGINFO)
+                return artist, title
+
+        # 3. Fallback: Kodi Player InfoTags
         try:
             if self.player.isPlayingAudio():
                 info_tag = self.player.getMusicInfoTag()
@@ -484,6 +796,10 @@ class RadioMonitor(xbmc.Monitor):
     
     def api_metadata_worker(self, generation):
         """Fallback: Pollt verschiedene APIs wenn keine ICY-Metadaten verfügbar"""
+        if not self._is_api_source_allowed():
+            self._log_api_source_blocked('api_metadata_worker_start')
+            return
+
         xbmc.log(f"[{ADDON_NAME}] API Metadata Worker gestartet (Fallback-Modus)", xbmc.LOGDEBUG)
         
         last_title = ""
@@ -495,7 +811,8 @@ class RadioMonitor(xbmc.Monitor):
             while (
                 not self.stop_thread
                 and self.is_playing
-                and (self.use_api_fallback or self.plugin_slug)
+                and self._is_api_source_allowed()
+                and (self.use_api_fallback or self.plugin_slug or self.tunein_station_id)
                 and generation == self.metadata_generation
             ):
                 # station_name aktualisieren falls API in get_radiode_api_nowplaying
@@ -504,8 +821,8 @@ class RadioMonitor(xbmc.Monitor):
                 if fresh_station:
                     station_name = fresh_station
 
-                # Versuche verschiedene APIs (plugin_slug erlaubt Abfrage ohne station_name)
-                if station_name or self.plugin_slug:
+                # Versuche verschiedene APIs (plugin_slug/tunein_station_id erlauben Abfrage ohne station_name)
+                if station_name or self.plugin_slug or self.tunein_station_id:
                     artist, title = self.get_nowplaying_from_apis(station_name, stream_url)
                     
                     if title and title != last_title:
@@ -862,7 +1179,7 @@ class RadioMonitor(xbmc.Monitor):
         """
         Trennt Artist und Title aus dem ICY-StreamTitle.
         Priorität:
-        1. API (radio.de) – erste Quelle; Nebeneffekte: Station+Logo werden gesetzt
+        1. API (radio.de / TuneIn) – erste Quelle; Nebeneffekte: Station+Logo werden gesetzt
         2. 'von'-Format → eindeutig, MusicBrainz zur Bestätigung
         3. Trennzeichen → part1/part2, MusicBrainz zur Reihenfolge-Bestimmung
         4. Fallback: ganzer String als Title
@@ -870,7 +1187,10 @@ class RadioMonitor(xbmc.Monitor):
         invalid = INVALID_METADATA_VALUES + ["", station_name]
 
         # --- API als erste Quelle ---
-        if station_name and stream_url:
+        api_candidate_available = bool(stream_url and (station_name or self.plugin_slug or self.tunein_station_id))
+        if api_candidate_available and not self._is_api_source_allowed():
+            self._log_api_source_blocked('parse_stream_title_api_first')
+        if api_candidate_available and self._is_api_source_allowed():
             api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
             if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
                 # Prüfe Übereinstimmung API <-> ICY
@@ -933,7 +1253,13 @@ class RadioMonitor(xbmc.Monitor):
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
             xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu Fallback", xbmc.LOGWARNING)
-            if (self.use_api_fallback or self.plugin_slug) and generation == self.metadata_generation:
+            if not self._is_api_source_allowed():
+                self._log_api_source_blocked('metadata_worker_no_icy')
+            if (
+                self._is_api_source_allowed()
+                and (self.use_api_fallback or self.plugin_slug or self.tunein_station_id)
+                and generation == self.metadata_generation
+            ):
                 self.api_metadata_worker(generation)
             elif generation == self.metadata_generation:
                 self._musicplayer_metadata_fallback(generation)
@@ -1237,6 +1563,12 @@ class RadioMonitor(xbmc.Monitor):
                     if playing_file != self.current_url:
                         self.current_url = playing_file
                         self.is_playing = True
+                        self._ensure_api_source_from_context(playing_file, 'check_playing_new_url')
+                        if self._can_use_tunein_api() and not self.tunein_station_id:
+                            tunein_id = self._extract_tunein_station_id(playing_file)
+                            if tunein_id:
+                                self.tunein_station_id = tunein_id
+                                xbmc.log(f"[{ADDON_NAME}] TuneIn Station-ID aus Stream-URL: '{tunein_id}'", xbmc.LOGDEBUG)
                         title = None
                         artist = None
                         album = None
@@ -1260,6 +1592,7 @@ class RadioMonitor(xbmc.Monitor):
                             if self.is_real_logo(listitem_icon):
                                 logo = listitem_icon
                                 self.station_logo = logo
+                                self._ensure_api_source_from_context(logo, 'check_playing_listitem_logo')
                                 xbmc.log(f"[{ADDON_NAME}] Logo vom ListItem.Icon: {logo}", xbmc.LOGINFO)
                             
                             # 2. Fallback: Window-Property vom radio.de Addon
@@ -1268,6 +1601,7 @@ class RadioMonitor(xbmc.Monitor):
                                 if self.is_real_logo(radiode_logo):
                                     logo = radiode_logo
                                     self.station_logo = logo
+                                    self._ensure_api_source_from_context(logo, 'check_playing_radiode_logo')
                                     xbmc.log(f"[{ADDON_NAME}] Logo vom radio.de Addon (Window-Property): {logo}", xbmc.LOGINFO)
                             
                             # 3. Fallback: Player Art
@@ -1277,6 +1611,7 @@ class RadioMonitor(xbmc.Monitor):
                                     if self.is_real_logo(player_logo):
                                         logo = player_logo
                                         self.station_logo = logo
+                                        self._ensure_api_source_from_context(logo, f'check_playing_{source}')
                                         xbmc.log(f"[{ADDON_NAME}] Logo von {source}: {logo}", xbmc.LOGINFO)
                                         break
 
