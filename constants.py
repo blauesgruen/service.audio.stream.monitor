@@ -18,6 +18,8 @@ MUSICBRAINZ_API_URL = "https://musicbrainz.org/ws/2/recording/"
 RADIODE_SEARCH_API_URL = "https://prod.radio-api.net/stations/search"
 RADIODE_NOWPLAYING_API_URL = "https://api.radio.de/stations/now-playing"
 RADIODE_DETAILS_API_URL = "https://prod.radio-api.net/stations/details"
+TUNEIN_DESCRIBE_API_URL = "https://opml.radiotime.com/Describe.ashx"
+TUNEIN_TUNE_API_URL = "https://opml.radiotime.com/Tune.ashx"
 
 # --- HTTP Headers ---
 
