@@ -39,9 +39,10 @@ INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 
 # Song-Timeout: Wie lange Properties nach dem letzten Titelwechsel behalten werden.
-# Wenn MB eine Songlänge liefert, wird diese + BUFFER verwendet; sonst FALLBACK.
-SONG_TIMEOUT_FALLBACK_S = 7 * 60  # Sekunden (Fallback wenn MB keine Länge liefert)
-SONG_TIMEOUT_BUFFER_S = 30         # Sekunden Puffer nach erwartetem Songerende
+# Wenn MB eine Songlaenge liefert, wird SONG_TIMEOUT_EARLY_CLEAR_S abgezogen.
+# Wenn keine MB-Laenge bekannt ist, greift SONG_TIMEOUT_FALLBACK_S.
+SONG_TIMEOUT_EARLY_CLEAR_S = 15
+SONG_TIMEOUT_FALLBACK_S = 4 * 60
 
 # --- Window Property-Namen ---
 
@@ -63,6 +64,10 @@ class PropertyNames:
     LOGO       = 'RadioMonitor.Logo'
     BAND_FORM  = 'RadioMonitor.BandFormed'
     BAND_MEM   = 'RadioMonitor.BandMembers'
+    MB_DUR_MS  = 'RadioMonitor.MBDurationMs'
+    MB_DUR_S   = 'RadioMonitor.MBDurationS'
+    TMO_TOTAL  = 'RadioMonitor.TimeoutTotal'
+    TMO_LEFT   = 'RadioMonitor.TimeoutRemaining'
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames

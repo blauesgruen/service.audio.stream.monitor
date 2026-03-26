@@ -13,7 +13,7 @@ from constants import (
     RADIODE_SEARCH_API_URL, RADIODE_NOWPLAYING_API_URL, RADIODE_DETAILS_API_URL,
     TUNEIN_DESCRIBE_API_URL, TUNEIN_TUNE_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
-    SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_BUFFER_S,
+    SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
     PropertyNames as _P, NUMERIC_ID_PATTERN as _NUMERIC_ID_RE
 )
 from logger import log_debug, log_info, log_warning, log_error
@@ -240,12 +240,92 @@ class RadioMonitor(xbmc.Monitor):
             f"[{ADDON_NAME}] API uebersprungen: Source nicht whitelisted (context={context}, source={source})",
             xbmc.LOGDEBUG
         )
+
+    def _clear_timer_debug_properties(self):
+        """Loescht Debug-Properties fuer MB-Dauer und Song-Timer."""
+        WINDOW.clearProperty(_P.MB_DUR_MS)
+        WINDOW.clearProperty(_P.MB_DUR_S)
+        WINDOW.clearProperty(_P.TMO_TOTAL)
+        WINDOW.clearProperty(_P.TMO_LEFT)
+
+    def _reset_song_timeout_state(self, clear_debug=False):
+        """Setzt den Song-Timer-Zustand zentral zurueck."""
+        self._last_song_time = 0.0
+        self._song_timeout = SONG_TIMEOUT_FALLBACK_S
+        if clear_debug:
+            self._clear_timer_debug_properties()
+
+    def _update_timeout_remaining_property(self):
+        """Aktualisiert den verbleibenden Song-Timer fuer Skin-Debugging."""
+        if self._last_song_time and self._song_timeout > 0:
+            elapsed = time.time() - self._last_song_time
+            remaining = max(0, int(self._song_timeout - elapsed))
+            WINDOW.setProperty(_P.TMO_LEFT, str(remaining))
+        else:
+            WINDOW.clearProperty(_P.TMO_LEFT)
+
+    def _compute_song_timeout(self, duration_ms):
+        """
+        Berechnet zentral den Song-Timeout:
+        - bei MB-Laenge: Songlaenge minus SONG_TIMEOUT_EARLY_CLEAR_S
+        - ohne MB-Laenge: SONG_TIMEOUT_FALLBACK_S
+        """
+        duration_s = 0.0
+        try:
+            if duration_ms:
+                duration_s = float(duration_ms) / 1000.0
+        except Exception:
+            duration_s = 0.0
+
+        if duration_s > 0:
+            return max(0.0, duration_s - SONG_TIMEOUT_EARLY_CLEAR_S)
+        return SONG_TIMEOUT_FALLBACK_S
         
+    def _start_song_timeout(self, duration_ms):
+        """
+        Startet den Song-Timer zentral und setzt Debug-Properties:
+        - RadioMonitor.MBDurationMs / RadioMonitor.MBDurationS
+        - RadioMonitor.TimeoutTotal / RadioMonitor.TimeoutRemaining
+        """
+        self._last_song_time = time.time()
+        self._song_timeout = self._compute_song_timeout(duration_ms)
+
+        mb_duration_ms = 0
+        try:
+            if duration_ms:
+                mb_duration_ms = int(float(duration_ms))
+        except Exception:
+            mb_duration_ms = 0
+
+        if mb_duration_ms > 0:
+            WINDOW.setProperty(_P.MB_DUR_MS, str(mb_duration_ms))
+            WINDOW.setProperty(_P.MB_DUR_S, str(int(round(mb_duration_ms / 1000.0))))
+        else:
+            WINDOW.clearProperty(_P.MB_DUR_MS)
+            WINDOW.clearProperty(_P.MB_DUR_S)
+
+        WINDOW.setProperty(_P.TMO_TOTAL, str(int(round(self._song_timeout))))
+        self._update_timeout_remaining_property()
+
+        if mb_duration_ms > 0:
+            xbmc.log(
+                f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s "
+                f"(MB-Laenge: {mb_duration_ms}ms, -{SONG_TIMEOUT_EARLY_CLEAR_S}s, fallback={SONG_TIMEOUT_FALLBACK_S}s)",
+                xbmc.LOGDEBUG
+            )
+        else:
+            xbmc.log(
+                f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s "
+                f"(MB-Laenge: unbekannt, fallback={SONG_TIMEOUT_FALLBACK_S}s)",
+                xbmc.LOGDEBUG
+            )
+
     def clear_properties(self):
         """Löscht alle Radio-Properties"""
         # Reset Logo und API-Kontext
         self.station_logo = None
         self._reset_api_context()
+        self._reset_song_timeout_state(clear_debug=True)
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -801,7 +881,11 @@ class RadioMonitor(xbmc.Monitor):
             return
 
         xbmc.log(f"[{ADDON_NAME}] API Metadata Worker gestartet (Fallback-Modus)", xbmc.LOGDEBUG)
-        
+
+        # Timer-Status beim Start des Workers sauber initialisieren.
+        # Verhindert, dass ein alter Timer aus einem vorherigen Stream sofort greift.
+        self._reset_song_timeout_state(clear_debug=True)
+
         last_title = ""
         poll_interval = 10  # Sekunden zwischen API-Abfragen
         station_name = WINDOW.getProperty(_P.STATION)
@@ -896,14 +980,6 @@ class RadioMonitor(xbmc.Monitor):
                             # Logo sofort nach Artist setzen
                             self.set_logo_safe()
 
-                            # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                            self._last_song_time = time.time()
-                            self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
-                            xbmc.log(
-                                f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
-                                xbmc.LOGDEBUG
-                            )
-
                             # Aktualisiere Kodi Player Metadaten
                             logo = WINDOW.getProperty(_P.LOGO)
                             self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
@@ -927,14 +1003,10 @@ class RadioMonitor(xbmc.Monitor):
                             self.update_player_metadata(None, title, station_name, logo if logo else None, None)
 
                         # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                        self._last_song_time = time.time()
-                        self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
-                        xbmc.log(
-                            f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
-                            xbmc.LOGDEBUG
-                        )
+                        self._start_song_timeout(duration_ms)
 
-                # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
+                # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
+                self._update_timeout_remaining_property()
                 if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                     xbmc.log(
                         f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
@@ -950,7 +1022,7 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
                     WINDOW.clearProperty(_P.STREAM_TTL)
-                    self._last_song_time = 0.0
+                    self._reset_song_timeout_state(clear_debug=True)
 
                 # Warte vor nächster Abfrage
                 for _ in range(poll_interval * 2):  # 10 Sekunden in 0.5s Schritten
@@ -1085,14 +1157,10 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_MEM)
 
                     # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                    self._last_song_time = time.time()
-                    self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
-                    xbmc.log(
-                        f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s (MB-Länge: {duration_ms}ms)",
-                        xbmc.LOGDEBUG
-                    )
+                    self._start_song_timeout(duration_ms)
 
-                # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
+                # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
+                self._update_timeout_remaining_property()
                 if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                     xbmc.log(
                         f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
@@ -1108,7 +1176,7 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
                     WINDOW.clearProperty(_P.STREAM_TTL)
-                    self._last_song_time = 0.0
+                    self._reset_song_timeout_state(clear_debug=True)
 
                 # Warte vor nächster Abfrage (in 0.5s-Schritten für schnelles Beenden)
                 for _ in range(poll_interval * 2):
@@ -1249,7 +1317,11 @@ class RadioMonitor(xbmc.Monitor):
     def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
         xbmc.log(f"[{ADDON_NAME}] Metadata Worker gestartet", xbmc.LOGDEBUG)
-        
+
+        # Timer-Status beim Start des Workers sauber initialisieren.
+        # Gilt auch für den No-ICY-Pfad (API/MusicPlayer-Fallback).
+        self._reset_song_timeout_state(clear_debug=True)
+
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
             xbmc.log(f"[{ADDON_NAME}] Keine ICY-Metadaten verfuegbar - wechsle zu Fallback", xbmc.LOGWARNING)
@@ -1268,9 +1340,6 @@ class RadioMonitor(xbmc.Monitor):
         metaint = stream_info['metaint']
         response = stream_info.get('response')
         last_title = ""
-        # Nutze zentrale Shared-Timer im RadioMonitor-Objekt
-        self._last_song_time = 0.0        # Zeitpunkt des letzten gültigen Titelwechsels
-        self._song_timeout   = SONG_TIMEOUT_FALLBACK_S  # wird überschrieben wenn MB eine Länge liefert
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
@@ -1339,7 +1408,7 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.BAND_MEM)
                                 WINDOW.clearProperty(_P.GENRE)
                                 WINDOW.clearProperty(_P.STREAM_TTL)
-                                self._last_song_time = 0.0  # kein gültiger Song → Timer deaktivieren
+                                self._reset_song_timeout_state(clear_debug=True)  # kein gültiger Song → Timer deaktivieren
                                 continue
                             
                             if stream_title not in INVALID_METADATA_VALUES:
@@ -1387,15 +1456,10 @@ class RadioMonitor(xbmc.Monitor):
                             self.set_logo_safe()
 
                             # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                            # Bei MB-Länge: Länge + Puffer; sonst Fallback.
+                            # Bei MB-Laenge: Laenge - SONG_TIMEOUT_EARLY_CLEAR_S.
+                            # Ohne MB-Laenge greift SONG_TIMEOUT_FALLBACK_S.
                             if title:
-                                self._last_song_time = time.time()
-                                self._song_timeout = (duration_ms / 1000 + SONG_TIMEOUT_BUFFER_S) if duration_ms else SONG_TIMEOUT_FALLBACK_S
-                                xbmc.log(
-                                    f"[{ADDON_NAME}] Song-Timeout: {self._song_timeout:.0f}s "
-                                    f"(MB-Länge: {duration_ms}ms)",
-                                    xbmc.LOGDEBUG
-                                )
+                                self._start_song_timeout(duration_ms)
 
                             # Artist-Info (Gründungsjahr + Mitglieder) erst NACH Artist-Property setzen.
                             # Grund: RadioMonitor.Artist ist der AS-Trigger – er darf nicht durch den
@@ -1483,7 +1547,8 @@ class RadioMonitor(xbmc.Monitor):
                             
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
 
-                    # Song-Timeout: Properties löschen wenn der Song abgelaufen ist.
+                    # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
+                    self._update_timeout_remaining_property()
                     # Läuft jede Iteration (~1s) – kein extra Thread notwendig.
                     if self._last_song_time and time.time() - self._last_song_time > self._song_timeout:
                         xbmc.log(
@@ -1500,7 +1565,7 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_MEM)
                         WINDOW.clearProperty(_P.GENRE)
                         WINDOW.clearProperty(_P.STREAM_TTL)
-                        self._last_song_time = 0.0  # Verhindert wiederholtes Löschen
+                        self._reset_song_timeout_state(clear_debug=True)  # Verhindert wiederholtes Löschen
 
                 except Exception as e:
                     xbmc.log(f"[{ADDON_NAME}] Fehler im Metadata-Loop (Thread läuft weiter): {str(e)}", xbmc.LOGERROR)

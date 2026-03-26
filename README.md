@@ -22,7 +22,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
 - ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
-- ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge + 90s Puffer, Fallback 7 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
+- ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge - 15s; wenn keine MB-Songlänge vorliegt: Fallback 4 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
+- ✅ Debug-Properties für Timeout-Validierung: MB-Songdauer und Live-Countdown als Window-Properties sichtbar
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
 
@@ -45,6 +46,10 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed` | Gründungsjahr (nur bei Bands) | "1995" |
 | `RadioMonitor.BandMembers` | Aktuelle Mitglieder (nur bei Bands) | "Chad Kroeger, Mike Kroeger, Ryan Peake, Daniel Adair" |
+| `RadioMonitor.MBDurationMs` | Von MusicBrainz ermittelte Songdauer in Millisekunden | "175000" |
+| `RadioMonitor.MBDurationS` | Von MusicBrainz ermittelte Songdauer in Sekunden | "175" |
+| `RadioMonitor.TimeoutTotal` | Aktueller gesetzter Timeout in Sekunden | "160" |
+| `RadioMonitor.TimeoutRemaining` | Verbleibende Zeit bis zum Label-Clear in Sekunden | "142" |
 
 ## Verwendung in Skins
 
@@ -69,6 +74,12 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 ### Beispiel 4: Sender-Name
 ```xml
 <label>[B]$INFO[Window(Home).Property(RadioMonitor.Station)][/B]</label>
+```
+
+### Beispiel 5: MB-Dauer + Timer-Countdown (Debug)
+```xml
+<label>MB: $INFO[Window(Home).Property(RadioMonitor.MBDurationS)]s</label>
+<label>Timer: $INFO[Window(Home).Property(RadioMonitor.TimeoutRemaining)] / $INFO[Window(Home).Property(RadioMonitor.TimeoutTotal)]s</label>
 ```
 
 ## Installation
