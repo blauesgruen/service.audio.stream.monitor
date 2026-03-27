@@ -10,6 +10,9 @@ from difflib import SequenceMatcher
 from constants import (
     MUSICBRAINZ_API_URL, MUSICBRAINZ_HEADERS,
     MB_SONG_CACHE_TTL, INVALID_METADATA_VALUES,
+    MB_WORK_CONTEXT_ENABLED, MB_WORK_CONTEXT_MAX_SECONDS,
+    MB_WORK_CONTEXT_MAX_PAGES, MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS,
+    MB_WORK_CONTEXT_RATE_LIMIT_S,
     NUMERIC_ID_PATTERN as _NUMERIC_ID_RE,
 )
 from api_client import APIClient
@@ -333,8 +336,14 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
 
     if not recording_mbid:
         return fallback_year, fallback_album, fallback_album_date
+    if not MB_WORK_CONTEXT_ENABLED:
+        return fallback_year, fallback_album, fallback_album_date
 
     try:
+        started_at = time.time()
+
+        def budget_exhausted():
+            return (time.time() - started_at) >= MB_WORK_CONTEXT_MAX_SECONDS
         # 1) Work-IDs des gewählten Recordings laden
         rec_lookup = _mb_client.get(
             f"{MUSICBRAINZ_API_URL}{recording_mbid}",
@@ -358,8 +367,10 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
         for work_id in work_ids:
             offset = 0
             page_size = 100
-            max_pages = 3  # 300 Recordings reichen für Song-Kontext
+            max_pages = max(1, int(MB_WORK_CONTEXT_MAX_PAGES))
             for _ in range(max_pages):
+                if budget_exhausted():
+                    break
                 response = _mb_client.get(
                     MUSICBRAINZ_API_URL,
                     params={
@@ -381,7 +392,10 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
                 if len(recordings) < page_size:
                     break
                 offset += page_size
-                time.sleep(1)  # MB-Richtlinie: max ~1 req/s
+                if MB_WORK_CONTEXT_RATE_LIMIT_S > 0:
+                    time.sleep(MB_WORK_CONTEXT_RATE_LIMIT_S)
+            if budget_exhausted():
+                break
 
         all_recordings = list(recording_by_id.values())
         if not all_recordings:
@@ -411,7 +425,7 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
             return (int(year) if year else 9999, rec.get("id", ""))
 
         detail_candidates = sorted(artist_filtered, key=sort_key)
-        max_detail_lookups = 25
+        max_detail_lookups = max(0, int(MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS))
         detail_candidates = detail_candidates[:max_detail_lookups]
 
         # Fallback-Releases vorseeden: Das Recording aus dem initialen Query hat
@@ -421,6 +435,8 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
         actual_lookups = 0
         if not album:
             for rec_stub in detail_candidates:
+                if budget_exhausted():
+                    break
                 rec_id = rec_stub.get("id", "")
                 if not rec_id:
                     continue
@@ -433,14 +449,16 @@ def _musicbrainz_resolve_song_context(recording_mbid, expected_artist, fallback_
                 album, album_date = _musicbrainz_extract_album(all_releases, song_first_release)
                 if album:
                     break
-                time.sleep(1)  # MB-Richtlinie: max ~1 req/s
+                if MB_WORK_CONTEXT_RATE_LIMIT_S > 0:
+                    time.sleep(MB_WORK_CONTEXT_RATE_LIMIT_S)
 
         log_debug(
             f"MB Work-Kontext: works={len(work_ids)}, "
             f"recordings={len(all_recordings)}, artist_filtered={len(artist_filtered)}, "
             f"detail_lookups={actual_lookups}/{len(detail_candidates)}, FirstRelease='{song_first_release or '-'}', "
             f"Releases={len(all_releases)}, "
-            f"Album='{album or ''}'"
+            f"Album='{album or ''}', "
+            f"elapsed={time.time() - started_at:.2f}s"
         )
         return song_first_release, album, album_date
 
