@@ -33,6 +33,19 @@ DEFAULT_HTTP_HEADERS = {
 # --- Metadaten-Konstanten ---
 
 INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
+RADIODE_PLUGIN_IDS = ('plugin.audio.radiode', 'plugin.audio.radio_de_light')
+TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
+
+# MB-Kandidat-Auswahl
+MB_WINNER_MIN_SCORE = 60
+MB_WINNER_MIN_COMBINED = 55.0
+MP_TRUST_MAX_MISMATCHES = 2
+
+# Trigger-Bezeichner fuer Quellenwechsel
+TRIGGER_TITLE_CHANGE = 'Titelwechsel'
+TRIGGER_API_CHANGE = 'API-Wechsel'
+TRIGGER_MP_CHANGE = 'MusicPlayer-Wechsel'
+TRIGGER_MP_INVALID = 'MusicPlayer ungueltig'
 
 # --- Cache & Timeouts ---
 
@@ -52,6 +65,8 @@ MB_WORK_CONTEXT_RATE_LIMIT_S = 1.0
 SONG_TIMEOUT_EARLY_CLEAR_S = 15
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
 API_DATA_REFRESH_INTERVAL_S = 10
+API_METADATA_POLL_INTERVAL_S = 10
+MUSICPLAYER_FALLBACK_POLL_INTERVAL_S = 5
 # Nach Ende des Kodi-Bufferings kurz stabilen Zustand abwarten,
 # bevor die Quellenentscheidung startet.
 PLAYER_BUFFER_SETTLE_S = 2.0
@@ -85,6 +100,8 @@ class PropertyNames:
     MB_DUR_S   = 'RadioMonitor.MBDurationS'
     TMO_TOTAL  = 'RadioMonitor.TimeoutTotal'
     TMO_LEFT   = 'RadioMonitor.TimeoutRemaining'
+    RADIODE_LOGO = 'RadioDE.StationLogo'
+    RADIODE_NAME = 'RadioDE.StationName'
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames
