@@ -2588,14 +2588,6 @@ class RadioMonitor(xbmc.Monitor):
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
                                 xbmc.log(f"[{ADDON_NAME}] Kein Player-Logo, wird spaeter von API geholt", xbmc.LOGDEBUG)
                             
-                            # Nur Title als vorläufige Info setzen.
-                            # RadioMonitor.Artist und RadioMonitor.Album werden bewusst NICHT gesetzt.
-                            # Artist ist der Trigger für AS, und ohne MBID würde AS mit falschen Daten starten.
-                            # Album wird erst nach erfolgreicher MB-Query gesetzt.
-                            # Artist, Album + MBID werden zusammen vom Metadata-Worker gesetzt.
-                            if title:
-                                self.set_property_safe(_P.TITLE, title)
-                            
                             # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                             self.set_logo_safe()
                             if self.station_logo and self.is_real_logo(self.station_logo):
