@@ -187,6 +187,7 @@ class RadioMonitor(xbmc.Monitor):
         self._mp_mismatch_count = 0
         self._mp_trust_generation = 0
         self._latest_api_pair = ('', '')
+        self._latest_api_pair_raw = ('', '')
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
         self._parse_prev_winner_pair = ('', '')
@@ -422,6 +423,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_seen_api_key = ('', '')
         self._last_api_data_refresh_ts = 0.0
         self._latest_api_pair = ('', '')
+        self._latest_api_pair_raw = ('', '')
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
         self._parse_prev_winner_pair = ('', '')
@@ -762,6 +764,7 @@ class RadioMonitor(xbmc.Monitor):
         if not self._is_api_source_allowed():
             WINDOW.clearProperty(_P.API_DATA)
             self._latest_api_pair = ('', '')
+            self._latest_api_pair_raw = ('', '')
             return
 
         now_ts = time.time()
@@ -782,13 +785,16 @@ class RadioMonitor(xbmc.Monitor):
             n_artist, n_title = self._normalize_song_candidate(artist, title, invalid_values)
             if n_artist and n_title:
                 self._latest_api_pair = (n_artist, n_title)
+                self._latest_api_pair_raw = (n_artist, n_title)
                 self.set_property_safe(_P.API_DATA, f"{n_artist} - {n_title}")
             else:
                 self._latest_api_pair = ('', '')
+                self._latest_api_pair_raw = ('', '')
                 self.set_property_safe(_P.API_DATA, f"{artist} - {title}" if artist else title)
         else:
             WINDOW.clearProperty(_P.API_DATA)
             self._latest_api_pair = ('', '')
+            self._latest_api_pair_raw = ('', '')
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
         """Versucht nowPlaying von verschiedenen APIs zu holen"""
@@ -979,10 +985,9 @@ class RadioMonitor(xbmc.Monitor):
                     return True
 
             if (time.time() - wait_started) >= PLAYER_BUFFER_MAX_WAIT_S:
-                log_debug(
+                log_warning(
                     f"[{ADDON_NAME}] Buffering-Check Timeout nach {PLAYER_BUFFER_MAX_WAIT_S:.0f}s - "
-                    f"setze Quellenfestlegung fort",
-                    xbmc.LOGWARNING
+                    f"setze Quellenfestlegung fort"
                 )
                 return True
 
@@ -1010,6 +1015,8 @@ class RadioMonitor(xbmc.Monitor):
             return stream_title_changed, self.TRIGGER_TITLE_CHANGE
 
         if last_winner_source.startswith('api'):
+            # current_api_pair kommt bereits source-orientiert aus metadata_worker.
+            # Hier nicht erneut swappen, sonst entstehen falsche API-Wechsel bei api_swapped.
             changed = (
                 current_api_pair[0]
                 and current_api_pair[1]
@@ -1056,6 +1063,20 @@ class RadioMonitor(xbmc.Monitor):
             return 'api'
         return s or 'other'
 
+    def _pair_for_source(self, source, direct_pair):
+        """
+        Liefert ein Paar in der Orientierung der angegebenen Source.
+        Beispiel: source='api_swapped' -> (title, artist) wird zu (artist, title).
+        """
+        a = direct_pair[0] if direct_pair else ''
+        b = direct_pair[1] if direct_pair else ''
+        if not (a and b):
+            return ('', '')
+        s = str(source or '')
+        if s.endswith('_swapped'):
+            return (b, a)
+        return (a, b)
+
     def _apply_locked_source_policy(self, candidates, locked_source, api_candidate, icy_pairs, mp_pairs):
         """
         Erzwingt Source-Lock fuer die aktuelle Auswertung:
@@ -1094,20 +1115,23 @@ class RadioMonitor(xbmc.Monitor):
         """
         MB=0 Fallback fuer source-locked Auswertungen:
         - Bei aktivem Lock darf keine andere Quelle den Lock uebersteuern.
-        Rueckgabe: (source_family, (artist, title)) oder ('', ('', '')).
+        Rueckgabe: (source_name, (artist, title)) oder ('', ('', '')).
         """
-        locked_family = self._source_family(locked_source)
+        locked_source_name = str(locked_source or '')
+        locked_family = self._source_family(locked_source_name)
         if locked_family == 'musicplayer' and mp_pairs:
-            return 'musicplayer', mp_pairs[0]
+            pair = self._select_musicplayer_pair_for_source(locked_source_name, mp_pairs)
+            if pair and pair[0] and pair[1]:
+                return locked_source_name, pair
         if (
             locked_family == 'api'
             and api_candidate
             and api_candidate[0]
             and api_candidate[1]
         ):
-            return 'api', api_candidate
+            return locked_source_name, self._pair_for_source(locked_source_name, api_candidate)
         if locked_family == 'icy' and icy_pairs:
-            return 'icy', icy_pairs[0]
+            return locked_source_name, icy_pairs[0]
         return '', ('', '')
 
     def _apply_api_stale_override(self, candidates, trigger_reason, api_candidate, icy_pairs):
@@ -1263,10 +1287,12 @@ class RadioMonitor(xbmc.Monitor):
 
         def _source_rank(source):
             s = str(source or '')
-            if s.startswith('musicplayer'):
+            if s.startswith('api'):
                 return 2
             if s.startswith('icy'):
                 return 1
+            if s.startswith('musicplayer'):
+                return 0
             return 0
 
         trigger_reason = str(getattr(self, '_parse_trigger_reason', '') or '')
@@ -1289,52 +1315,28 @@ class RadioMonitor(xbmc.Monitor):
                     f"(Trigger={trigger_reason}, entfernt={filtered_count})")
 
         winner_pool = effective_valid
-        musicplayer_pool = [
-            ev for ev in effective_valid
-            if str(ev.get('source', '')).startswith('musicplayer')
-        ]
-        all_mp_match_prev = bool(musicplayer_pool) and prev_pair_valid and all(
-            (ev.get('input_artist'), ev.get('input_title')) == prev_pair
-            for ev in musicplayer_pool
-        )
-        stale_mp_hold = (
-            bool(trigger_reason)
-            and not trigger_reason.startswith('MusicPlayer')
-            and all_mp_match_prev
-        )
-
-        if musicplayer_pool and not stale_mp_hold:
-            winner_pool = musicplayer_pool
-            log_debug(
-                f"[{ADDON_NAME}] MB-Winner: MusicPlayer-Praeferenz aktiv "
-                f"(candidates={len(musicplayer_pool)})")
-        else:
-            if stale_mp_hold:
+        # Einheitliche Gewinnerregel:
+        # - Keine harte MusicPlayer-Praeferenz.
+        # - Bei Gleichstand entscheidet die Quellen-Prioritaet (API > ICY > MusicPlayer).
+        # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
+        pair_support = {}
+        for ev in effective_valid:
+            pair = (ev.get('input_artist'), ev.get('input_title'))
+            fam = self._source_family(ev.get('source'))
+            pair_support.setdefault(pair, set()).add(fam)
+        consensus_pairs = {
+            pair for pair, families in pair_support.items() if len(families) >= 2
+        }
+        if consensus_pairs:
+            consensus_pool = [
+                ev for ev in effective_valid
+                if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
+            ]
+            if consensus_pool:
+                winner_pool = consensus_pool
                 log_debug(
-                    f"[{ADDON_NAME}] MB-Winner: MusicPlayer-Praeferenz ausgesetzt "
-                    f"(Trigger={trigger_reason}, MP entspricht vorherigem Winner)")
-            # Fallback ohne MP-Praeferenz:
-            # Wenn mindestens zwei unabhaengige Quellenfamilien (API/ICY/MusicPlayer)
-            # dasselbe Eingangspaar liefern, wird der Winner auf diese Konsenspaare
-            # eingeschraenkt.
-            pair_support = {}
-            for ev in effective_valid:
-                pair = (ev.get('input_artist'), ev.get('input_title'))
-                fam = self._source_family(ev.get('source'))
-                pair_support.setdefault(pair, set()).add(fam)
-            consensus_pairs = {
-                pair for pair, families in pair_support.items() if len(families) >= 2
-            }
-            if consensus_pairs:
-                consensus_pool = [
-                    ev for ev in effective_valid
-                    if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
-                ]
-                if consensus_pool:
-                    winner_pool = consensus_pool
-                    log_debug(
-                        f"[{ADDON_NAME}] MB-Winner: Konsens aktiv "
-                        f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
+                    f"[{ADDON_NAME}] MB-Winner: Konsens aktiv "
+                    f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
 
         winner = max(
             winner_pool,
@@ -1344,11 +1346,10 @@ class RadioMonitor(xbmc.Monitor):
                 _source_rank(ev.get('source'))
             )
         )
-        log_debug(
+        log_info(
             f"[{ADDON_NAME}] MB-Winner: source={winner['source']} "
             f"('{winner['mb_artist']} - {winner['mb_title']}'), "
-            f"score={winner['score']}, combined={winner['combined']:.1f}",
-            xbmc.LOGINFO
+            f"score={winner['score']}, combined={winner['combined']:.1f}"
         )
         return winner, evaluations
     
@@ -1903,12 +1904,13 @@ class RadioMonitor(xbmc.Monitor):
                         f"[{ADDON_NAME}] API-Kandidat geblockt nach Timeout: '{api_artist} - {api_title}'")
                 else:
                     if self._api_timeout_block_key != ('', '') and api_key != self._api_timeout_block_key:
-                        log_debug(
-                            f"[{ADDON_NAME}] API-Song geändert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'",
-                            xbmc.LOGINFO
-                        )
+                        log_info(f"[{ADDON_NAME}] API-Song geaendert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'")
                         self._api_timeout_block_key = ('', '')
                     candidates.append({'source': 'api', 'artist': api_artist, 'title': api_title})
+                    if api_artist != api_title:
+                        s_artist, s_title = self._normalize_song_candidate(api_title, api_artist, invalid)
+                        if s_artist and s_title:
+                            candidates.append({'source': 'api_swapped', 'artist': s_artist, 'title': s_title})
                     api_candidate = (api_artist, api_title)
                     api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
                     self._last_seen_api_key = api_key
@@ -2019,18 +2021,31 @@ class RadioMonitor(xbmc.Monitor):
                 return locked_source_pair[0], locked_source_pair[1], '', '', '', '', 0
 
             for mp_pair in mp_pairs:
-                if mp_pair == api_candidate or mp_pair in icy_pairs:
+                if mp_pair == api_candidate:
                     if not self._is_musicplayer_trusted():
                         self._mark_musicplayer_trusted(
                             f"Bootstrap bei MB=0: '{mp_pair[0]} - {mp_pair[1]}'"
                         )
                     xbmc.log(
-                        f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, MusicPlayer konsistent -> nutze MusicPlayer: "
+                        f"[{ADDON_NAME}] MB score=0 fuer alle Kandidaten, MP/API-Konsens -> nutze API: "
+                        f"'{api_candidate[0]} - {api_candidate[1]}'",
+                        xbmc.LOGINFO
+                    )
+                    self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
+                    self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
+                    return api_candidate[0], api_candidate[1], '', '', '', '', 0
+                if mp_pair in icy_pairs:
+                    if not self._is_musicplayer_trusted():
+                        self._mark_musicplayer_trusted(
+                            f"Bootstrap bei MB=0: '{mp_pair[0]} - {mp_pair[1]}'"
+                        )
+                    xbmc.log(
+                        f"[{ADDON_NAME}] MB score=0 fuer alle Kandidaten, MP/ICY-Konsens -> nutze ICY: "
                         f"'{mp_pair[0]} - {mp_pair[1]}'",
                         xbmc.LOGINFO
                     )
-                    self._set_last_song_decision('musicplayer', mp_pair[0], mp_pair[1])
-                    self._update_musicplayer_trust_after_decision('musicplayer', mp_pair, mp_pairs)
+                    self._set_last_song_decision('icy', mp_pair[0], mp_pair[1])
+                    self._update_musicplayer_trust_after_decision('icy', mp_pair, mp_pairs)
                     return mp_pair[0], mp_pair[1], '', '', '', '', 0
 
             has_icy_candidate = any(str(ev.get('source', '')).startswith('icy') for ev in evaluations)
@@ -2167,9 +2182,10 @@ class RadioMonitor(xbmc.Monitor):
                         api_refresh_allowed = startup_stable_confirmed or bool(last_winner_source)
                         if api_refresh_allowed:
                             self._refresh_api_data_property(station_name)
-                            current_api_pair = self._latest_api_pair
+                            current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair_raw)
                         else:
                             self._latest_api_pair = ('', '')
+                            self._latest_api_pair_raw = ('', '')
                             current_api_pair = ('', '')
 
                         # StreamTitle unabhängig vom Gewinner aktuell halten.
@@ -2198,7 +2214,7 @@ class RadioMonitor(xbmc.Monitor):
                                 mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
                                 current_mp_pair = self._select_musicplayer_pair_for_source(last_winner_source, mp_live_pairs)
                                 self._refresh_api_data_property(station_name)
-                                current_api_pair = self._latest_api_pair
+                                current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair_raw)
                                 if station_name:
                                     self.set_property_safe(_P.STATION, station_name)
                                 if stream_info.get('genre'):
@@ -2215,6 +2231,11 @@ class RadioMonitor(xbmc.Monitor):
                         )
 
                         if source_changed_trigger:
+                            observed_source = last_winner_source or 'initial'
+                            log_debug(
+                                f"Songwechsel-Trigger aktiv: reason='{trigger_reason}', "
+                                f"beobachtete_Quelle='{observed_source}'"
+                            )
                             # Bei Trigger: MusicBrainz-Cache invalidieren
                             try:
                                 _mb_cache.clear()
@@ -2424,6 +2445,11 @@ class RadioMonitor(xbmc.Monitor):
                                     last_winner_pair = decision_pair
                                 else:
                                     last_winner_pair = (artist or '', title or '')
+                        elif stream_title_changed and last_winner_source:
+                            log_debug(
+                                f"StreamTitle-Wechsel ignoriert: beobachtete_Quelle='{last_winner_source}' "
+                                f"hat keinen Wechsel gemeldet"
+                            )
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     if startup_stable_confirmed or last_winner_source:
