@@ -38,12 +38,26 @@ INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 
 MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 
+# MusicBrainz Work-Kontext: harte Laufzeit- und Lookup-Grenzen fuer
+# reaktionsschnelles Live-Monitoring.
+MB_WORK_CONTEXT_ENABLED = True
+MB_WORK_CONTEXT_MAX_SECONDS = 3.0
+MB_WORK_CONTEXT_MAX_PAGES = 1
+MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS = 2
+MB_WORK_CONTEXT_RATE_LIMIT_S = 1.0
+
 # Song-Timeout: Wie lange Properties nach dem letzten Titelwechsel behalten werden.
 # Wenn MB eine Songlaenge liefert, wird SONG_TIMEOUT_EARLY_CLEAR_S abgezogen.
 # Wenn keine MB-Laenge bekannt ist, greift SONG_TIMEOUT_FALLBACK_S.
 SONG_TIMEOUT_EARLY_CLEAR_S = 15
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
 API_DATA_REFRESH_INTERVAL_S = 10
+# Nach Ende des Kodi-Bufferings kurz stabilen Zustand abwarten,
+# bevor die Quellenentscheidung startet.
+PLAYER_BUFFER_SETTLE_S = 2.0
+# Safety-Net: falls Kodi den Buffer-Status nicht sauber meldet, wird die
+# Quellenfestlegung nach dieser Zeit trotzdem gestartet.
+PLAYER_BUFFER_MAX_WAIT_S = 45.0
 
 # --- Window Property-Namen ---
 
@@ -62,6 +76,7 @@ class PropertyNames:
     FIRST_REL  = 'RadioMonitor.FirstRelease'
     STREAM_TTL = 'RadioMonitor.StreamTitle'
     API_DATA   = 'RadioMonitor.ApiData'
+    SOURCE     = 'RadioMonitor.Source'
     PLAYING    = 'RadioMonitor.Playing'
     LOGO       = 'RadioMonitor.Logo'
     BAND_FORM  = 'RadioMonitor.BandFormed'
