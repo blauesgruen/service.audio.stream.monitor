@@ -1405,6 +1405,7 @@ class RadioMonitor(xbmc.Monitor):
 
         # Sonderfall B: MB kann zwischen Kandidaten nicht entscheiden (alle score=0).
         # Dann API nur übernehmen, wenn sie sich gegenüber der letzten API-Antwort geändert hat.
+        # Sonst gilt: keine verlässlichen Songdaten -> Artist/Title leer lassen.
         if evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
             if api_candidate[0] and api_candidate[1] and api_changed:
                 xbmc.log(
@@ -1413,6 +1414,12 @@ class RadioMonitor(xbmc.Monitor):
                     xbmc.LOGINFO
                 )
                 return api_candidate[0], api_candidate[1], '', '', '', '', 0
+            xbmc.log(
+                f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, keine belastbaren Songdaten -> "
+                f"nutze nur Station/StreamTitle",
+                xbmc.LOGDEBUG
+            )
+            return None, None, '', '', '', '', 0
 
         # --- ICY-Analyse (bestehender Fallback) ---
         if not artist and not title:
@@ -1531,7 +1538,12 @@ class RadioMonitor(xbmc.Monitor):
                             # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
                             if artist is None and title is None:
                                 xbmc.log(f"[{ADDON_NAME}] Keine verwertbaren Metadaten fuer '{stream_title}' - RadioMonitor Properties bleiben leer", xbmc.LOGDEBUG)
-                                # Properties komplett löschen, damit Skin auf MusicPlayer zurückfällt
+                                # Bei klar fehlenden Songdaten: nur Song-Properties löschen,
+                                # Station + StreamTitle bleiben gesetzt.
+                                if stream_title and stream_title not in INVALID_METADATA_VALUES:
+                                    self.set_property_safe(_P.STREAM_TTL, stream_title)
+                                else:
+                                    WINDOW.clearProperty(_P.STREAM_TTL)
                                 WINDOW.clearProperty(_P.ARTIST)
                                 WINDOW.clearProperty(_P.TITLE)
                                 WINDOW.clearProperty(_P.ALBUM)
@@ -1541,7 +1553,6 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.BAND_FORM)
                                 WINDOW.clearProperty(_P.BAND_MEM)
                                 WINDOW.clearProperty(_P.GENRE)
-                                WINDOW.clearProperty(_P.STREAM_TTL)
                                 self._reset_song_timeout_state(clear_debug=True)  # kein gültiger Song → Timer deaktivieren
                                 continue
                             
