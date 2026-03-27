@@ -50,9 +50,24 @@ def parse_stream_title_complex(stream_title: str, station_name: str = None) -> T
         return None, None, False, False
 
     # --- 'von'-Format ---
+    # Beispiele:
+    # - "Titel" von Artist
+    # - Titel von Artist
+    # - Titel von Artist JETZT AUF MDR JUMP
     von_match = re.match(r'^"(.+?)"\s+von\s+(.+)$', stream_title, re.IGNORECASE)
     if von_match:
         return von_match.group(2).strip(), von_match.group(1).strip(), True, False
+
+    von_match_plain = re.match(
+        r'^(.+?)\s+von\s+(.+?)(?:\s+JETZT\s+AUF\s+.+)?$',
+        stream_title,
+        re.IGNORECASE
+    )
+    if von_match_plain:
+        title = von_match_plain.group(1).strip()
+        artist = von_match_plain.group(2).strip()
+        if title and artist:
+            return artist, title, True, False
 
     # --- Trennzeichen-Erkennung ---
     separators = [' - ', ' – ', ' — ', ' | ', ': ']
@@ -156,6 +171,13 @@ def get_artist_variants(artist: str) -> List[str]:
     apo_rem = artist.replace("'", "").replace("’", "")
     if apo_rem != artist:
         add_v(apo_rem)
+
+    # 4. Slash-Normalisierung:
+    # "AC / DC" -> "AC/DC" (liefert bei MusicBrainz deutlich bessere Treffer).
+    if '/' in artist:
+        slash_compact = re.sub(r'\s*/\s*', '/', artist).strip()
+        if slash_compact != artist:
+            add_v(slash_compact)
 
     return variants
 

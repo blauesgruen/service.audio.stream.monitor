@@ -121,6 +121,8 @@ class RadioMonitor(xbmc.Monitor):
     TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
     RADIODE_URL_HINTS = ('radio.de', 'radio-assets.com')
     TUNEIN_URL_HINTS = ('tunein.com', 'radiotime.com', 'cdn-profiles.tunein.com')
+    MB_WINNER_MIN_SCORE = 60
+    MB_WINNER_MIN_COMBINED = 55.0
 
     def __init__(self):
         super(RadioMonitor, self).__init__()
@@ -141,6 +143,9 @@ class RadioMonitor(xbmc.Monitor):
         # Zentrale Song-Timeout-Status (wird von Metadata-Workern geteilt)
         self._last_song_time = 0.0
         self._song_timeout = SONG_TIMEOUT_FALLBACK_S
+        # Nach Song-Timeout: gleicher API-Song wird so lange ignoriert, bis API einen neuen Song liefert.
+        self._api_timeout_block_key = ('', '')  # (artist, title)
+        self._last_seen_api_key = ('', '')      # zuletzt gelesener API-Kandidat (artist, title)
         
         # Event-Handler für Player-Events
         self.player_monitor = PlayerMonitor(self)
@@ -326,6 +331,8 @@ class RadioMonitor(xbmc.Monitor):
         self.station_logo = None
         self._reset_api_context()
         self._reset_song_timeout_state(clear_debug=True)
+        self._api_timeout_block_key = ('', '')
+        self._last_seen_api_key = ('', '')
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -700,6 +707,95 @@ class RadioMonitor(xbmc.Monitor):
     def parse_stream_title_simple(self, stream_title):
         """Einfache Trennung ohne API-Aufrufe (Nutzt zentrales metadata Modul)"""
         return _parse_stream_title_simple(stream_title)
+
+    def _normalize_song_candidate(self, artist, title, invalid_values):
+        """
+        Normalisiert und validiert einen Kandidaten.
+        Rückgabe: (artist, title) oder (None, None), wenn nicht verwertbar.
+        """
+        a = (artist or '').strip()
+        t = (title or '').strip()
+        if not a or not t:
+            return None, None
+        if a in invalid_values or t in invalid_values:
+            return None, None
+        if _NUMERIC_ID_RE.match(a) or _NUMERIC_ID_RE.match(t):
+            return None, None
+        return a, t
+
+    def _evaluate_mb_candidate(self, source, artist, title):
+        """
+        Bewertet einen Kandidaten via MusicBrainz.
+        """
+        score, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, mb_duration_ms = \
+            _musicbrainz_query_recording(title, artist)
+        artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
+        title_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
+        combined = float(score) * ((artist_sim + title_sim) / 2.0)
+        return {
+            'source': source,
+            'input_artist': artist,
+            'input_title': title,
+            'score': int(score),
+            'artist_sim': float(artist_sim),
+            'title_sim': float(title_sim),
+            'combined': float(combined),
+            'mb_artist': mb_artist or artist,
+            'mb_title': mb_title or title,
+            'mb_album': mb_album or '',
+            'mb_album_date': mb_album_date or '',
+            'mbid': mbid or '',
+            'mb_first_release': mb_first_release or '',
+            'mb_duration_ms': int(mb_duration_ms or 0),
+        }
+
+    def _select_mb_winner(self, candidates):
+        """
+        Wählt den besten Song-Kandidaten per MB-Score.
+        Rückgabe: (winner_dict|None, evaluations_list).
+        """
+        if not candidates:
+            return None, []
+
+        evaluations = []
+        for c in candidates:
+            ev = self._evaluate_mb_candidate(c['source'], c['artist'], c['title'])
+            evaluations.append(ev)
+            xbmc.log(
+                f"[{ADDON_NAME}] MB-Kandidat[{ev['source']}]: "
+                f"in='{ev['input_artist']} - {ev['input_title']}', "
+                f"score={ev['score']}, artist_sim={ev['artist_sim']:.2f}, "
+                f"title_sim={ev['title_sim']:.2f}, combined={ev['combined']:.1f}",
+                xbmc.LOGDEBUG
+            )
+
+        valid = [
+            ev for ev in evaluations
+            if ev['score'] >= self.MB_WINNER_MIN_SCORE and ev['combined'] >= self.MB_WINNER_MIN_COMBINED
+        ]
+        if not valid:
+            xbmc.log(
+                f"[{ADDON_NAME}] MB-Winner: kein Kandidat über Schwellwert "
+                f"(min_score={self.MB_WINNER_MIN_SCORE}, min_combined={self.MB_WINNER_MIN_COMBINED:.1f})",
+                xbmc.LOGDEBUG
+            )
+            return None, evaluations
+
+        winner = max(
+            valid,
+            key=lambda ev: (
+                ev['combined'],
+                ev['score'],
+                1 if str(ev.get('source', '')).startswith('icy') else 0
+            )
+        )
+        xbmc.log(
+            f"[{ADDON_NAME}] MB-Winner: source={winner['source']} "
+            f"('{winner['mb_artist']} - {winner['mb_title']}'), "
+            f"score={winner['score']}, combined={winner['combined']:.1f}",
+            xbmc.LOGINFO
+        )
+        return winner, evaluations
     
     def get_radiode_api_nowplaying(self, station_name):
         """Holt aktuelle Song-Info direkt von der radio.de API"""
@@ -739,7 +835,7 @@ class RadioMonitor(xbmc.Monitor):
                         xbmc.log(f"[{ADDON_NAME}] now-playing API Response (Slug): {np_data}", xbmc.LOGDEBUG)
                         if isinstance(np_data, list) and len(np_data) > 0:
                             full_title = np_data[0].get('title', '')
-                            if full_title and ' - ' in full_title:
+                            if full_title:
                                 artist, title = _parse_radiode_api_title(full_title, station_name)
                                 if artist or title:
                                     xbmc.log(f"[{ADDON_NAME}] ✓ now-playing via Slug: {artist} - {title}", xbmc.LOGINFO)
@@ -844,7 +940,7 @@ class RadioMonitor(xbmc.Monitor):
                                     
                                     xbmc.log(f"[{ADDON_NAME}] Empfangener Titel: '{full_title}'", xbmc.LOGDEBUG)
                                     
-                                    if full_title and ' - ' in full_title:
+                                    if full_title:
                                         artist, title = _parse_radiode_api_title(full_title, station_name)
                                         if artist is not None or title is not None:
                                             if artist and title:
@@ -1247,43 +1343,78 @@ class RadioMonitor(xbmc.Monitor):
         """
         Trennt Artist und Title aus dem ICY-StreamTitle.
         Priorität:
-        1. API (radio.de / TuneIn) – erste Quelle; Nebeneffekte: Station+Logo werden gesetzt
-        2. 'von'-Format → eindeutig, MusicBrainz zur Bestätigung
-        3. Trennzeichen → part1/part2, MusicBrainz zur Reihenfolge-Bestimmung
-        4. Fallback: ganzer String als Title
+        1. Kandidaten aus API + ICY bilden
+        2. MusicBrainz bewertet jeden Kandidaten (Score + Similarity)
+        3. Kandidat mit bestem MB-Combined gewinnt
+        4. Falls MB nichts belastbares liefert: bestehender ICY-Fallback
         """
         invalid = INVALID_METADATA_VALUES + ["", station_name]
+        artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
 
-        # --- API als erste Quelle ---
+        # --- Kandidaten sammeln ---
+        candidates = []
+        api_candidate = (None, None)
+        api_changed = False
+
+        # API-Kandidat
         api_candidate_available = bool(stream_url and (station_name or self.plugin_slug or self.tunein_station_id))
         if api_candidate_available and not self._is_api_source_allowed():
             self._log_api_source_blocked('parse_stream_title_api_first')
         if api_candidate_available and self._is_api_source_allowed():
             api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
-            if api_artist and api_title and api_artist not in invalid and api_title not in invalid:
-                # Prüfe Übereinstimmung API <-> ICY
-                api_combined = f"{api_artist} - {api_title}".strip()
-                is_numeric_icy = bool(stream_title and _NUMERIC_ID_RE.match(stream_title))
-                effective_stream_title = None if is_numeric_icy else stream_title
-                try:
-                    sim = _mb_similarity((effective_stream_title or '').strip(), api_combined)
-                except Exception:
-                    sim = 0.0
+            api_artist, api_title = self._normalize_song_candidate(api_artist, api_title, invalid)
+            if api_artist and api_title:
+                api_key = (api_artist, api_title)
+                if self._api_timeout_block_key and api_key == self._api_timeout_block_key:
+                    xbmc.log(
+                        f"[{ADDON_NAME}] API-Kandidat geblockt nach Timeout: '{api_artist} - {api_title}'",
+                        xbmc.LOGDEBUG
+                    )
+                else:
+                    if self._api_timeout_block_key != ('', '') and api_key != self._api_timeout_block_key:
+                        xbmc.log(
+                            f"[{ADDON_NAME}] API-Song geändert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'",
+                            xbmc.LOGINFO
+                        )
+                        self._api_timeout_block_key = ('', '')
+                    candidates.append({'source': 'api', 'artist': api_artist, 'title': api_title})
+                    api_candidate = (api_artist, api_title)
+                    api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
+                    self._last_seen_api_key = api_key
 
-                if (effective_stream_title and sim >= 0.9) or (not effective_stream_title):
-                    xbmc.log(f"[{ADDON_NAME}] API-Daten (erste Quelle): Artist='{api_artist}', Title='{api_title}' (sim={sim:.2f})", xbmc.LOGINFO)
-                    mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = \
-                        _identify_artist_title_via_musicbrainz(api_artist, api_title)
-                    if uncertain:
-                        mb_artist, mb_title = api_artist, api_title
-                        mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
-                    if mb_artist in invalid: mb_artist = None
-                    if mb_title in invalid:  mb_title  = None
-                    if mb_artist or mb_title:
-                        return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
+        # ICY-Kandidaten (direkt + ggf. swapped)
+        icy_artist, icy_title = self._normalize_song_candidate(artist, title, invalid)
+        if icy_artist and icy_title:
+            candidates.append({'source': 'icy', 'artist': icy_artist, 'title': icy_title})
+            if not is_von and icy_artist != icy_title:
+                s_artist, s_title = self._normalize_song_candidate(icy_title, icy_artist, invalid)
+                if s_artist and s_title:
+                    candidates.append({'source': 'icy_swapped', 'artist': s_artist, 'title': s_title})
 
-        # --- ICY-Analyse (via metadata Modul) ---
-        artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
+        winner, evaluations = self._select_mb_winner(candidates)
+        if winner:
+            return (
+                winner['mb_artist'],
+                winner['mb_title'],
+                winner['mb_album'],
+                winner['mb_album_date'],
+                winner['mbid'],
+                winner['mb_first_release'],
+                winner['mb_duration_ms']
+            )
+
+        # Sonderfall B: MB kann zwischen Kandidaten nicht entscheiden (alle score=0).
+        # Dann API nur übernehmen, wenn sie sich gegenüber der letzten API-Antwort geändert hat.
+        if evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
+            if api_candidate[0] and api_candidate[1] and api_changed:
+                xbmc.log(
+                    f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, API hat gewechselt -> nutze API: "
+                    f"'{api_candidate[0]} - {api_candidate[1]}'",
+                    xbmc.LOGINFO
+                )
+                return api_candidate[0], api_candidate[1], '', '', '', '', 0
+
+        # --- ICY-Analyse (bestehender Fallback) ---
         if not artist and not title:
             return None, None, '', '', '', '', 0
 
@@ -1340,6 +1471,7 @@ class RadioMonitor(xbmc.Monitor):
         metaint = stream_info['metaint']
         response = stream_info.get('response')
         last_title = ""
+        last_song_key = ('', '', '')
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
@@ -1393,6 +1525,8 @@ class RadioMonitor(xbmc.Monitor):
 
                             # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
                             artist, title, album, album_date, mbid, first_release, duration_ms = self.parse_stream_title(stream_title, station_name, url)
+                            current_song_key = (artist or '', title or '', mbid or '')
+                            is_new_song = (current_song_key != last_song_key)
 
                             # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
                             if artist is None and title is None:
@@ -1458,7 +1592,7 @@ class RadioMonitor(xbmc.Monitor):
                             # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
                             # Bei MB-Laenge: Laenge - SONG_TIMEOUT_EARLY_CLEAR_S.
                             # Ohne MB-Laenge greift SONG_TIMEOUT_FALLBACK_S.
-                            if title:
+                            if title and is_new_song:
                                 self._start_song_timeout(duration_ms)
 
                             # Artist-Info (Gründungsjahr + Mitglieder) erst NACH Artist-Property setzen.
@@ -1546,6 +1680,8 @@ class RadioMonitor(xbmc.Monitor):
                                 xbmc.log(f"[{ADDON_NAME}] Fehler bei JSON-RPC Notify: {str(e)}", xbmc.LOGDEBUG)
                             
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
+                            if title:
+                                last_song_key = current_song_key
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     self._update_timeout_remaining_property()
@@ -1555,6 +1691,13 @@ class RadioMonitor(xbmc.Monitor):
                             f"[{ADDON_NAME}] Song-Timeout abgelaufen ({self._song_timeout:.0f}s) – lösche Song-Properties",
                             xbmc.LOGDEBUG
                         )
+                        if last_song_key[0] and last_song_key[1]:
+                            self._api_timeout_block_key = (last_song_key[0], last_song_key[1])
+                            xbmc.log(
+                                f"[{ADDON_NAME}] API-Block bis Songwechsel aktiviert: "
+                                f"'{last_song_key[0]} - {last_song_key[1]}'",
+                                xbmc.LOGDEBUG
+                            )
                         WINDOW.clearProperty(_P.ARTIST)
                         WINDOW.clearProperty(_P.TITLE)
                         WINDOW.clearProperty(_P.ALBUM)
