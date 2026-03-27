@@ -884,6 +884,19 @@ class RadioMonitor(xbmc.Monitor):
         """Filtert nur valide (artist, title)-Paare."""
         return [p for p in pairs if p and p[0] and p[1]]
 
+    def _select_musicplayer_pair_for_source(self, source, mp_pairs):
+        """
+        Waehlt das passende MP-Paar fuer die aktuelle MP-Quellenvariante:
+        - musicplayer -> direktes Paar
+        - musicplayer_swapped -> swapped Paar (falls vorhanden)
+        """
+        if not mp_pairs:
+            return ('', '')
+        src = str(source or '')
+        if src.startswith('musicplayer_swapped') and len(mp_pairs) > 1:
+            return mp_pairs[1]
+        return mp_pairs[0]
+
     def _is_player_buffering(self):
         """True solange Kodi den Stream noch puffert/laedt."""
         try:
@@ -1874,7 +1887,10 @@ class RadioMonitor(xbmc.Monitor):
         3. Kandidat mit bestem MB-Combined gewinnt
         4. Falls MB nichts belastbares liefert: bestehender ICY-Fallback
         """
-        self._set_last_song_decision('', None, None)
+        # Parse-Zyklus starten, ohne die zuletzt gesetzte Quelle sofort zu loeschen.
+        # Sonst flackert RadioMonitor.Source zwischen '' und dem finalen Gewinner.
+        self._last_decision_source = ''
+        self._last_decision_pair = ('', '')
         invalid = INVALID_METADATA_VALUES + ["", station_name]
         artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
 
@@ -2169,7 +2185,7 @@ class RadioMonitor(xbmc.Monitor):
                         invalid_values = INVALID_METADATA_VALUES + ["", station_name]
                         mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                         mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
-                        current_mp_pair = mp_live_pairs[0] if mp_live_pairs else ('', '')
+                        current_mp_pair = self._select_musicplayer_pair_for_source(last_winner_source, mp_live_pairs)
 
                         # API-Daten erst nach stabilem Start oder nach gesetzter Erstquelle aktualisieren.
                         # Dadurch wird waehrend sichtbarem Kodi-Buffering kein API-Property vorbefuellt.
@@ -2205,7 +2221,7 @@ class RadioMonitor(xbmc.Monitor):
                                 # den tatsaechlich stabilen Startzustand verwendet.
                                 mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                                 mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
-                                current_mp_pair = mp_live_pairs[0] if mp_live_pairs else ('', '')
+                                current_mp_pair = self._select_musicplayer_pair_for_source(last_winner_source, mp_live_pairs)
                                 self._refresh_api_data_property(station_name)
                                 current_api_pair = self._latest_api_pair
                                 if station_name:
