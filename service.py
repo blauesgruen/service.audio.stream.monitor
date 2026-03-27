@@ -124,6 +124,7 @@ class RadioMonitor(xbmc.Monitor):
     TUNEIN_URL_HINTS = ('tunein.com', 'radiotime.com', 'cdn-profiles.tunein.com')
     MB_WINNER_MIN_SCORE = 60
     MB_WINNER_MIN_COMBINED = 55.0
+    MP_TRUST_MAX_MISMATCHES = 2
 
     def __init__(self):
         super(RadioMonitor, self).__init__()
@@ -148,6 +149,12 @@ class RadioMonitor(xbmc.Monitor):
         self._api_timeout_block_key = ('', '')  # (artist, title)
         self._last_seen_api_key = ('', '')      # zuletzt gelesener API-Kandidat (artist, title)
         self._last_api_data_refresh_ts = 0.0
+        self._mp_trusted = False
+        self._mp_mismatch_count = 0
+        self._mp_trust_generation = 0
+        self._latest_api_pair = ('', '')
+        self._last_decision_source = ''
+        self._last_decision_pair = ('', '')
         
         # Event-Handler für Player-Events
         self.player_monitor = PlayerMonitor(self)
@@ -262,6 +269,15 @@ class RadioMonitor(xbmc.Monitor):
         if clear_debug:
             self._clear_timer_debug_properties()
 
+    def _reset_musicplayer_trust_state(self, reason=''):
+        """Setzt den MusicPlayer-Trust-Zustand zentral zurueck."""
+        was_trusted = self._mp_trusted
+        self._mp_trusted = False
+        self._mp_mismatch_count = 0
+        self._mp_trust_generation = self.metadata_generation
+        if reason and was_trusted:
+            xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Trust zurueckgesetzt: {reason}", xbmc.LOGDEBUG)
+
     def _update_timeout_remaining_property(self):
         """Aktualisiert den verbleibenden Song-Timer fuer Skin-Debugging."""
         if self._last_song_time and self._song_timeout > 0:
@@ -333,9 +349,13 @@ class RadioMonitor(xbmc.Monitor):
         self.station_logo = None
         self._reset_api_context()
         self._reset_song_timeout_state(clear_debug=True)
+        self._reset_musicplayer_trust_state('clear_properties')
         self._api_timeout_block_key = ('', '')
         self._last_seen_api_key = ('', '')
         self._last_api_data_refresh_ts = 0.0
+        self._latest_api_pair = ('', '')
+        self._last_decision_source = ''
+        self._last_decision_pair = ('', '')
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty('RadioDE.StationLogo')
@@ -651,6 +671,7 @@ class RadioMonitor(xbmc.Monitor):
         """
         if not self._is_api_source_allowed():
             WINDOW.clearProperty(_P.API_DATA)
+            self._latest_api_pair = ('', '')
             return
 
         now_ts = time.time()
@@ -667,9 +688,17 @@ class RadioMonitor(xbmc.Monitor):
             artist, title = self.get_tunein_api_nowplaying(s_name)
 
         if artist or title:
-            self.set_property_safe(_P.API_DATA, f"{artist} - {title}" if artist else title)
+            invalid_values = INVALID_METADATA_VALUES + ['', s_name]
+            n_artist, n_title = self._normalize_song_candidate(artist, title, invalid_values)
+            if n_artist and n_title:
+                self._latest_api_pair = (n_artist, n_title)
+                self.set_property_safe(_P.API_DATA, f"{n_artist} - {n_title}")
+            else:
+                self._latest_api_pair = ('', '')
+                self.set_property_safe(_P.API_DATA, f"{artist} - {title}" if artist else title)
         else:
             WINDOW.clearProperty(_P.API_DATA)
+            self._latest_api_pair = ('', '')
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
         """Versucht nowPlaying von verschiedenen APIs zu holen"""
@@ -758,6 +787,101 @@ class RadioMonitor(xbmc.Monitor):
         if _NUMERIC_ID_RE.match(a) or _NUMERIC_ID_RE.match(t):
             return None, None
         return a, t
+
+    def _read_musicplayer_candidates(self, invalid_values):
+        """
+        Liest MusicPlayer-Kandidaten (direkt + swapped) zentral aus.
+        Rückgabe: (mp_direct, mp_swapped)
+        """
+        mp_direct = (None, None)
+        mp_swapped = (None, None)
+        try:
+            if self.player.isPlayingAudio():
+                info_tag = self.player.getMusicInfoTag()
+                mp_artist_raw = info_tag.getArtist()
+                mp_title_raw = info_tag.getTitle()
+                mp_artist, mp_title = self._normalize_song_candidate(mp_artist_raw, mp_title_raw, invalid_values)
+                if mp_artist and mp_title:
+                    mp_direct = (mp_artist, mp_title)
+                    if mp_artist != mp_title:
+                        s_mp_artist, s_mp_title = self._normalize_song_candidate(mp_title, mp_artist, invalid_values)
+                        if s_mp_artist and s_mp_title and (s_mp_artist, s_mp_title) != mp_direct:
+                            mp_swapped = (s_mp_artist, s_mp_title)
+        except Exception as e:
+            xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen MusicPlayer Kandidat: {str(e)}", xbmc.LOGDEBUG)
+        return mp_direct, mp_swapped
+
+    def _valid_song_pairs(self, *pairs):
+        """Filtert nur valide (artist, title)-Paare."""
+        return [p for p in pairs if p and p[0] and p[1]]
+
+    def _set_last_song_decision(self, source, artist=None, title=None):
+        """Speichert die letzte Gewinnerquelle zentral fuer source-locked Trigger."""
+        self._last_decision_source = str(source or '')
+        if artist and title:
+            self._last_decision_pair = (artist, title)
+        else:
+            self._last_decision_pair = ('', '')
+
+    def _is_musicplayer_trusted(self):
+        """MusicPlayer ist nur innerhalb der aktuellen Metadata-Generation vertrauenswürdig."""
+        return self._mp_trusted and self._mp_trust_generation == self.metadata_generation
+
+    def _mark_musicplayer_trusted(self, reason=''):
+        """Promotet MusicPlayer als vertrauenswürdige Songquelle."""
+        was_trusted = self._is_musicplayer_trusted()
+        self._mp_trusted = True
+        self._mp_trust_generation = self.metadata_generation
+        self._mp_mismatch_count = 0
+        if not was_trusted:
+            suffix = f" ({reason})" if reason else ""
+            xbmc.log(f"[{ADDON_NAME}] MusicPlayer als Songquelle verifiziert{suffix}", xbmc.LOGINFO)
+
+    def _register_musicplayer_mismatch(self, reason=''):
+        """Registriert einen Trust-Fehler (z. B. fehlende/ungueltige MusicPlayer-Daten)."""
+        if not self._is_musicplayer_trusted():
+            return
+        self._mp_mismatch_count += 1
+        xbmc.log(
+            f"[{ADDON_NAME}] MusicPlayer-Widerspruch ({self._mp_mismatch_count}/{self.MP_TRUST_MAX_MISMATCHES})"
+            f"{': ' + reason if reason else ''}",
+            xbmc.LOGDEBUG
+        )
+        if self._mp_mismatch_count >= self.MP_TRUST_MAX_MISMATCHES:
+            self._reset_musicplayer_trust_state('zu viele Widersprueche')
+
+    def _update_musicplayer_trust_after_decision(self, decision_source, decision_pair, mp_pairs):
+        """
+        Aktualisiert den MusicPlayer-Trust nach einer finalen Song-Entscheidung.
+        Regel:
+        - Trust wird nur dann aufgebaut, wenn eine externe Entscheidung (api/icy) den MP bestätigt.
+        - Im MP-master Modus wird bei externem Widerspruch nicht automatisch de-vertraut.
+        """
+        if not mp_pairs:
+            return
+        source = str(decision_source or '')
+        pair = decision_pair if decision_pair and decision_pair[0] and decision_pair[1] else None
+        mp_set = set(mp_pairs)
+
+        if source.startswith('musicplayer'):
+            if self._is_musicplayer_trusted():
+                self._mp_mismatch_count = 0
+            return
+
+        if source.startswith('api') or source.startswith('icy'):
+            if pair and pair in mp_set:
+                self._mark_musicplayer_trusted(f"Konsens mit {source}: '{pair[0]} - {pair[1]}'")
+
+    def _should_use_musicplayer_candidates(self, mp_pairs, api_candidate, icy_pairs):
+        """
+        Steuert zentral, ob MusicPlayer-Kandidaten in die MB-Wahl aufgenommen werden.
+        Voraussetzung:
+        - MusicPlayer ist verifiziert.
+        Hinweis: Im MP-master Modus ist kein API/ICY-Konsens fuer die Nutzung noetig.
+        """
+        _ = api_candidate
+        _ = icy_pairs
+        return bool(mp_pairs) and self._is_musicplayer_trusted()
 
     def _evaluate_mb_candidate(self, source, artist, title):
         """
@@ -1390,6 +1514,7 @@ class RadioMonitor(xbmc.Monitor):
         3. Kandidat mit bestem MB-Combined gewinnt
         4. Falls MB nichts belastbares liefert: bestehender ICY-Fallback
         """
+        self._set_last_song_decision('', None, None)
         invalid = INVALID_METADATA_VALUES + ["", station_name]
         artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
 
@@ -1399,22 +1524,15 @@ class RadioMonitor(xbmc.Monitor):
         api_changed = False
         mp_direct = (None, None)
         mp_swapped = (None, None)
+        mp_pairs = []
 
-        # MusicPlayer-Kandidat (primäre Songquelle, wenn valide)
-        try:
-            if self.player.isPlayingAudio():
-                info_tag = self.player.getMusicInfoTag()
-                mp_artist_raw = info_tag.getArtist()
-                mp_title_raw = info_tag.getTitle()
-                mp_artist, mp_title = self._normalize_song_candidate(mp_artist_raw, mp_title_raw, invalid)
-                if mp_artist and mp_title:
-                    mp_direct = (mp_artist, mp_title)
-                    if mp_artist != mp_title:
-                        s_mp_artist, s_mp_title = self._normalize_song_candidate(mp_title, mp_artist, invalid)
-                        if s_mp_artist and s_mp_title and (s_mp_artist, s_mp_title) != mp_direct:
-                            mp_swapped = (s_mp_artist, s_mp_title)
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler beim Lesen MusicPlayer Kandidat: {str(e)}", xbmc.LOGDEBUG)
+        # MusicPlayer-Kandidaten lesen; Nutzung fuer die Entscheidung nur bei bestaetigtem Trust.
+        mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
+        mp_pairs = self._valid_song_pairs(mp_direct, mp_swapped)
+        if mp_pairs and self._is_musicplayer_trusted():
+            self._mp_mismatch_count = 0
+        elif not mp_pairs and self._is_musicplayer_trusted():
+            self._register_musicplayer_mismatch('MusicPlayer leer/ungueltig')
 
         # API-Kandidat
         api_candidate_available = bool(stream_url and (station_name or self.plugin_slug or self.tunein_station_id))
@@ -1451,14 +1569,37 @@ class RadioMonitor(xbmc.Monitor):
                 if s_artist and s_title:
                     candidates.append({'source': 'icy_swapped', 'artist': s_artist, 'title': s_title})
 
+        icy_candidate_pairs = [
+            (c.get('artist'), c.get('title'))
+            for c in candidates
+            if str(c.get('source', '')).startswith('icy')
+        ]
+        mp_candidates_allowed = self._should_use_musicplayer_candidates(
+            mp_pairs,
+            api_candidate,
+            icy_candidate_pairs
+        )
+        if mp_pairs and not self._is_musicplayer_trusted():
+            xbmc.log(
+                f"[{ADDON_NAME}] MusicPlayer-Kandidaten vorhanden, aber noch nicht verifiziert -> nur Monitoring",
+                xbmc.LOGDEBUG
+            )
+
         # MusicPlayer-Kandidaten ergänzen (direkt + swapped)
-        if mp_direct[0] and mp_direct[1]:
-            candidates.append({'source': 'musicplayer', 'artist': mp_direct[0], 'title': mp_direct[1]})
-        if mp_swapped[0] and mp_swapped[1]:
-            candidates.append({'source': 'musicplayer_swapped', 'artist': mp_swapped[0], 'title': mp_swapped[1]})
+        if mp_candidates_allowed:
+            if mp_direct[0] and mp_direct[1]:
+                candidates.append({'source': 'musicplayer', 'artist': mp_direct[0], 'title': mp_direct[1]})
+            if mp_swapped[0] and mp_swapped[1]:
+                candidates.append({'source': 'musicplayer_swapped', 'artist': mp_swapped[0], 'title': mp_swapped[1]})
 
         winner, evaluations = self._select_mb_winner(candidates)
         if winner:
+            self._set_last_song_decision(winner.get('source'), winner['mb_artist'], winner['mb_title'])
+            self._update_musicplayer_trust_after_decision(
+                winner.get('source'),
+                (winner.get('input_artist'), winner.get('input_title')),
+                mp_pairs
+            )
             return (
                 winner['mb_artist'],
                 winner['mb_title'],
@@ -1475,19 +1616,25 @@ class RadioMonitor(xbmc.Monitor):
         if evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
             # MusicPlayer-Konsens: wenn MusicPlayer (direkt/swapped) mit API oder ICY übereinstimmt,
             # übernehme MusicPlayer auch ohne MB-Treffer.
+            # Bootstrap: gilt auch wenn MP bisher untrusted war.
             icy_pairs = {
                 (ev.get('input_artist'), ev.get('input_title'))
                 for ev in evaluations
                 if str(ev.get('source', '')).startswith('icy')
             }
-            mp_pairs = [p for p in (mp_direct, mp_swapped) if p[0] and p[1]]
             for mp_pair in mp_pairs:
                 if mp_pair == api_candidate or mp_pair in icy_pairs:
+                    if not self._is_musicplayer_trusted():
+                        self._mark_musicplayer_trusted(
+                            f"Bootstrap bei MB=0: '{mp_pair[0]} - {mp_pair[1]}'"
+                        )
                     xbmc.log(
                         f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, MusicPlayer konsistent -> nutze MusicPlayer: "
                         f"'{mp_pair[0]} - {mp_pair[1]}'",
                         xbmc.LOGINFO
                     )
+                    self._set_last_song_decision('musicplayer', mp_pair[0], mp_pair[1])
+                    self._update_musicplayer_trust_after_decision('musicplayer', mp_pair, mp_pairs)
                     return mp_pair[0], mp_pair[1], '', '', '', '', 0
 
             has_icy_candidate = any(str(ev.get('source', '')).startswith('icy') for ev in evaluations)
@@ -1498,16 +1645,20 @@ class RadioMonitor(xbmc.Monitor):
                     f"'{api_candidate[0]} - {api_candidate[1]}'",
                     xbmc.LOGINFO
                 )
+                self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
+                self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
                 return api_candidate[0], api_candidate[1], '', '', '', '', 0
             xbmc.log(
                 f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, keine belastbaren Songdaten -> "
                 f"nutze nur Station/StreamTitle",
                 xbmc.LOGDEBUG
             )
+            self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
 
         # --- ICY-Analyse (bestehender Fallback) ---
         if not artist and not title:
+            self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
 
         # MusicBrainz zur Verifikation und Vervollständigung
@@ -1533,8 +1684,11 @@ class RadioMonitor(xbmc.Monitor):
         if mb_artist in invalid: mb_artist = None
         if mb_title in invalid:  mb_title  = None
         if not mb_artist and not mb_title:
+            self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
-            
+
+        self._set_last_song_decision('icy', mb_artist, mb_title)
+        self._update_musicplayer_trust_after_decision('icy', (mb_artist, mb_title), mp_pairs)
         return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
         
     def metadata_worker(self, url, generation):
@@ -1564,6 +1718,8 @@ class RadioMonitor(xbmc.Monitor):
         response = stream_info.get('response')
         last_title = ""
         last_song_key = ('', '', '')
+        last_winner_source = ''
+        last_winner_pair = ('', '')
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
@@ -1598,25 +1754,72 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] =========================", xbmc.LOGDEBUG)
                         
                         stream_title = self.extract_stream_title(metadata_str)
-                        
-                        # Prüfe ob sich etwas geändert hat (auch leerer Titel zählt)
-                        if stream_title != last_title:
-                            # Bei neuem StreamTitle: MusicBrainz-Cache invalidieren
+                        station_name = stream_info.get('station', '')
+                        invalid_values = INVALID_METADATA_VALUES + ["", station_name]
+                        mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
+                        mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
+                        current_mp_pair = mp_live_pairs[0] if mp_live_pairs else ('', '')
+
+                        # API-Daten periodisch aktualisieren, damit source-locked API-Wechsel erkannt werden.
+                        self._refresh_api_data_property(station_name)
+                        current_api_pair = self._latest_api_pair
+
+                        # StreamTitle unabhängig vom Gewinner aktuell halten.
+                        stream_title_changed = (stream_title != last_title)
+                        if stream_title_changed:
+                            last_title = stream_title
+                            xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
+
+                        # Source-locked Trigger: nur die letzte Gewinnerquelle entscheidet den Wechsel-Trigger.
+                        source_changed_trigger = False
+                        trigger_reason = ''
+                        if not last_winner_source:
+                            source_changed_trigger = stream_title_changed
+                            trigger_reason = 'Titelwechsel'
+                        elif last_winner_source.startswith('icy'):
+                            source_changed_trigger = stream_title_changed
+                            trigger_reason = 'Titelwechsel'
+                        elif last_winner_source.startswith('api'):
+                            if (
+                                current_api_pair[0]
+                                and current_api_pair[1]
+                                and current_api_pair != last_winner_pair
+                            ):
+                                source_changed_trigger = True
+                                trigger_reason = 'API-Wechsel'
+                        elif last_winner_source.startswith('musicplayer'):
+                            if (
+                                current_mp_pair[0]
+                                and current_mp_pair[1]
+                                and current_mp_pair != last_winner_pair
+                            ):
+                                source_changed_trigger = True
+                                trigger_reason = 'MusicPlayer-Wechsel'
+                            elif last_winner_pair[0] and not (current_mp_pair[0] and current_mp_pair[1]):
+                                source_changed_trigger = True
+                                trigger_reason = 'MusicPlayer ungueltig'
+
+                        if source_changed_trigger:
+                            # Bei Trigger: MusicBrainz-Cache invalidieren
                             try:
                                 _mb_cache.clear()
-                                xbmc.log(f"[{ADDON_NAME}] MB-Cache invalidiert wegen Titelwechsel", xbmc.LOGDEBUG)
+                                xbmc.log(f"[{ADDON_NAME}] MB-Cache invalidiert wegen {trigger_reason}", xbmc.LOGDEBUG)
                             except Exception:
                                 pass
-                            last_title = stream_title
-                            
-                            xbmc.log(f"[{ADDON_NAME}] Neuer StreamTitle erkannt: '{stream_title}'", xbmc.LOGDEBUG)
-                            
+                            if trigger_reason.startswith('MusicPlayer'):
+                                xbmc.log(
+                                    f"[{ADDON_NAME}] MusicPlayer-Titelwechsel erkannt (trusted): "
+                                    f"'{current_mp_pair[0]} - {current_mp_pair[1]}'",
+                                    xbmc.LOGDEBUG
+                                )
+
                             # Station ausschließlich aus ICY-Header (bereits in parse_icy_metadata gesetzt)
-                            station_name = stream_info.get('station', '')
                             xbmc.log(f"[{ADDON_NAME}] ICY-Daten: station='{station_name}', stream_title='{stream_title}'", xbmc.LOGINFO)
 
                             # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
                             artist, title, album, album_date, mbid, first_release, duration_ms = self.parse_stream_title(stream_title, station_name, url)
+                            decision_source = self._last_decision_source
+                            decision_pair = self._last_decision_pair
                             current_song_key = (artist or '', title or '', mbid or '')
                             is_new_song = (current_song_key != last_song_key)
 
@@ -1639,6 +1842,8 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.BAND_MEM)
                                 WINDOW.clearProperty(_P.GENRE)
                                 self._reset_song_timeout_state(clear_debug=True)  # kein gültiger Song → Timer deaktivieren
+                                last_winner_source = ''
+                                last_winner_pair = ('', '')
                                 continue
                             
                             if stream_title not in INVALID_METADATA_VALUES:
@@ -1778,6 +1983,12 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
                             if title:
                                 last_song_key = current_song_key
+                            if decision_source:
+                                last_winner_source = decision_source
+                                if decision_pair[0] and decision_pair[1]:
+                                    last_winner_pair = decision_pair
+                                else:
+                                    last_winner_pair = (artist or '', title or '')
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     self._update_timeout_remaining_property()
@@ -1829,6 +2040,7 @@ class RadioMonitor(xbmc.Monitor):
         self.use_api_fallback = False
         self.stop_thread = False
         self.metadata_generation += 1
+        self._reset_musicplayer_trust_state('neuer metadata worker')
         generation = self.metadata_generation
         
         self.metadata_thread = threading.Thread(target=self.metadata_worker, args=(url, generation))
