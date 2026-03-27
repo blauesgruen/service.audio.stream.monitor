@@ -1117,7 +1117,6 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_FORM)
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
-                    WINDOW.clearProperty(_P.STREAM_TTL)
                     self._reset_song_timeout_state(clear_debug=True)
 
                 # Warte vor nächster Abfrage
@@ -1271,7 +1270,6 @@ class RadioMonitor(xbmc.Monitor):
                     WINDOW.clearProperty(_P.BAND_FORM)
                     WINDOW.clearProperty(_P.BAND_MEM)
                     WINDOW.clearProperty(_P.GENRE)
-                    WINDOW.clearProperty(_P.STREAM_TTL)
                     self._reset_song_timeout_state(clear_debug=True)
 
                 # Warte vor nächster Abfrage (in 0.5s-Schritten für schnelles Beenden)
@@ -1718,7 +1716,6 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_FORM)
                         WINDOW.clearProperty(_P.BAND_MEM)
                         WINDOW.clearProperty(_P.GENRE)
-                        WINDOW.clearProperty(_P.STREAM_TTL)
                         self._reset_song_timeout_state(clear_debug=True)  # Verhindert wiederholtes Löschen
 
                 except Exception as e:

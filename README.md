@@ -18,11 +18,12 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
+- ✅ Wenn API/ICY keine belastbaren Songdaten liefern (z.B. MB-Scores aller Kandidaten = 0 ohne API-Wechsel), bleiben `RadioMonitor.Artist` und `RadioMonitor.Title` leer; `RadioMonitor.Station` und `RadioMonitor.StreamTitle` bleiben gesetzt
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
 - ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
-- ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge - 15s; wenn keine MB-Songlänge vorliegt: Fallback 4 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
+- ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge minus `SONG_TIMEOUT_EARLY_CLEAR_S`; wenn keine MB-Songlänge vorliegt: Fallback 4 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
 - ✅ Debug-Properties für Timeout-Validierung: MB-Songdauer und Live-Countdown als Window-Properties sichtbar
 - ✅ Automatisches Löschen der Properties beim Stoppen
 - ✅ Verhindert alte Metadaten beim Addon-Wechsel
@@ -117,6 +118,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
+- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben und kein API-Wechsel-Sonderfall greift, werden Artist/Title absichtlich nicht gesetzt.
 
 ### Modulstruktur
 
@@ -156,7 +158,7 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 ## Bekannte Limitierungen
 
 - Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift entweder die API (nur whitelisted Addons: radio.de/radio.de light/TuneIn) oder der MusicPlayer-Fallback
-- Manche Sender senden nur den Sendernamen statt Interpret/Titel – dieser wird korrekt gefiltert und nicht als Artist oder Title übernommen; alle Properties bleiben in diesem Fall leer
+- Manche Sender senden nur Sender-/Promo-Text statt Interpret/Titel. In solchen Faellen bleiben Artist/Title leer; Station und StreamTitle bleiben fuer die Anzeige erhalten.
 - Bei verschlüsselten Streams (HTTPS) können manche Server keine ICY-Metadaten liefern
 - Künstler ohne Einträge in fanart.tv oder theaudiodb liefern keine Hintergrundbilder für Artist Slideshow
 

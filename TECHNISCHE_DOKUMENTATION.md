@@ -117,22 +117,27 @@ Im Loop:
 
 ### 6.2 parse_stream_title() Prioritaet
 
-1. API zuerst (wenn whitelisted und Kontext valide)
-- `get_nowplaying_from_apis(station_name, stream_url)`
-- API-Ergebnis wird nur akzeptiert wenn:
-  - ICY fehlt/numerisch oder
-  - API und ICY-Kombitext aehnlich genug (`mb_similarity >= 0.9`)
-- API-Ergebnis wird zusaetzlich ueber MB verifiziert/angereichert
+1. Kandidatenbildung (API + ICY)
+- API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
+- ICY-Kandidaten aus `metadata.parse_stream_title_complex()` (direkt + optional swapped)
 
-2. ICY-Analyse
+2. MB-Winner
+- jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
+- Winner nur oberhalb der Schwellwerte
+- Tie-Break bei Gleichstand: ICY wird bevorzugt
+
+3. Sonderfall alle MB-Scores = 0
+- wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
+- sonst: keine belastbaren Songdaten -> Rueckgabe `Artist=None`, `Title=None`
+
+4. ICY-Analyse/Fallback
 - `metadata.parse_stream_title_complex()`
 - erkennt `"Title" von Artist`, mehrere Separatoren, Station-/Invalid-Werte
 - numerische Formate wie `123 - 456` gelten als "kein ICY"
-
-3. Mehrfach-Separator-Heuristik
+- Mehrfach-Separator-Heuristik:
 - bei mehrfach ` - ` zuerst last-separator-Variante pruefen
 
-4. MB-Entscheidung
+5. MB-Entscheidung fuer ICY-Fallback
 - `identify_artist_title_via_musicbrainz(...)`
 - bei `uncertain=True` bleiben Eingabewerte konservativ erhalten, unsichere MB-Felder werden geleert
 
@@ -176,8 +181,9 @@ Typische Setz-Reihenfolge im Metadatenpfad:
 7. `Logo`
 8. optional spaeter `BandFormed`, `BandMembers`, `Genre`
 
-Bei ungueltigen/leerem Titel werden song-bezogene Felder geloescht:
-- `Artist`, `Title`, `Album`, `AlbumDate`, `MBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`, `StreamTitle`
+Bei klar fehlenden Songdaten werden song-bezogene Felder geloescht:
+- `Artist`, `Title`, `Album`, `AlbumDate`, `MBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
+- `Station` und `StreamTitle` bleiben fuer die Anzeige erhalten
 
 ## 8) Song-Timeout
 
@@ -189,7 +195,7 @@ Zentrale Methoden:
 
 Regeln:
 - nach gueltigem Titelupdate startet der Timer neu
-- wenn MB-Laenge bekannt: `timeout = max(0, duration_ms/1000 - 15)`
+- wenn MB-Laenge bekannt: `timeout = max(0, duration_ms/1000 - SONG_TIMEOUT_EARLY_CLEAR_S)`
 - wenn MB-Laenge nicht bekannt: Fallback `240s`
 
 Wenn Timeout ablaeuft:
@@ -248,6 +254,7 @@ Nicht verletzen ohne expliziten Grund:
    - `ICY METADATA (ROH)`
    - `Neuer StreamTitle erkannt`
    - `MB-Cache invalidiert wegen Titelwechsel`
+   - `MB score=0 fuer alle Kandidaten, keine belastbaren Songdaten -> nutze nur Station/StreamTitle`
    - `MusicBrainz Entscheidung`
    - `Song-Timeout abgelaufen`
 

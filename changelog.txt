@@ -1,3 +1,9 @@
+v1.0.11 (2026-03-27)
+- Anpassung: Bei klar fehlenden Songdaten (alle MB-Kandidaten `score=0` und kein API-Wechsel-Sonderfall) werden `RadioMonitor.Artist` und `RadioMonitor.Title` nicht mehr mit unzuverlaessigen Restdaten befuellt.
+- Anpassung: In diesem Fall bleiben `RadioMonitor.Station` und `RadioMonitor.StreamTitle` gesetzt; song-bezogene Felder werden geloescht.
+- Anpassung: Song-Timeout ist zentral berechnet; bei vorhandener MB-Laenge fliesst `SONG_TIMEOUT_EARLY_CLEAR_S` in `TimeoutTotal` ein.
+- Doku: README und TECHNISCHE_DOKUMENTATION auf den neuen No-Song-Datenpfad aktualisiert.
+
 v1.0.10 (2026-03-26)
 - Neu: TuneIn API Integration (Describe.ashx/Tune.ashx) als zusaetzliche Now-Playing-Quelle.
 - Neu: Zentrale API-Quellensteuerung (Whitelist) fuer `plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`.
