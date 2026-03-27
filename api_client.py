@@ -31,7 +31,13 @@ class APIClient:
             self.session.headers.update(headers)
         self.retry_count = retry_count
 
-    def get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 5) -> requests.Response:
+    def get(
+        self,
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: int = 5,
+        **request_kwargs
+    ) -> requests.Response:
         """
         Führt GET-Request mit automatischen Retries durch.
 
@@ -50,7 +56,7 @@ class APIClient:
 
         for attempt in range(self.retry_count):
             try:
-                response = self.session.get(url, params=params, timeout=timeout)
+                response = self.session.get(url, params=params, timeout=timeout, **request_kwargs)
                 response.raise_for_status()
                 return response
 
