@@ -114,10 +114,12 @@ Im Loop:
 - bei Titelwechsel:
   - invalidiert MB Song-Cache: `_mb_cache.clear()`
   - parst Artist/Title via `parse_stream_title(stream_title, station_name, url)`
+- aktualisiert periodisch `RadioMonitor.ApiData` aus der aktiven API-Quelle (throttled)
 
 ### 6.2 parse_stream_title() Prioritaet
 
-1. Kandidatenbildung (API + ICY)
+1. Kandidatenbildung (MusicPlayer + API + ICY)
+- MusicPlayer-Kandidaten (direkt + swapped)
 - API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
 - ICY-Kandidaten aus `metadata.parse_stream_title_complex()` (direkt + optional swapped)
 
@@ -127,7 +129,9 @@ Im Loop:
 - Tie-Break bei Gleichstand: ICY wird bevorzugt
 
 3. Sonderfall alle MB-Scores = 0
+- wenn MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
 - wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
+- wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs): API wird ebenfalls uebernommen
 - sonst: keine belastbaren Songdaten -> Rueckgabe `Artist=None`, `Title=None`
 
 4. ICY-Analyse/Fallback
@@ -151,6 +155,7 @@ Im Loop:
   - MB-Felder nur behalten wenn MB zum API-Titel plausibel passt
 - bei nur Title:
   - Artist/MBID werden bewusst nicht aggressiv geloescht (stabileres AS-Verhalten)
+- `RadioMonitor.ApiData` zeigt nur echte API-Titel (radio.de/TuneIn), nicht MusicPlayer-Fallback
 
 ### 6.4 MusicPlayer-Fallback-Worker
 
@@ -184,6 +189,7 @@ Typische Setz-Reihenfolge im Metadatenpfad:
 Bei klar fehlenden Songdaten werden song-bezogene Felder geloescht:
 - `Artist`, `Title`, `Album`, `AlbumDate`, `MBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
 - `Station` und `StreamTitle` bleiben fuer die Anzeige erhalten
+- `ApiData` wird separat aus der API-Refresh-Logik gepflegt
 
 ## 8) Song-Timeout
 

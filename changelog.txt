@@ -1,7 +1,11 @@
 v1.0.11 (2026-03-27)
 - Anpassung: Bei klar fehlenden Songdaten (alle MB-Kandidaten `score=0` und kein API-Wechsel-Sonderfall) werden `RadioMonitor.Artist` und `RadioMonitor.Title` nicht mehr mit unzuverlaessigen Restdaten befuellt.
 - Anpassung: In diesem Fall bleiben `RadioMonitor.Station` und `RadioMonitor.StreamTitle` gesetzt; song-bezogene Felder werden geloescht.
+- Anpassung: Bei `score=0` fuer alle Kandidaten wird API weiterhin uebernommen, wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs).
+- Anpassung: MusicPlayer (direkt + swapped) wird in der Kandidatenlogik mitbewertet; bei `score=0` kann ein Konsens mit API/ICY zur Uebernahme fuehren.
 - Anpassung: Song-Timeout ist zentral berechnet; bei vorhandener MB-Laenge fliesst `SONG_TIMEOUT_EARLY_CLEAR_S` in `TimeoutTotal` ein.
+- Neu: `RadioMonitor.ApiData` wird periodisch aus der aktiven API-Quelle aktualisiert (throttled), damit API-Labels ohne Titelwechsel aktuell bleiben.
+- Doku: README um API-Label-Beispiel erweitert; technische Doku um ApiData-Refresh/Verhalten ergaenzt.
 - Doku: README und TECHNISCHE_DOKUMENTATION auf den neuen No-Song-Datenpfad aktualisiert.
 
 v1.0.10 (2026-03-26)

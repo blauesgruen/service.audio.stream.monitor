@@ -43,6 +43,7 @@ MB_SONG_CACHE_TTL = 86400  # 24 Stunden
 # Wenn keine MB-Laenge bekannt ist, greift SONG_TIMEOUT_FALLBACK_S.
 SONG_TIMEOUT_EARLY_CLEAR_S = 15
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
+API_DATA_REFRESH_INTERVAL_S = 10
 
 # --- Window Property-Namen ---
 
@@ -60,6 +61,7 @@ class PropertyNames:
     MBID       = 'RadioMonitor.MBID'
     FIRST_REL  = 'RadioMonitor.FirstRelease'
     STREAM_TTL = 'RadioMonitor.StreamTitle'
+    API_DATA   = 'RadioMonitor.ApiData'
     PLAYING    = 'RadioMonitor.Playing'
     LOGO       = 'RadioMonitor.Logo'
     BAND_FORM  = 'RadioMonitor.BandFormed'

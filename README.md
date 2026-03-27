@@ -18,7 +18,9 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
-- ✅ Wenn API/ICY keine belastbaren Songdaten liefern (z.B. MB-Scores aller Kandidaten = 0 ohne API-Wechsel), bleiben `RadioMonitor.Artist` und `RadioMonitor.Title` leer; `RadioMonitor.Station` und `RadioMonitor.StreamTitle` bleiben gesetzt
+- ✅ Wenn API/ICY keine belastbaren Songdaten liefern (z.B. MB-Scores aller Kandidaten = 0), bleiben `RadioMonitor.Artist` und `RadioMonitor.Title` leer; Ausnahme: API wird weiter genutzt, wenn sie gewechselt hat oder kein valider ICY-Kandidat vorliegt (z.B. numerische ICY-IDs)
+- ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
+- ✅ `RadioMonitor.ApiData` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel), damit API-Debug-Labels aktuell bleiben
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
 - ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
@@ -43,6 +45,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
+| `RadioMonitor.ApiData` | Letzter valider API-Titel (radio.de/TuneIn) | "Artist - Title" |
 | `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed` | Gründungsjahr (nur bei Bands) | "1995" |
@@ -83,6 +86,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 <label>Timer: $INFO[Window(Home).Property(RadioMonitor.TimeoutRemaining)] / $INFO[Window(Home).Property(RadioMonitor.TimeoutTotal)]s</label>
 ```
 
+### Beispiel 6: Aktuelle API-Daten (Debug)
+```xml
+<label>API: $INFO[Window(Home).Property(RadioMonitor.ApiData)]</label>
+```
+
 ## Installation
 
 ### Empfohlene Methode: Kodinerds Repository
@@ -118,7 +126,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
-- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben und kein API-Wechsel-Sonderfall greift, werden Artist/Title absichtlich nicht gesetzt.
+- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, wird API nur bei Songwechsel oder ohne validen ICY-Kandidaten uebernommen; sonst werden Artist/Title absichtlich nicht gesetzt.
 
 ### Modulstruktur
 
