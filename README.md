@@ -18,17 +18,19 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
-- ✅ Wenn API/ICY keine belastbaren Songdaten liefern (z.B. MB-Scores aller Kandidaten = 0), bleiben `RadioMonitor.Artist` und `RadioMonitor.Title` leer; Ausnahme: API wird weiter genutzt, wenn sie gewechselt hat oder kein valider ICY-Kandidat vorliegt (z.B. numerische ICY-IDs)
+- ✅ Source-Lock nach Erstentscheidung: nach gesetzter Quelle (MusicPlayer/API/ICY) werden Songwechsel nur noch an dieser Quelle erkannt; Wechsel nur bei ungueltigen/fehlenden Daten der Lock-Quelle
+- ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
 - ✅ `RadioMonitor.ApiData` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel), damit API-Debug-Labels aktuell bleiben
+- ✅ API/ICY-Property-Befuellung erst nach stabilem Start (Kodi-Buffering vorbei), Logo weiterhin sofort
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
 - ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
 - ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge minus `SONG_TIMEOUT_EARLY_CLEAR_S`; wenn keine MB-Songlänge vorliegt: Fallback 4 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
 - ✅ Debug-Properties für Timeout-Validierung: MB-Songdauer und Live-Countdown als Window-Properties sichtbar
-- ✅ Automatisches Löschen der Properties beim Stoppen
-- ✅ Verhindert alte Metadaten beim Addon-Wechsel
+- ✅ Sofortiges Löschen der Labels bei Stop/Ende (Player-Callbacks)
+- ✅ Streamwechsel wird abgefangen: Labels werden vor Neubefuellung zuerst geloescht
 
 ## Verfügbare Window Properties
 
@@ -46,6 +48,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.ApiData` | Letzter valider API-Titel (radio.de/TuneIn) | "Artist - Title" |
+| `RadioMonitor.Source` | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
 | `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed` | Gründungsjahr (nur bei Bands) | "1995" |
@@ -126,7 +129,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
-- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, wird API nur bei Songwechsel oder ohne validen ICY-Kandidaten uebernommen; sonst werden Artist/Title absichtlich nicht gesetzt.
+- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, bleibt bei aktivem Source-Lock die gelockte Quelle massgeblich; ohne Lock greifen die bestehenden Fallback-Regeln.
 
 ### Modulstruktur
 

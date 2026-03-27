@@ -45,6 +45,7 @@ Startpunkt:
 Event-/Polling-Quellen:
 - `PlayerMonitor` (Kodi `xbmc.Player`):
   - `onPlayBackStarted()`: erkennt API-Source frueh (radio.de/radio.de light/TuneIn)
+  - `onPlayBackStopped()` / `onPlayBackEnded()`: loeschen Labels sofort (ohne Polling-Verzoegerung)
   - `onAVStarted()`: behandelt Video/Lokaldateien als harte Stop-Szenarien und liest frueh Logo aus `ListItem.Icon`
 - `RadioMonitor.run()`:
   - Polling alle 2 Sekunden (`check_playing()`)
@@ -92,6 +93,10 @@ Bei Video, lokaler Datei, Stream-Ende oder Addon-Ende:
 - `stop_metadata_monitoring()`
 - `clear_properties()`
 
+Bei Streamwechsel:
+- `_handle_stream_transition(...)` leert alte Labels vor dem Neubefuellen.
+- Aufgerufen sowohl im `onPlayBackStarted()`-Pfad (frueh) als auch als Safety-Net im Polling (`check_playing()`).
+
 `clear_properties()` loescht:
 - radio.de Window-Properties (`RadioDE.StationLogo`, `RadioDE.StationName`)
 - alle `RadioMonitor.*` Properties inkl. Timer-/Debug-Properties
@@ -104,6 +109,7 @@ Bei Video, lokaler Datei, Stream-Ende oder Addon-Ende:
 `metadata_worker()` -> `parse_icy_metadata(url)`:
 - Request mit Header `Icy-MetaData: 1`
 - liest `icy-name`, `icy-genre`, `icy-metaint`
+- schreibt Station/Genre-Properties erst nach stabilem Start (Buffering-Gate), nicht beim Header-Read
 - wenn `icy-metaint` fehlt:
   - `_setup_api_fallback_from_url(url)`
   - kein ICY-Worker, stattdessen Fallback-Worker
@@ -111,6 +117,7 @@ Bei Video, lokaler Datei, Stream-Ende oder Addon-Ende:
 Im Loop:
 - liest Audio-Bytes bis `metaint`, dann Metadatenblocklaenge und Metadatenblock
 - extrahiert `StreamTitle` via `metadata.extract_stream_title`
+- API-Refresh nur nach stabilem Start oder nach gesetzter Erstquelle (kein Vorbefuellen waehrend Buffering)
 - bei Titelwechsel:
   - invalidiert MB Song-Cache: `_mb_cache.clear()`
   - parst Artist/Title via `parse_stream_title(stream_title, station_name, url)`
@@ -129,6 +136,7 @@ Im Loop:
 - Tie-Break bei Gleichstand: ICY wird bevorzugt
 
 3. Sonderfall alle MB-Scores = 0
+- bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich (kein API-Override gegen Lock)
 - wenn MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
 - wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
 - wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs): API wird ebenfalls uebernommen
@@ -246,6 +254,7 @@ Timer-Debug-Properties:
 
 Nicht verletzen ohne expliziten Grund:
 - Property-Setzreihenfolge (insb. MBID vor Artist)
+- Source-Lock nach Erstentscheidung (Quellenwechsel nur bei fehlenden/ungueltigen Lock-Daten)
 - getrennte, aehnlich aussehende Property-Bloecke nicht blind zusammenfuehren
 - numerische ICY-Titel als "kein ICY" behandeln
 - MB-Cache bei StreamTitle-Wechsel invalidieren
