@@ -21,7 +21,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Source-Lock nach Erstentscheidung: nach gesetzter Quelle (MusicPlayer/API/ICY) werden Songwechsel nur noch an dieser Quelle erkannt; Wechsel nur bei ungueltigen/fehlenden Daten der Lock-Quelle
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
-- ✅ `RadioMonitor.ApiData` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel), damit API-Debug-Labels aktuell bleiben
+- ✅ `RadioMonitor.ApiNowPlaying` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel)
 - ✅ API/ICY-Property-Befuellung erst nach stabilem Start (Kodi-Buffering vorbei), Logo weiterhin sofort
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
@@ -47,7 +47,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
-| `RadioMonitor.ApiData` | Letzter valider API-Titel (radio.de/TuneIn) | "Artist - Title" |
+| `RadioMonitor.ApiNowPlaying` | Letzter valider API-Titel (radio.de/TuneIn) | "Artist - Title" |
 | `RadioMonitor.Source` | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
 | `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
@@ -89,9 +89,9 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 <label>Timer: $INFO[Window(Home).Property(RadioMonitor.TimeoutRemaining)] / $INFO[Window(Home).Property(RadioMonitor.TimeoutTotal)]s</label>
 ```
 
-### Beispiel 6: Aktuelle API-Daten (Debug)
+### Beispiel 6: Aktuelle API-Daten
 ```xml
-<label>API: $INFO[Window(Home).Property(RadioMonitor.ApiData)]</label>
+<label>API: $INFO[Window(Home).Property(RadioMonitor.ApiNowPlaying)]</label>
 ```
 
 ## Installation
