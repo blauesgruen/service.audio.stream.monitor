@@ -13,7 +13,7 @@ from constants import (
     TUNEIN_DESCRIBE_API_URL, TUNEIN_TUNE_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
-    API_DATA_REFRESH_INTERVAL_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
+    API_NOW_REFRESH_INTERVAL_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
@@ -188,12 +188,11 @@ class RadioMonitor(xbmc.Monitor):
         # Nach Song-Timeout: gleicher API-Song wird so lange ignoriert, bis API einen neuen Song liefert.
         self._api_timeout_block_key = ('', '')  # (artist, title)
         self._last_seen_api_key = ('', '')      # zuletzt gelesener API-Kandidat (artist, title)
-        self._last_api_data_refresh_ts = 0.0
+        self._last_api_now_refresh_ts = 0.0
         self._mp_trusted = False
         self._mp_mismatch_count = 0
         self._mp_trust_generation = 0
         self._latest_api_pair = ('', '')
-        self._latest_api_pair_raw = ('', '')
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
         self._parse_prev_winner_pair = ('', '')
@@ -452,9 +451,8 @@ class RadioMonitor(xbmc.Monitor):
         self._reset_musicplayer_trust_state('clear_properties')
         self._api_timeout_block_key = ('', '')
         self._last_seen_api_key = ('', '')
-        self._last_api_data_refresh_ts = 0.0
+        self._last_api_now_refresh_ts = 0.0
         self._latest_api_pair = ('', '')
-        self._latest_api_pair_raw = ('', '')
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
         self._parse_prev_winner_pair = ('', '')
@@ -827,22 +825,21 @@ class RadioMonitor(xbmc.Monitor):
                 log_debug(f"Fehler bei TuneIn API Abfrage ({endpoint}): {e}")
 
         return None, None
-    def _refresh_api_data_property(self, station_name=None, force=False):
+    def _refresh_api_nowplaying_property(self, station_name=None, force=False):
         """
         Aktualisiert RadioMonitor.ApiNowPlaying periodisch aus der aktiven API-Quelle.
         Nutzt bewusst keinen MusicPlayer-Fallback.
         """
-        self._reconcile_api_source('_refresh_api_data_property')
+        self._reconcile_api_source('_refresh_api_nowplaying_property')
         if not self._is_api_source_allowed():
             WINDOW.clearProperty(_P.API_NOW)
             self._latest_api_pair = ('', '')
-            self._latest_api_pair_raw = ('', '')
             return
 
         now_ts = time.time()
-        if not force and (now_ts - self._last_api_data_refresh_ts) < API_DATA_REFRESH_INTERVAL_S:
+        if not force and (now_ts - self._last_api_now_refresh_ts) < API_NOW_REFRESH_INTERVAL_S:
             return
-        self._last_api_data_refresh_ts = now_ts
+        self._last_api_now_refresh_ts = now_ts
 
         s_name = station_name or WINDOW.getProperty(_P.STATION) or ''
         artist, title = None, None
@@ -857,16 +854,13 @@ class RadioMonitor(xbmc.Monitor):
             n_artist, n_title = self._normalize_song_candidate(artist, title, invalid_values)
             if n_artist and n_title:
                 self._latest_api_pair = (n_artist, n_title)
-                self._latest_api_pair_raw = (n_artist, n_title)
                 self._set_api_nowplaying_label(n_artist, n_title)
             else:
                 self._latest_api_pair = ('', '')
-                self._latest_api_pair_raw = ('', '')
                 self._set_api_nowplaying_label(artist, title)
         else:
             WINDOW.clearProperty(_P.API_NOW)
             self._latest_api_pair = ('', '')
-            self._latest_api_pair_raw = ('', '')
     
     def get_nowplaying_from_apis(self, station_name, stream_url):
         """Versucht nowPlaying von verschiedenen APIs zu holen"""
@@ -1086,6 +1080,7 @@ class RadioMonitor(xbmc.Monitor):
             'title': self.TRIGGER_TITLE_CHANGE,
             'api': self.TRIGGER_API_CHANGE,
             'musicplayer': self.TRIGGER_MP_CHANGE,
+            'mp_invalid': self.TRIGGER_MP_INVALID,
             'icy': self.TRIGGER_TITLE_CHANGE,
             'icy_stale': self.TRIGGER_ICY_STALE
         }
@@ -2329,11 +2324,10 @@ class RadioMonitor(xbmc.Monitor):
                         # Dadurch wird waehrend sichtbarem Kodi-Buffering kein API-Property vorbefuellt.
                         api_refresh_allowed = startup_stable_confirmed or bool(last_winner_source)
                         if api_refresh_allowed:
-                            self._refresh_api_data_property(station_name)
-                            current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair_raw)
+                            self._refresh_api_nowplaying_property(station_name)
+                            current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
                         else:
                             self._latest_api_pair = ('', '')
-                            self._latest_api_pair_raw = ('', '')
                             current_api_pair = ('', '')
 
                         # StreamTitle unabhängig vom Gewinner aktuell halten.
@@ -2371,8 +2365,8 @@ class RadioMonitor(xbmc.Monitor):
                                     last_winner_source,
                                     (icy_artist, icy_title)
                                 )
-                                self._refresh_api_data_property(station_name)
-                                current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair_raw)
+                                self._refresh_api_nowplaying_property(station_name)
+                                current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
                                 if station_name:
                                     self.set_property_safe(_P.STATION, station_name)
                                 if stream_info.get('genre'):
@@ -2620,7 +2614,7 @@ class RadioMonitor(xbmc.Monitor):
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     if startup_stable_confirmed or last_winner_source:
-                        self._refresh_api_data_property(stream_info.get('station', ''))
+                        self._refresh_api_nowplaying_property(stream_info.get('station', ''))
                     # Laeuft jede Iteration (~1s) - kein extra Thread notwendig.
                     self._handle_song_timeout_expiry(
                         last_song_key=last_song_key,

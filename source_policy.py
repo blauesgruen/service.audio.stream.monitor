@@ -1,4 +1,4 @@
-from collections import deque
+﻿from collections import deque
 
 
 class SourceHealth:
@@ -202,7 +202,17 @@ class SourcePolicy:
                 if self._confirm('icy', pairs['icy'], 1):
                     return True, reasons['icy_stale'], preferred
 
-        # Aktive Quelle liefert nichts mehr: zur besten verfügbaren Quelle wechseln.
+        if (
+            winner_family == 'musicplayer'
+            and last_winner_pair
+            and last_winner_pair[0]
+            and last_winner_pair[1]
+            and not self._valid_pair(active_pair)
+        ):
+            self._reset_confirm()
+            return True, reasons['mp_invalid'], preferred
+
+        # Aktive Quelle liefert nichts mehr: zur besten verfÃƒÂ¼gbaren Quelle wechseln.
         if not self._valid_pair(active_pair) and preferred:
             target_pair = valid_pairs.get(preferred, ('', ''))
             if self._valid_pair(target_pair) and target_pair != last_winner_pair:
@@ -219,3 +229,5 @@ class SourcePolicy:
             family: round(self._score(family), 3)
             for family in self.FAMILIES
         }
+
+
