@@ -121,7 +121,7 @@ Im Loop:
 - bei Titelwechsel:
   - invalidiert MB Song-Cache: `_mb_cache.clear()`
   - parst Artist/Title via `parse_stream_title(stream_title, station_name, url)`
-- aktualisiert periodisch `RadioMonitor.ApiData` aus der aktiven API-Quelle (throttled)
+- aktualisiert periodisch `RadioMonitor.ApiNowPlaying` aus der aktiven API-Quelle (throttled)
 
 ### 6.2 parse_stream_title() Prioritaet
 
@@ -163,7 +163,7 @@ Im Loop:
   - MB-Felder nur behalten wenn MB zum API-Titel plausibel passt
 - bei nur Title:
   - Artist/MBID werden bewusst nicht aggressiv geloescht (stabileres AS-Verhalten)
-- `RadioMonitor.ApiData` zeigt nur echte API-Titel (radio.de/TuneIn), nicht MusicPlayer-Fallback
+- `RadioMonitor.ApiNowPlaying` zeigt nur echte API-Titel (radio.de/TuneIn), nicht MusicPlayer-Fallback
 
 ### 6.4 MusicPlayer-Fallback-Worker
 
@@ -197,7 +197,7 @@ Typische Setz-Reihenfolge im Metadatenpfad:
 Bei klar fehlenden Songdaten werden song-bezogene Felder geloescht:
 - `Artist`, `Title`, `Album`, `AlbumDate`, `MBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
 - `Station` und `StreamTitle` bleiben fuer die Anzeige erhalten
-- `ApiData` wird separat aus der API-Refresh-Logik gepflegt
+- `ApiNowPlaying` wird separat aus der API-Refresh-Logik gepflegt
 
 ## 8) Song-Timeout
 
