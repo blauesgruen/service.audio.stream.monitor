@@ -46,6 +46,7 @@ TRIGGER_TITLE_CHANGE = 'Titelwechsel'
 TRIGGER_API_CHANGE = 'API-Wechsel'
 TRIGGER_MP_CHANGE = 'MusicPlayer-Wechsel'
 TRIGGER_MP_INVALID = 'MusicPlayer ungueltig'
+TRIGGER_ICY_STALE = 'ICY-Wechsel (API stale)'
 
 # --- Cache & Timeouts ---
 
@@ -90,8 +91,10 @@ class PropertyNames:
     MBID       = 'RadioMonitor.MBID'
     FIRST_REL  = 'RadioMonitor.FirstRelease'
     STREAM_TTL = 'RadioMonitor.StreamTitle'
-    API_DATA   = 'RadioMonitor.ApiData'
+    API_NOW    = 'RadioMonitor.ApiNowPlaying'
+    ICY_NOW    = 'RadioMonitor.IcyNowPlaying'
     SOURCE     = 'RadioMonitor.Source'
+    SOURCE_DETAIL = 'RadioMonitor.SourceDetail'
     PLAYING    = 'RadioMonitor.Playing'
     LOGO       = 'RadioMonitor.Logo'
     BAND_FORM  = 'RadioMonitor.BandFormed'
