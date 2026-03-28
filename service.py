@@ -4,7 +4,12 @@ import re
 import time
 import threading
 import json
+import os
 from urllib.parse import urlparse, parse_qs, unquote
+try:
+    import xbmcvfs
+except Exception:  # pragma: no cover - Kodi runtime dependency
+    xbmcvfs = None
 
 # --- Modul-Imports ---
 from constants import (
@@ -15,6 +20,9 @@ from constants import (
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
     API_NOW_REFRESH_INTERVAL_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
+    STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
+    SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
+    STARTUP_SOURCE_QUALIFY_WINDOW_S,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
     MB_WINNER_MIN_SCORE as _MB_WINNER_MIN_SCORE,
@@ -30,6 +38,7 @@ from constants import (
 from logger import log_debug, log_info, log_warning, log_error
 from api_client import APIClient
 from source_policy import SourcePolicy
+from station_profiles import StationProfileStore
 from musicbrainz import (
     identify_artist_title_via_musicbrainz as _identify_artist_title_via_musicbrainz,
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
@@ -165,6 +174,7 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_MP_CHANGE = _TRIGGER_MP_CHANGE
     TRIGGER_MP_INVALID = _TRIGGER_MP_INVALID
     TRIGGER_ICY_STALE = _TRIGGER_ICY_STALE
+    MP_GENERIC_HOLD_MAX_S = 120.0
 
     def __init__(self):
         super(RadioMonitor, self).__init__()
@@ -199,7 +209,22 @@ class RadioMonitor(xbmc.Monitor):
         self._parse_trigger_reason = ''
         self._parse_locked_source = ''
         self._policy_preferred_source = ''
-        self.source_policy = SourcePolicy()
+        self._last_policy_context = {}
+        self._last_icy_format_hint = 'unknown'
+        self._active_station_profile_key = ''
+        self._station_profile_session = None
+        self._station_profile_policy_enabled = False
+        self._active_policy_profile = {}
+        self._last_station_profile_observe_ts = 0.0
+        self._mp_generic_hold_active = False
+        self._mp_generic_hold_since_ts = 0.0
+        self._mp_generic_hold_timed_out = False
+        self.source_policy = SourcePolicy(
+            window=SOURCE_POLICY_WINDOW,
+            switch_margin=SOURCE_POLICY_SWITCH_MARGIN,
+            single_confirm_polls=SOURCE_POLICY_SINGLE_CONFIRM_POLLS
+        )
+        self._profile_store = self._init_station_profile_store()
         self.api_client = APIClient(headers=DEFAULT_HTTP_HEADERS)
         
         # Event-Handler für Player-Events
@@ -319,6 +344,302 @@ class RadioMonitor(xbmc.Monitor):
         self._last_api_skip_log = key
         log_debug(
             f"[{ADDON_NAME}] API uebersprungen: Source nicht whitelisted (context={context}, source={source})")
+
+    def _init_station_profile_store(self):
+        """
+        Initializes the persistent station profile store.
+        """
+        try:
+            profile_path = ''
+            if xbmcvfs is not None:
+                profile_path = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
+            if not profile_path:
+                profile_path = os.path.join(os.path.dirname(__file__), 'profile')
+            profile_dir = os.path.join(profile_path, STATION_PROFILE_DIRNAME)
+            return StationProfileStore(profile_dir)
+        except Exception as e:
+            log_debug(f"Station profile store konnte nicht initialisiert werden: {e}")
+            return None
+
+    def _build_station_profile_key(self, station_name=''):
+        """
+        Returns a stable station key for profile learning and lookup.
+        """
+        if self.plugin_slug:
+            return f"radiode:{self.plugin_slug}"
+        if self.tunein_station_id:
+            return f"tunein:{self.tunein_station_id}"
+        if self.station_slug:
+            return f"stream:{self.station_slug}"
+        name = (station_name or '').strip().lower()
+        if not name:
+            return ''
+        name = re.sub(r'\s+', ' ', name)
+        return f"name:{name}"
+
+    def _is_song_pair(self, pair):
+        return bool(pair and pair[0] and pair[1])
+
+    def _is_generic_metadata_text(self, text, station_name=''):
+        text_l = str(text or '').strip().lower()
+        if not text_l:
+            return False
+        station_l = (station_name or '').strip().lower()
+        if station_l and station_l in text_l:
+            return True
+        generic_tokens = (
+            'wir sind',
+            'nachrichten',
+            'verkehr',
+            'wetter',
+            'news',
+            'jingle',
+        )
+        return any(token in text_l for token in generic_tokens)
+
+    def _is_generic_song_pair(self, pair, station_name=''):
+        if not self._is_song_pair(pair):
+            return False
+        a_l = str(pair[0] or '').strip().lower()
+        t_l = str(pair[1] or '').strip().lower()
+        return (
+            self._is_generic_metadata_text(a_l, station_name)
+            or self._is_generic_metadata_text(t_l, station_name)
+            or self._is_generic_metadata_text(f"{a_l} - {t_l}", station_name)
+        )
+
+    def _has_non_generic_song_pair(self, pair, station_name=''):
+        return self._is_song_pair(pair) and not self._is_generic_song_pair(pair, station_name)
+
+    def _is_generic_stream_title(self, stream_title, station_name=''):
+        return self._is_generic_metadata_text(stream_title, station_name)
+
+    def _filter_non_generic_song_pairs(self, pairs, station_name=''):
+        return [p for p in (pairs or []) if self._has_non_generic_song_pair(p, station_name)]
+
+    def _sanitize_musicplayer_pair(self, pair, station_name=''):
+        if self._is_generic_song_pair(pair, station_name):
+            return ('', '')
+        return pair
+
+    def _update_mp_generic_hold_state(self, last_winner_source, current_mp_pair, station_name=''):
+        """
+        Haelt die zuletzt valide MP-Quelle waehrend einer generischen MP-Phase.
+        Verhindert Quellspruenge auf ICY/API bei Nachrichten/Jingles.
+        """
+        source = str(last_winner_source or '')
+        mp_has_song = self._has_non_generic_song_pair(current_mp_pair, station_name)
+
+        if not source.startswith('musicplayer'):
+            self._mp_generic_hold_active = False
+            self._mp_generic_hold_since_ts = 0.0
+            self._mp_generic_hold_timed_out = False
+            return False
+
+        if mp_has_song:
+            if self._mp_generic_hold_active:
+                elapsed = max(0, int(round(time.time() - self._mp_generic_hold_since_ts)))
+                log_info(
+                    f"[{ADDON_NAME}] MP-Generic-Hold beendet: MP liefert wieder Songdaten "
+                    f"(dauer={elapsed}s)"
+                )
+            self._mp_generic_hold_active = False
+            self._mp_generic_hold_since_ts = 0.0
+            self._mp_generic_hold_timed_out = False
+            return False
+
+        if self._mp_generic_hold_timed_out:
+            return False
+
+        now_ts = time.time()
+        if not self._mp_generic_hold_active:
+            self._mp_generic_hold_active = True
+            self._mp_generic_hold_since_ts = now_ts
+            log_info(f"[{ADDON_NAME}] MP-Generic-Hold aktiv: MP aktuell generisch/leer")
+            return True
+
+        if (now_ts - self._mp_generic_hold_since_ts) >= float(self.MP_GENERIC_HOLD_MAX_S):
+            self._mp_generic_hold_active = False
+            self._mp_generic_hold_timed_out = True
+            log_info(
+                f"[{ADDON_NAME}] MP-Generic-Hold Timeout ({int(self.MP_GENERIC_HOLD_MAX_S)}s): "
+                f"ICY/API duerfen wieder triggern"
+            )
+            return False
+
+        return True
+
+    def _pairs_match_or_swapped(self, p1, p2):
+        if not (self._is_song_pair(p1) and self._is_song_pair(p2)):
+            return False
+        if p1 == p2:
+            return True
+        return (p1[0] == p2[1] and p1[1] == p2[0])
+
+    def _maybe_reclaim_musicplayer_source(self, decision_source, decision_pair, current_mp_pair, station_name=''):
+        """
+        Wenn ICY/API gewinnt, MP aber zeitgleich exakt dasselbe Song-Paar liefert,
+        wird die Gewinnerquelle auf MP zurueckgenommen (Source-Reclaim).
+        """
+        source = str(decision_source or '')
+        if source.startswith('musicplayer'):
+            return decision_source, decision_pair
+        if not self._has_non_generic_song_pair(current_mp_pair, station_name):
+            return decision_source, decision_pair
+        if not self._is_song_pair(decision_pair):
+            return decision_source, decision_pair
+        if not self._pairs_match_or_swapped(current_mp_pair, decision_pair):
+            return decision_source, decision_pair
+
+        reclaimed_source = 'musicplayer_reclaim'
+        self._set_last_song_decision(reclaimed_source, current_mp_pair[0], current_mp_pair[1])
+        log_info(
+            f"[{ADDON_NAME}] MP-Reclaim aktiv: Quelle auf musicplayer zurueckgesetzt "
+            f"('{current_mp_pair[0]} - {current_mp_pair[1]}')"
+        )
+        return reclaimed_source, current_mp_pair
+
+    def _current_profile_confidence(self):
+        try:
+            return float((self._active_policy_profile or {}).get('confidence', 0.0))
+        except Exception:
+            return 0.0
+
+    def _has_station_analysis(self):
+        if self._current_profile_confidence() < 0.20:
+            return False
+        preferred = str((self._active_policy_profile or {}).get('preferred_family', '') or '')
+        return preferred in ('musicplayer', 'api', 'icy')
+
+    def _should_prioritize_stream_candidates(self):
+        if not self._has_station_analysis():
+            return False
+        preferred = str((self._active_policy_profile or {}).get('preferred_family', '') or '')
+        return preferred in ('api', 'icy')
+
+    def _has_startup_source_consensus(self, current_mp_pair, current_api_pair, current_icy_pair, station_name=''):
+        pairs = []
+        for pair in (current_mp_pair, current_api_pair, current_icy_pair):
+            if self._has_non_generic_song_pair(pair, station_name):
+                pairs.append((pair[0], pair[1]))
+        if len(pairs) < 2:
+            return False
+
+        counts = {}
+        for pair in pairs:
+            counts[pair] = int(counts.get(pair, 0)) + 1
+            if counts[pair] >= 2:
+                return True
+        return False
+
+    def _classify_icy_format(self, stream_title, station_name=''):
+        text = (stream_title or '').strip()
+        if not text:
+            return 'unknown'
+        try:
+            artist, title, is_von_format, _ = _parse_metadata_complex(text, station_name)
+        except Exception:
+            return 'unknown'
+        artist = (artist or '').strip()
+        title = (title or '').strip()
+        if not artist or not title:
+            return 'unknown'
+        return 'title_artist' if bool(is_von_format) else 'artist_title'
+
+    def _refresh_station_profile_context(self, station_name='', enable_policy=False):
+        if self._profile_store is None:
+            return
+
+        key = self._build_station_profile_key(station_name)
+        if not key:
+            return
+
+        key_changed = (key != self._active_station_profile_key)
+        if key_changed:
+            self._close_station_profile_session()
+            self._active_station_profile_key = key
+            self._station_profile_session = self._profile_store.start_session(key, station_name)
+            self._station_profile_policy_enabled = False
+            self._active_policy_profile = {}
+            self.source_policy.clear_station_profile()
+            log_debug(f"Station-Profil Session gestartet: key='{key}'")
+
+        if enable_policy and not key_changed and not self._station_profile_policy_enabled:
+            policy_profile = self._profile_store.get_policy_profile(key)
+            self.source_policy.apply_station_profile(policy_profile)
+            self._station_profile_policy_enabled = True
+            self._active_policy_profile = dict(policy_profile or {})
+            log_info(
+                f"[{ADDON_NAME}] Station-Profil aktiv: key='{key}', "
+                f"confidence={policy_profile.get('confidence', 0.0):.2f}, "
+                f"preferred='{policy_profile.get('preferred_family', '') or 'none'}'"
+            )
+
+    def _try_enable_station_profile_policy(self, station_name, startup_stable_confirmed, current_icy_pair):
+        if self._profile_store is None:
+            return
+        if self._station_profile_policy_enabled:
+            return
+        if not startup_stable_confirmed:
+            return
+        if not self._is_song_pair(current_icy_pair):
+            return
+        if self._is_generic_song_pair(current_icy_pair, station_name):
+            return
+
+        self._refresh_station_profile_context(station_name, enable_policy=True)
+
+    def _update_station_profile(self, station_name=''):
+        if self._profile_store is None:
+            return
+        self._refresh_station_profile_context(station_name, enable_policy=self._station_profile_policy_enabled)
+        if self._station_profile_session is None:
+            return
+
+        now_ts = time.time()
+        if (now_ts - self._last_station_profile_observe_ts) < STATION_PROFILE_OBSERVE_INTERVAL_S:
+            return
+        self._last_station_profile_observe_ts = now_ts
+
+        observation = self.source_policy.latest_observation()
+        if not observation:
+            return
+
+        context = dict(self._last_policy_context or {})
+        context['station_name'] = station_name
+        context['icy_format'] = self._last_icy_format_hint
+        context['icy_is_song'] = bool(
+            self._is_song_pair(context.get('current_icy_pair'))
+            and not self._is_generic_song_pair(context.get('current_icy_pair'), station_name)
+        )
+        self._station_profile_session.observe(observation, context)
+        self._profile_store.flush_if_due(min_interval_s=STATION_PROFILE_SAVE_INTERVAL_S)
+
+    def _close_station_profile_session(self):
+        if self._profile_store is None or self._station_profile_session is None:
+            return
+        try:
+            profile = self._profile_store.finish_session(self._station_profile_session)
+            if profile is not None:
+                log_debug(
+                    f"Station-Profil Session gespeichert: key='{self._station_profile_session.station_key}', "
+                    f"sessions={profile.get('sessions', 0)}, "
+                    f"stable={profile.get('sessions_above_threshold', 0)}, "
+                    f"confidence={profile.get('confidence', 0.0):.2f}"
+                )
+        finally:
+            self._station_profile_session = None
+            self._station_profile_policy_enabled = False
+            self._active_policy_profile = {}
+            self._last_station_profile_observe_ts = 0.0
+            self.source_policy.clear_station_profile()
+
+    def _flush_station_profiles(self):
+        if self._profile_store is None:
+            return
+        self._close_station_profile_session()
+        self._active_station_profile_key = ''
+        self._profile_store.flush()
 
     def _clear_timer_debug_properties(self):
         """Loescht Debug-Properties fuer MB-Dauer und Song-Timer."""
@@ -444,6 +765,9 @@ class RadioMonitor(xbmc.Monitor):
 
     def clear_properties(self):
         """Löscht alle Radio-Properties"""
+        if self._profile_store is not None and self._station_profile_session is not None:
+            self._flush_station_profiles()
+
         # Reset Logo und API-Kontext
         self.station_logo = None
         self._reset_api_context()
@@ -459,7 +783,18 @@ class RadioMonitor(xbmc.Monitor):
         self._parse_trigger_reason = ''
         self._parse_locked_source = ''
         self._policy_preferred_source = ''
-        self.source_policy = SourcePolicy()
+        self._last_policy_context = {}
+        self._last_icy_format_hint = 'unknown'
+        self._station_profile_policy_enabled = False
+        self._active_policy_profile = {}
+        self._mp_generic_hold_active = False
+        self._mp_generic_hold_since_ts = 0.0
+        self._mp_generic_hold_timed_out = False
+        self.source_policy = SourcePolicy(
+            window=SOURCE_POLICY_WINDOW,
+            switch_margin=SOURCE_POLICY_SWITCH_MARGIN,
+            single_confirm_polls=SOURCE_POLICY_SINGLE_CONFIRM_POLLS
+        )
 
         # Lösche auch radio.de Addon Properties
         WINDOW.clearProperty(_P.RADIODE_LOGO)
@@ -491,6 +826,7 @@ class RadioMonitor(xbmc.Monitor):
         Streamwechsel: alte Labels sofort leeren, bevor neue Daten gesetzt werden.
         """
         self.stop_metadata_monitoring()
+        self._flush_station_profiles()
         self.is_playing = False
         self.current_url = None
         self.clear_properties()
@@ -502,6 +838,7 @@ class RadioMonitor(xbmc.Monitor):
         Playback-Stop/Ende: Labels sofort leeren (ohne 2s Poll-Wartezeit).
         """
         self.stop_metadata_monitoring()
+        self._flush_station_profiles()
         self.is_playing = False
         self.current_url = None
         self.clear_properties()
@@ -992,17 +1329,29 @@ class RadioMonitor(xbmc.Monitor):
         """Filtert nur valide (artist, title)-Paare."""
         return [p for p in pairs if p and p[0] and p[1]]
 
-    def _select_musicplayer_pair_for_source(self, source, mp_pairs):
+    def _select_musicplayer_pair_for_source(self, source, mp_pairs, last_winner_pair=None):
         """
         Waehlt das passende MP-Paar fuer die aktuelle MP-Quellenvariante:
         - musicplayer -> direktes Paar
         - musicplayer_swapped -> swapped Paar (falls vorhanden)
+        - Bei fremder Winner-Quelle (api/icy): orientiert bevorzugt auf das Paar,
+          das zum letzten Winner passt, damit MP nicht kuenstlich als "other song"
+          gewertet wird (wichtig fuer swapped-Feeds).
         """
         if not mp_pairs:
             return ('', '')
         src = str(source or '')
         if src.startswith('musicplayer_swapped') and len(mp_pairs) > 1:
             return mp_pairs[1]
+        if not src.startswith('musicplayer') and len(mp_pairs) > 1:
+            winner_pair = last_winner_pair or ('', '')
+            if winner_pair and winner_pair[0] and winner_pair[1]:
+                if mp_pairs[0] == winner_pair:
+                    return mp_pairs[0]
+                if mp_pairs[1] == winner_pair:
+                    return mp_pairs[1]
+            if src.endswith('_swapped'):
+                return mp_pairs[1]
         return mp_pairs[0]
 
     def _is_player_buffering(self):
@@ -1084,6 +1433,10 @@ class RadioMonitor(xbmc.Monitor):
             'icy': self.TRIGGER_TITLE_CHANGE,
             'icy_stale': self.TRIGGER_ICY_STALE
         }
+        self._refresh_station_profile_context(
+            station_name,
+            enable_policy=self._station_profile_policy_enabled
+        )
         changed, reason, preferred = self.source_policy.decide_trigger(
             last_winner_source=last_winner_source,
             last_winner_pair=last_winner_pair,
@@ -1095,6 +1448,15 @@ class RadioMonitor(xbmc.Monitor):
             initial_source_pending=initial_source_pending,
             reasons=reasons
         )
+        self._last_policy_context = {
+            'station_name': station_name,
+            'current_mp_pair': current_mp_pair if self._is_song_pair(current_mp_pair) else ('', ''),
+            'current_api_pair': current_api_pair if self._is_song_pair(current_api_pair) else ('', ''),
+            'current_icy_pair': current_icy_pair if self._is_song_pair(current_icy_pair) else ('', ''),
+            'stream_title_changed': bool(stream_title_changed),
+            'triggered': bool(changed),
+            'trigger_reason': reason if changed else ''
+        }
         scores = self.source_policy.debug_scores()
         self._policy_preferred_source = preferred or ''
         log_debug(
@@ -1326,16 +1688,16 @@ class RadioMonitor(xbmc.Monitor):
             if pair and pair in mp_set:
                 self._mark_musicplayer_trusted(f"Konsens mit {source}: '{pair[0]} - {pair[1]}'")
 
-    def _should_use_musicplayer_candidates(self, mp_pairs, api_candidate, icy_pairs):
+    def _should_use_musicplayer_candidates(self, mp_pairs, api_candidate, icy_pairs, station_name=''):
         """
         Steuert zentral, ob MusicPlayer-Kandidaten in die MB-Wahl aufgenommen werden.
         Policy:
-        - Wenn MusicPlayer valide (artist+title) liefert, wird er immer mitbewertet.
-        - Die eigentliche Gueltigkeit wird danach ueber die MB-Schwellen geprueft.
+        - MusicPlayer wird nur mitbewertet, wenn mindestens ein nicht-generisches
+          Song-Paar vorliegt (Senderinfos/Jingles auf MP werden ignoriert).
         """
         _ = api_candidate
         _ = icy_pairs
-        return bool(mp_pairs)
+        return bool(self._filter_non_generic_song_pairs(mp_pairs, station_name))
 
     def _evaluate_mb_candidate(self, source, artist, title):
         """
@@ -1393,11 +1755,11 @@ class RadioMonitor(xbmc.Monitor):
 
         def _source_rank(source):
             s = str(source or '')
-            if s.startswith('api'):
+            if s.startswith('musicplayer'):
                 return 2
             if s.startswith('icy'):
                 return 1
-            if s.startswith('musicplayer'):
+            if s.startswith('api'):
                 return 0
             return 0
 
@@ -1422,8 +1784,7 @@ class RadioMonitor(xbmc.Monitor):
 
         winner_pool = effective_valid
         # Einheitliche Gewinnerregel:
-        # - Keine harte MusicPlayer-Praeferenz.
-        # - Bei Gleichstand entscheidet die Quellen-Prioritaet (API > ICY > MusicPlayer).
+        # - Bei Gleichstand entscheidet die Quellen-Prioritaet (MusicPlayer > ICY > API).
         # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
         pair_support = {}
         for ev in effective_valid:
@@ -1991,7 +2352,10 @@ class RadioMonitor(xbmc.Monitor):
 
         # MusicPlayer-Kandidaten lesen; Nutzung fuer die Entscheidung nur bei bestaetigtem Trust.
         mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
-        mp_pairs = self._valid_song_pairs(mp_direct, mp_swapped)
+        mp_pairs = self._filter_non_generic_song_pairs(
+            self._valid_song_pairs(mp_direct, mp_swapped),
+            station_name
+        )
         if mp_pairs and self._is_musicplayer_trusted():
             self._mp_mismatch_count = 0
         elif not mp_pairs and self._is_musicplayer_trusted():
@@ -2039,7 +2403,8 @@ class RadioMonitor(xbmc.Monitor):
         mp_candidates_allowed = self._should_use_musicplayer_candidates(
             mp_pairs,
             api_candidate,
-            icy_candidate_pairs
+            icy_candidate_pairs,
+            station_name
         )
 
         # MusicPlayer-Kandidaten ergänzen (direkt + swapped)
@@ -2067,13 +2432,24 @@ class RadioMonitor(xbmc.Monitor):
         )
 
         stream_candidates, mp_only_candidates = self._split_source_candidates(candidates)
+        prioritize_stream = self._should_prioritize_stream_candidates()
+        profile_confidence = self._current_profile_confidence()
         log_debug(
             f"[{ADDON_NAME}] Quellen-Phase: stream_candidates={len(stream_candidates)}, "
             f"mp_candidates={len(mp_only_candidates)}, lock='{locked_source or 'none'}', "
-            f"trigger='{trigger_reason or 'none'}'"
+            f"trigger='{trigger_reason or 'none'}', "
+            f"mode='{'stream-priority' if prioritize_stream else 'neutral-all-sources'}', "
+            f"profile_conf={profile_confidence:.2f}"
         )
 
-        winner, evaluations = self._select_mb_winner(stream_candidates)
+        if prioritize_stream:
+            primary_candidates = stream_candidates
+            fallback_candidates = mp_only_candidates if not stream_candidates else []
+        else:
+            primary_candidates = list(stream_candidates) + list(mp_only_candidates)
+            fallback_candidates = []
+
+        winner, evaluations = self._select_mb_winner(primary_candidates)
         if winner:
             # Für source-locked Trigger immer das source-native Eingangspaar speichern.
             # MB-normalisierte Namen können sich vom API/ICY/MP-Original unterscheiden
@@ -2103,41 +2479,40 @@ class RadioMonitor(xbmc.Monitor):
                 winner['mb_duration_ms']
             )
 
-        # Bestandsverhalten: wenn nur MusicPlayer-Kandidaten verfuegbar sind,
-        # kann MusicPlayer weiterhin als alleinige Quelle gewinnen.
-        if not stream_candidates and mp_only_candidates:
-            mp_winner, mp_evaluations = self._select_mb_winner(mp_only_candidates)
-            if mp_winner:
+        # Fallback nur im Stream-Prioritaetsmodus, wenn keine Stream-Kandidaten da waren.
+        if fallback_candidates:
+            fb_winner, fb_evaluations = self._select_mb_winner(fallback_candidates)
+            if fb_winner:
                 self._set_last_song_decision(
-                    mp_winner.get('source'),
-                    mp_winner.get('input_artist'),
-                    mp_winner.get('input_title')
+                    fb_winner.get('source'),
+                    fb_winner.get('input_artist'),
+                    fb_winner.get('input_title')
                 )
                 self._log_musicplayer_comparison(
-                    mp_winner.get('source'),
-                    (mp_winner.get('input_artist'), mp_winner.get('input_title')),
+                    fb_winner.get('source'),
+                    (fb_winner.get('input_artist'), fb_winner.get('input_title')),
                     mp_pairs
                 )
                 self._update_musicplayer_trust_after_decision(
-                    mp_winner.get('source'),
-                    (mp_winner.get('input_artist'), mp_winner.get('input_title')),
+                    fb_winner.get('source'),
+                    (fb_winner.get('input_artist'), fb_winner.get('input_title')),
                     mp_pairs
                 )
                 return (
-                    mp_winner['mb_artist'],
-                    mp_winner['mb_title'],
-                    mp_winner['mb_album'],
-                    mp_winner['mb_album_date'],
-                    mp_winner['mbid'],
-                    mp_winner['mb_first_release'],
-                    mp_winner['mb_duration_ms']
+                    fb_winner['mb_artist'],
+                    fb_winner['mb_title'],
+                    fb_winner['mb_album'],
+                    fb_winner['mb_album_date'],
+                    fb_winner['mbid'],
+                    fb_winner['mb_first_release'],
+                    fb_winner['mb_duration_ms']
                 )
-            evaluations = mp_evaluations
+            evaluations = fb_evaluations
 
         # Sonderfall B: MB kann zwischen Kandidaten nicht entscheiden (alle score=0).
         # Dann API nur übernehmen, wenn sie sich gegenüber der letzten API-Antwort geändert hat.
         # Sonst gilt: keine verlässlichen Songdaten -> Artist/Title leer lassen.
-        if stream_candidates and evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
+        if prioritize_stream and stream_candidates and evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
             # MB=0 für die Stream-Quelle: API/ICY intern entscheiden.
             # MusicPlayer wird danach nur zum Abgleich/Trust genutzt.
             icy_pairs = {
@@ -2260,6 +2635,7 @@ class RadioMonitor(xbmc.Monitor):
         last_winner_pair = ('', '')
         initial_source_pending = False
         startup_stable_confirmed = False
+        startup_qualify_until_ts = 0.0
         # Hinweis: response.raw.read() blockiert bis Daten da sind; bei Netzabbruch
         # kann das erst enden, wenn der Thread per stop_thread gestoppt wird.
         try:
@@ -2284,6 +2660,7 @@ class RadioMonitor(xbmc.Monitor):
                         meta_length > 0
                         or last_winner_source.startswith('musicplayer')
                         or last_winner_source.startswith('api')
+                        or initial_source_pending
                     ):
                         if meta_length > 0:
                             # Metadaten lesen
@@ -2308,7 +2685,12 @@ class RadioMonitor(xbmc.Monitor):
                         invalid_values = INVALID_METADATA_VALUES + ["", station_name]
                         mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                         mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
-                        current_mp_pair = self._select_musicplayer_pair_for_source(last_winner_source, mp_live_pairs)
+                        current_mp_pair = self._select_musicplayer_pair_for_source(
+                            last_winner_source,
+                            mp_live_pairs,
+                            last_winner_pair=last_winner_pair
+                        )
+                        current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
                         icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
                         icy_artist, icy_title = self._normalize_song_candidate(
                             icy_artist,
@@ -2335,6 +2717,7 @@ class RadioMonitor(xbmc.Monitor):
                         if stream_title_changed:
                             last_title = stream_title
                             log_debug(f"Neuer StreamTitle erkannt: '{stream_title}'")
+                            self._last_icy_format_hint = self._classify_icy_format(stream_title, station_name)
 
                         needs_initial_decision = (
                             not last_winner_source
@@ -2348,13 +2731,19 @@ class RadioMonitor(xbmc.Monitor):
                                 if not self._wait_for_stable_playback_start(generation):
                                     continue
                                 startup_stable_confirmed = True
+                                startup_qualify_until_ts = time.time() + STARTUP_SOURCE_QUALIFY_WINDOW_S
                                 # Nach dem Wait im selben Durchlauf die Initial-Entscheidung erzwingen.
                                 initial_source_pending = True
                                 # MP/API nach dem Wait neu lesen, damit die Quellenwahl
                                 # den tatsaechlich stabilen Startzustand verwendet.
                                 mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                                 mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
-                                current_mp_pair = self._select_musicplayer_pair_for_source(last_winner_source, mp_live_pairs)
+                                current_mp_pair = self._select_musicplayer_pair_for_source(
+                                    last_winner_source,
+                                    mp_live_pairs,
+                                    last_winner_pair=last_winner_pair
+                                )
+                                current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
                                 icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
                                 icy_artist, icy_title = self._normalize_song_candidate(
                                     icy_artist,
@@ -2372,6 +2761,26 @@ class RadioMonitor(xbmc.Monitor):
                                 if stream_info.get('genre'):
                                     self.set_property_safe(_P.GENRE, stream_info.get('genre'))
 
+                        self._try_enable_station_profile_policy(
+                            station_name,
+                            startup_stable_confirmed,
+                            current_icy_pair
+                        )
+
+                        in_startup_window = (
+                            not last_winner_source
+                            and startup_stable_confirmed
+                            and startup_qualify_until_ts > 0.0
+                            and time.time() < startup_qualify_until_ts
+                        )
+                        startup_consensus = self._has_startup_source_consensus(
+                            current_mp_pair,
+                            current_api_pair,
+                            current_icy_pair,
+                            station_name
+                        )
+                        allow_initial_trigger = (not in_startup_window) or startup_consensus
+
                         # Source-locked Trigger: nur die letzte Gewinnerquelle entscheidet den Wechsel-Trigger.
                         source_changed_trigger, trigger_reason = self._determine_source_change_trigger(
                             last_winner_source,
@@ -2381,8 +2790,45 @@ class RadioMonitor(xbmc.Monitor):
                             current_icy_pair,
                             station_name,
                             stream_title_changed,
-                            initial_source_pending
+                            (initial_source_pending if allow_initial_trigger else False)
                         )
+
+                        mp_generic_hold_active = self._update_mp_generic_hold_state(
+                            last_winner_source,
+                            current_mp_pair,
+                            station_name
+                        )
+                        if mp_generic_hold_active and source_changed_trigger:
+                            log_debug(
+                                f"[{ADDON_NAME}] MP-Generic-Hold: Trigger geparkt "
+                                f"(reason='{trigger_reason}', source bleibt='musicplayer')"
+                            )
+                            source_changed_trigger = False
+                            initial_source_pending = False
+
+                        initial_program_block = (
+                            not last_winner_source
+                            and (
+                                self._is_generic_song_pair(current_icy_pair, station_name)
+                                or self._is_generic_stream_title(stream_title, station_name)
+                            )
+                            and not self._has_non_generic_song_pair(current_mp_pair, station_name)
+                        )
+                        if initial_program_block and source_changed_trigger:
+                            log_info(
+                                f"[{ADDON_NAME}] Initialer Song-Trigger unterdrueckt: "
+                                f"ICY/MP noch generisch (Nachrichten/Programmphase)"
+                            )
+                            source_changed_trigger = False
+                            initial_source_pending = False
+                        elif in_startup_window and not startup_consensus and source_changed_trigger:
+                            remaining = max(0, int(round(startup_qualify_until_ts - time.time())))
+                            log_debug(
+                                f"[{ADDON_NAME}] Startup-Qualify aktiv: Trigger geparkt "
+                                f"(noch {remaining}s, warte auf Quell-Konsens)"
+                            )
+                            source_changed_trigger = False
+                            initial_source_pending = True
 
                         if source_changed_trigger:
                             observed_source = last_winner_source or 'initial'
@@ -2416,7 +2862,10 @@ class RadioMonitor(xbmc.Monitor):
                                 parse_locked_source = 'musicplayer'
                             elif trigger_reason == self.TRIGGER_ICY_STALE:
                                 parse_locked_source = 'icy'
-                            elif self._policy_preferred_source in ('musicplayer', 'api', 'icy'):
+                            elif (
+                                self._has_station_analysis()
+                                and self._policy_preferred_source in ('musicplayer', 'api', 'icy')
+                            ):
                                 parse_locked_source = self._policy_preferred_source
                             self._parse_prev_winner_pair = last_winner_pair
                             self._parse_trigger_reason = trigger_reason
@@ -2429,6 +2878,12 @@ class RadioMonitor(xbmc.Monitor):
                                 self._parse_locked_source = ''
                             decision_source = self._last_decision_source
                             decision_pair = self._last_decision_pair
+                            decision_source, decision_pair = self._maybe_reclaim_musicplayer_source(
+                                decision_source,
+                                decision_pair,
+                                current_mp_pair,
+                                station_name
+                            )
                             current_song_key = (artist or '', title or '', mbid or '')
                             is_new_song = (current_song_key != last_song_key)
 
@@ -2615,6 +3070,7 @@ class RadioMonitor(xbmc.Monitor):
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     if startup_stable_confirmed or last_winner_source:
                         self._refresh_api_nowplaying_property(stream_info.get('station', ''))
+                    self._update_station_profile(stream_info.get('station', ''))
                     # Laeuft jede Iteration (~1s) - kein extra Thread notwendig.
                     self._handle_song_timeout_expiry(
                         last_song_key=last_song_key,
@@ -2834,6 +3290,7 @@ class RadioMonitor(xbmc.Monitor):
             
         # Cleanup beim Beenden
         self.stop_metadata_monitoring()
+        self._flush_station_profiles()
         self.api_client.close()
         self.clear_properties()
         xbmc.log(f"[{ADDON_NAME}] Service beendet", xbmc.LOGINFO)
