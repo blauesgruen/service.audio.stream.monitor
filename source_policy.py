@@ -1,4 +1,4 @@
-﻿from collections import deque
+from collections import deque
 
 
 class SourceHealth:
@@ -38,15 +38,24 @@ class SourcePolicy:
 
     def __init__(self, window=40, switch_margin=0.12, single_confirm_polls=2):
         self.window = int(window)
-        self.switch_margin = float(switch_margin)
-        self.single_confirm_polls = int(single_confirm_polls)
-        self._state = {
-            family: SourceHealth(window=self.window)
-            for family in self.FAMILIES
-        }
+        self.base_switch_margin = float(switch_margin)
+        self.base_single_confirm_polls = int(single_confirm_polls)
+        # Keep legacy names as aliases for existing call sites.
+        self.switch_margin = self.base_switch_margin
+        self.single_confirm_polls = self.base_single_confirm_polls
+
+        self._learned_weights = {family: 1.0 for family in self.FAMILIES}
+        self._state = {family: SourceHealth(window=self.window) for family in self.FAMILIES}
+
+        self._profile_confidence = 0.0
+        self._profile_preferred_family = ''
+        self._profile_switch_margin = None
+        self._profile_single_confirm_polls = None
+
         self._pending_source = ''
         self._pending_pair = ('', '')
         self._pending_count = 0
+        self._last_observation = {}
 
     @staticmethod
     def _valid_pair(pair):
@@ -62,6 +71,16 @@ class SourcePolicy:
         a_l = str(pair[0] or '').strip().lower()
         t_l = str(pair[1] or '').strip().lower()
         return station_l in a_l or station_l in t_l
+
+    def _active_switch_margin(self):
+        if self._profile_switch_margin is not None and self._profile_confidence >= 0.60:
+            return float(self._profile_switch_margin)
+        return float(self.base_switch_margin)
+
+    def _active_confirm_polls(self):
+        if self._profile_single_confirm_polls is not None and self._profile_confidence >= 0.60:
+            return max(1, int(self._profile_single_confirm_polls))
+        return max(1, int(self.base_single_confirm_polls))
 
     def _observe_pair(self, family, pair, station_name, last_winner_pair):
         st = self._state.get(family)
@@ -83,7 +102,7 @@ class SourcePolicy:
         if st is not None:
             st.lead_error.append(1)
 
-    def _score(self, family):
+    def _base_score(self, family):
         st = self._state.get(family)
         if st is None:
             return -1.0
@@ -93,8 +112,6 @@ class SourcePolicy:
         agree = st.agreement_rate()
         lead = st.lead_error_rate()
         empty = 1.0 - valid
-        # Positive: valide + konsistent mit finalen Entscheidungen.
-        # Negative: generische Sendertexte, Flattern, nachweislich vorauslaufende Wechsel.
         return (
             0.38 * valid
             + 0.34 * agree
@@ -104,19 +121,94 @@ class SourcePolicy:
             - 0.20 * empty
         )
 
+    def _score(self, family):
+        base = self._base_score(family)
+        weight = float(self._learned_weights.get(family, 1.0))
+        return base * weight
+
+    def set_learned_weights(self, weights):
+        safe = {}
+        for family in self.FAMILIES:
+            value = 1.0
+            try:
+                value = float((weights or {}).get(family, 1.0))
+            except Exception:
+                value = 1.0
+            if value < 0.7:
+                value = 0.7
+            if value > 1.3:
+                value = 1.3
+            safe[family] = value
+        self._learned_weights = safe
+
+    def apply_station_profile(self, profile):
+        data = profile or {}
+        confidence = 0.0
+        try:
+            confidence = float(data.get('confidence', 0.0))
+        except Exception:
+            confidence = 0.0
+        self._profile_confidence = max(0.0, min(1.0, confidence))
+
+        preferred = str(data.get('preferred_family', '') or '').strip().lower()
+        self._profile_preferred_family = preferred if preferred in self.FAMILIES else ''
+
+        switch_margin = data.get('switch_margin')
+        if switch_margin is None:
+            self._profile_switch_margin = None
+        else:
+            try:
+                self._profile_switch_margin = float(switch_margin)
+            except Exception:
+                self._profile_switch_margin = None
+
+        single_confirm = data.get('single_confirm_polls')
+        if single_confirm is None:
+            self._profile_single_confirm_polls = None
+        else:
+            try:
+                self._profile_single_confirm_polls = max(1, int(single_confirm))
+            except Exception:
+                self._profile_single_confirm_polls = None
+
+        self.set_learned_weights(data.get('weights') or {})
+
+    def clear_station_profile(self):
+        self._profile_confidence = 0.0
+        self._profile_preferred_family = ''
+        self._profile_switch_margin = None
+        self._profile_single_confirm_polls = None
+        self.set_learned_weights({})
+
     def _preferred_family(self, valid_pairs, last_winner_family):
         if not valid_pairs:
             return ''
+
+        # MP hat Prioritaet, sobald valide Songdaten vorliegen.
+        # Generische MP-Daten werden bereits im Service gefiltert.
+        if 'musicplayer' in valid_pairs and self._valid_pair(valid_pairs.get('musicplayer')):
+            return 'musicplayer'
+
         ranked = sorted(
             ((family, self._score(family)) for family in valid_pairs.keys()),
             key=lambda item: item[1],
-            reverse=True
+            reverse=True,
         )
         best_family, best_score = ranked[0]
+        margin = self._active_switch_margin()
+
         if last_winner_family in valid_pairs:
             current_score = self._score(last_winner_family)
-            if best_family != last_winner_family and (best_score - current_score) < self.switch_margin:
+            if best_family != last_winner_family and (best_score - current_score) < margin:
                 return last_winner_family
+
+        # For medium/high confidence profiles, allow dominant-source tie-break.
+        preferred = self._profile_preferred_family
+        if self._profile_confidence >= 0.20 and preferred in valid_pairs:
+            preferred_score = self._score(preferred)
+            if best_family != preferred and (best_score - preferred_score) <= (margin * 0.80):
+                return preferred
+
         return best_family
 
     def _confirm(self, family, pair, required):
@@ -145,6 +237,43 @@ class SourcePolicy:
             return 'icy'
         return ''
 
+    def _classify_source_state(self, pair, station_name):
+        if not self._valid_pair(pair):
+            return 'empty'
+        if self._contains_station(pair, station_name):
+            return 'generic'
+        return 'song'
+
+    def _build_observation(
+        self,
+        winner_family,
+        last_winner_pair,
+        pairs,
+        station_name,
+        preferred,
+        changed,
+        reason,
+    ):
+        sources = {}
+        current_valid = bool(last_winner_pair and last_winner_pair[0] and last_winner_pair[1])
+        for family in self.FAMILIES:
+            pair = pairs.get(family, ('', ''))
+            state = self._classify_source_state(pair, station_name)
+            match_current = bool(state == 'song' and current_valid and pair == last_winner_pair)
+            other_song = bool(state == 'song' and current_valid and pair != last_winner_pair)
+            sources[family] = {
+                'state': state,
+                'match_current': match_current,
+                'other_song': other_song,
+            }
+        return {
+            'winner_family': winner_family,
+            'preferred_family': preferred,
+            'changed': bool(changed),
+            'reason': reason or '',
+            'sources': sources,
+        }
+
     def decide_trigger(
         self,
         last_winner_source,
@@ -155,7 +284,7 @@ class SourcePolicy:
         station_name,
         stream_title_changed,
         initial_source_pending,
-        reasons
+        reasons,
     ):
         winner_family = self._source_family(last_winner_source)
         pairs = {
@@ -168,51 +297,79 @@ class SourcePolicy:
 
         valid_pairs = {family: pair for family, pair in pairs.items() if self._valid_pair(pair)}
         preferred = self._preferred_family(valid_pairs, winner_family)
+        default_reason = reasons.get(winner_family, reasons['title'])
+        confirm_polls = self._active_confirm_polls()
+
+        def _finish(changed, reason):
+            final_reason = reason or default_reason
+            self._last_observation = self._build_observation(
+                winner_family=winner_family,
+                last_winner_pair=last_winner_pair,
+                pairs=pairs,
+                station_name=station_name,
+                preferred=preferred,
+                changed=changed,
+                reason=final_reason,
+            )
+            return changed, final_reason, preferred
 
         if not winner_family:
             self._reset_confirm()
-            return (stream_title_changed or initial_source_pending), reasons['title'], preferred
+            return _finish((stream_title_changed or initial_source_pending), reasons['title'])
 
         active_pair = pairs.get(winner_family, ('', ''))
         api_pair = pairs.get('api', ('', ''))
         icy_pair = pairs.get('icy', ('', ''))
+        mp_pair = pairs.get('musicplayer', ('', ''))
         external_support_last = (
             (self._valid_pair(api_pair) and api_pair == last_winner_pair)
             or (self._valid_pair(icy_pair) and icy_pair == last_winner_pair)
         )
 
-        # Aktive Quelle hat einen echten Wechsel gemeldet.
+        # MP-Prioritaet: wenn MP einen neuen, validen Song meldet, wird dieser
+        # bevorzugt uebernommen (sofern MP nicht generisch ist).
+        if (
+            winner_family != 'musicplayer'
+            and self._valid_pair(mp_pair)
+            and mp_pair != last_winner_pair
+            and not self._contains_station(mp_pair, station_name)
+        ):
+            required = confirm_polls if len(valid_pairs) == 1 else 1
+            if self._confirm('musicplayer_priority', mp_pair, required):
+                return _finish(True, reasons['musicplayer'])
+            return _finish(False, reasons['musicplayer'])
+
+        # Active source reports a real track change.
         if self._valid_pair(active_pair) and active_pair != last_winner_pair:
             if winner_family == 'api':
-                mp_pair = pairs['musicplayer']
                 mp_conflict = self._valid_pair(mp_pair) and mp_pair != active_pair
                 icy_conflict = self._valid_pair(icy_pair) and icy_pair != active_pair
                 if mp_conflict and icy_conflict:
                     self.mark_lead_error('api')
                     self._reset_confirm()
-                    return False, reasons['api'], preferred
+                    return _finish(False, reasons['api'])
+
             if winner_family == 'musicplayer':
                 mp_generic = self._contains_station(active_pair, station_name)
                 if mp_generic and external_support_last:
                     self._reset_confirm()
-                    return False, reasons['musicplayer'], preferred
+                    return _finish(False, reasons['musicplayer'])
                 if mp_generic:
-                    required = max(3, self.single_confirm_polls + 1)
+                    required = max(3, confirm_polls + 1)
                     if self._confirm('musicplayer_noise', active_pair, required):
-                        return True, reasons['mp_invalid'], preferred
-                    return False, reasons['musicplayer'], preferred
-                required = 2 if external_support_last else (
-                    self.single_confirm_polls if len(valid_pairs) == 1 else 1
-                )
+                        return _finish(True, reasons['mp_invalid'])
+                    return _finish(False, reasons['musicplayer'])
+                required = 2 if external_support_last else (confirm_polls if len(valid_pairs) == 1 else 1)
                 if self._confirm(winner_family, active_pair, required):
-                    return True, reasons[winner_family], preferred
-                return False, reasons[winner_family], preferred
-            required = self.single_confirm_polls if len(valid_pairs) == 1 else 1
-            if self._confirm(winner_family, active_pair, required):
-                return True, reasons[winner_family], preferred
-            return False, reasons[winner_family], preferred
+                    return _finish(True, reasons[winner_family])
+                return _finish(False, reasons[winner_family])
 
-        # API stale: API bleibt stehen, ICY zeigt neuen Song.
+            required = confirm_polls if len(valid_pairs) == 1 else 1
+            if self._confirm(winner_family, active_pair, required):
+                return _finish(True, reasons[winner_family])
+            return _finish(False, reasons[winner_family])
+
+        # API stale: API keeps old track while ICY has a valid new song.
         if (
             winner_family == 'api'
             and stream_title_changed
@@ -222,7 +379,7 @@ class SourcePolicy:
         ):
             if preferred == 'icy' or (preferred == '' and not self._valid_pair(pairs['api'])):
                 if self._confirm('icy', pairs['icy'], 1):
-                    return True, reasons['icy_stale'], preferred
+                    return _finish(True, reasons['icy_stale'])
 
         if (
             winner_family == 'musicplayer'
@@ -233,28 +390,29 @@ class SourcePolicy:
         ):
             if external_support_last:
                 self._reset_confirm()
-                return False, reasons['musicplayer'], preferred
-            required = max(3, self.single_confirm_polls + 1)
+                return _finish(False, reasons['musicplayer'])
+            required = max(3, confirm_polls + 1)
             if self._confirm('musicplayer_invalid', ('', ''), required):
-                return True, reasons['mp_invalid'], preferred
-            return False, reasons['musicplayer'], preferred
+                return _finish(True, reasons['mp_invalid'])
+            return _finish(False, reasons['musicplayer'])
 
-        # Aktive Quelle liefert nichts mehr: zur besten verfuegbaren Quelle wechseln.
+        # Active source has no data: move to preferred valid source.
         if not self._valid_pair(active_pair) and preferred:
             target_pair = valid_pairs.get(preferred, ('', ''))
             if self._valid_pair(target_pair) and target_pair != last_winner_pair:
-                required = self.single_confirm_polls if len(valid_pairs) == 1 else 1
+                required = confirm_polls if len(valid_pairs) == 1 else 1
                 if self._confirm(preferred, target_pair, required):
-                    return True, reasons.get(preferred, reasons['title']), preferred
-                return False, reasons.get(preferred, reasons['title']), preferred
+                    return _finish(True, reasons.get(preferred, reasons['title']))
+                return _finish(False, reasons.get(preferred, reasons['title']))
 
         self._reset_confirm()
-        return False, reasons.get(winner_family, reasons['title']), preferred
+        return _finish(False, default_reason)
 
     def debug_scores(self):
-        return {
-            family: round(self._score(family), 3)
-            for family in self.FAMILIES
-        }
+        return {family: round(self._score(family), 3) for family in self.FAMILIES}
 
+    def learning_scores(self):
+        return {family: float(self._base_score(family)) for family in self.FAMILIES}
 
+    def latest_observation(self):
+        return dict(self._last_observation or {})
