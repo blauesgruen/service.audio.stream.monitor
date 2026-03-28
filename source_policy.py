@@ -173,18 +173,40 @@ class SourcePolicy:
             self._reset_confirm()
             return (stream_title_changed or initial_source_pending), reasons['title'], preferred
 
-        # Aktive Quelle hat einen echten Wechsel gemeldet.
         active_pair = pairs.get(winner_family, ('', ''))
+        api_pair = pairs.get('api', ('', ''))
+        icy_pair = pairs.get('icy', ('', ''))
+        external_support_last = (
+            (self._valid_pair(api_pair) and api_pair == last_winner_pair)
+            or (self._valid_pair(icy_pair) and icy_pair == last_winner_pair)
+        )
+
+        # Aktive Quelle hat einen echten Wechsel gemeldet.
         if self._valid_pair(active_pair) and active_pair != last_winner_pair:
             if winner_family == 'api':
                 mp_pair = pairs['musicplayer']
-                icy_pair = pairs['icy']
                 mp_conflict = self._valid_pair(mp_pair) and mp_pair != active_pair
                 icy_conflict = self._valid_pair(icy_pair) and icy_pair != active_pair
                 if mp_conflict and icy_conflict:
                     self.mark_lead_error('api')
                     self._reset_confirm()
                     return False, reasons['api'], preferred
+            if winner_family == 'musicplayer':
+                mp_generic = self._contains_station(active_pair, station_name)
+                if mp_generic and external_support_last:
+                    self._reset_confirm()
+                    return False, reasons['musicplayer'], preferred
+                if mp_generic:
+                    required = max(3, self.single_confirm_polls + 1)
+                    if self._confirm('musicplayer_noise', active_pair, required):
+                        return True, reasons['mp_invalid'], preferred
+                    return False, reasons['musicplayer'], preferred
+                required = 2 if external_support_last else (
+                    self.single_confirm_polls if len(valid_pairs) == 1 else 1
+                )
+                if self._confirm(winner_family, active_pair, required):
+                    return True, reasons[winner_family], preferred
+                return False, reasons[winner_family], preferred
             required = self.single_confirm_polls if len(valid_pairs) == 1 else 1
             if self._confirm(winner_family, active_pair, required):
                 return True, reasons[winner_family], preferred
@@ -209,10 +231,15 @@ class SourcePolicy:
             and last_winner_pair[1]
             and not self._valid_pair(active_pair)
         ):
-            self._reset_confirm()
-            return True, reasons['mp_invalid'], preferred
+            if external_support_last:
+                self._reset_confirm()
+                return False, reasons['musicplayer'], preferred
+            required = max(3, self.single_confirm_polls + 1)
+            if self._confirm('musicplayer_invalid', ('', ''), required):
+                return True, reasons['mp_invalid'], preferred
+            return False, reasons['musicplayer'], preferred
 
-        # Aktive Quelle liefert nichts mehr: zur besten verfÃƒÂ¼gbaren Quelle wechseln.
+        # Aktive Quelle liefert nichts mehr: zur besten verfuegbaren Quelle wechseln.
         if not self._valid_pair(active_pair) and preferred:
             target_pair = valid_pairs.get(preferred, ('', ''))
             if self._valid_pair(target_pair) and target_pair != last_winner_pair:
