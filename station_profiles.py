@@ -1,0 +1,612 @@
+import json
+import os
+import time
+import hashlib
+from datetime import datetime
+
+from constants import (
+    SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
+    SOURCE_POLICY_SWITCH_MARGIN,
+    STATION_PROFILE_ALPHA,
+    STATION_PROFILE_CONFIDENCE_HIGH,
+    STATION_PROFILE_CONFIDENCE_LOW,
+    STATION_PROFILE_DIRNAME,
+    STATION_PROFILE_FILENAME,
+    STATION_PROFILE_MIN_SESSION_S,
+    STATION_PROFILE_MIN_STABLE_SESSIONS,
+)
+
+
+FAMILIES = ('musicplayer', 'api', 'icy')
+ICY_FORMAT_KEYS = ('artist_title', 'title_artist', 'unknown')
+
+
+def _clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def _safe_div(num, den):
+    if not den:
+        return 0.0
+    return float(num) / float(den)
+
+
+def _today_iso():
+    return datetime.utcnow().strftime('%Y-%m-%d')
+
+
+def _normalize_family(value):
+    family = str(value or '').strip().lower()
+    if family in FAMILIES:
+        return family
+    return ''
+
+
+def _valid_pair(pair):
+    return bool(pair and pair[0] and pair[1])
+
+
+class StationProfileSession:
+    """
+    Runtime collector for one station playback session.
+    """
+
+    def __init__(self, station_key, station_name=''):
+        self.station_key = station_key
+        self.station_name = station_name
+        self.started_ts = time.time()
+        self.last_ts = self.started_ts
+        self.polls = 0
+
+        self.winner_counts = {family: 0 for family in FAMILIES}
+        self.source_stats = {
+            family: {
+                'samples': 0,
+                'song': 0,
+                'generic': 0,
+                'empty': 0,
+                'match_current': 0,
+                'other_song': 0,
+            }
+            for family in FAMILIES
+        }
+
+        self.icy_format_counts = {key: 0 for key in ICY_FORMAT_KEYS}
+        self.api_present_samples = 0
+
+        self.mp_song_samples = 0
+        self.mp_match_samples = 0
+        self.mp_other_song_samples = 0
+
+        self.api_lag_sum = 0.0
+        self.api_lag_count = 0
+        self._pending_icy_pair = ('', '')
+        self._pending_icy_poll = -1
+        self._last_api_pair = ('', '')
+        self._last_icy_pair = ('', '')
+
+    def observe(self, observation, context):
+        self.polls += 1
+        self.last_ts = time.time()
+
+        winner = _normalize_family((observation or {}).get('winner_family'))
+        if winner:
+            self.winner_counts[winner] += 1
+
+        sources = (observation or {}).get('sources', {})
+        api_has_data_now = False
+        for family in FAMILIES:
+            state = 'empty'
+            src = sources.get(family, {}) if isinstance(sources, dict) else {}
+            if isinstance(src, dict):
+                state_value = str(src.get('state', 'empty') or 'empty').strip().lower()
+                if state_value in ('song', 'generic', 'empty'):
+                    state = state_value
+            stats = self.source_stats[family]
+            stats['samples'] += 1
+            stats[state] += 1
+            if src.get('match_current'):
+                stats['match_current'] += 1
+            if src.get('other_song'):
+                stats['other_song'] += 1
+
+            if family == 'api' and state != 'empty':
+                api_has_data_now = True
+
+            if family == 'musicplayer' and state == 'song':
+                self.mp_song_samples += 1
+                if src.get('match_current'):
+                    self.mp_match_samples += 1
+                if src.get('other_song'):
+                    self.mp_other_song_samples += 1
+
+        if api_has_data_now:
+            self.api_present_samples += 1
+
+        format_hint = str((context or {}).get('icy_format', '') or '').strip().lower()
+        if format_hint in self.icy_format_counts:
+            self.icy_format_counts[format_hint] += 1
+
+        self._observe_api_lag(context)
+
+    def _observe_api_lag(self, context):
+        context = context or {}
+        stream_title_changed = bool(context.get('stream_title_changed'))
+        icy_pair = context.get('current_icy_pair') or ('', '')
+        api_pair = context.get('current_api_pair') or ('', '')
+        icy_is_song = bool(context.get('icy_is_song'))
+
+        if stream_title_changed and icy_is_song and _valid_pair(icy_pair):
+            if icy_pair != self._last_icy_pair:
+                self._pending_icy_pair = icy_pair
+                self._pending_icy_poll = self.polls
+
+        if _valid_pair(api_pair) and api_pair != self._last_api_pair:
+            if self._pending_icy_poll >= 0 and api_pair == self._pending_icy_pair:
+                lag = max(0, self.polls - self._pending_icy_poll)
+                self.api_lag_sum += float(lag)
+                self.api_lag_count += 1
+                self._pending_icy_pair = ('', '')
+                self._pending_icy_poll = -1
+
+        if _valid_pair(icy_pair):
+            self._last_icy_pair = icy_pair
+        if _valid_pair(api_pair):
+            self._last_api_pair = api_pair
+
+    def duration_seconds(self):
+        return max(0.0, float(self.last_ts - self.started_ts))
+
+    def build_metrics(self):
+        total_winners = sum(self.winner_counts.values())
+        winner_shares = {
+            family: _safe_div(self.winner_counts.get(family, 0), total_winners)
+            for family in FAMILIES
+        }
+        dominant_source = max(FAMILIES, key=lambda fam: winner_shares.get(fam, 0.0)) if total_winners else ''
+
+        icy_stats = self.source_stats['icy']
+        icy_generic_rate = _safe_div(icy_stats.get('generic', 0), icy_stats.get('samples', 0))
+
+        api_available = _safe_div(self.api_present_samples, self.polls) >= 0.20
+
+        mp_match_rate = _safe_div(self.mp_match_samples, self.mp_song_samples)
+        mp_other_rate = _safe_div(self.mp_other_song_samples, self.mp_song_samples)
+        mp_reliable = bool(
+            self.mp_song_samples >= 3
+            and mp_match_rate >= 0.65
+            and mp_other_rate <= 0.25
+        )
+
+        total_formats = sum(self.icy_format_counts.values())
+        format_shares = {
+            key: _safe_div(self.icy_format_counts.get(key, 0), total_formats)
+            for key in ICY_FORMAT_KEYS
+        }
+        icy_format = max(ICY_FORMAT_KEYS, key=lambda key: format_shares.get(key, 0.0)) if total_formats else 'unknown'
+
+        api_lag_cycles = None
+        if self.api_lag_count > 0:
+            api_lag_cycles = self.api_lag_sum / float(self.api_lag_count)
+
+        return {
+            'duration_s': self.duration_seconds(),
+            'polls': self.polls,
+            'dominant_source': dominant_source,
+            'winner_shares': winner_shares,
+            'icy_generic_rate': icy_generic_rate,
+            'api_available': api_available,
+            'api_lag_cycles': api_lag_cycles,
+            'mp_reliable': mp_reliable,
+            'format_shares': format_shares,
+            'icy_format': icy_format,
+        }
+
+
+class StationProfileStore:
+    """
+    Persistent station profile store with EMA learning and confidence tracking.
+    Storage mode: one JSON file per station.
+    """
+
+    def __init__(
+        self,
+        storage_path,
+        legacy_file_path=None,
+        alpha=STATION_PROFILE_ALPHA,
+        min_session_s=STATION_PROFILE_MIN_SESSION_S,
+        min_stable_sessions=STATION_PROFILE_MIN_STABLE_SESSIONS,
+    ):
+        raw_path = str(storage_path or '').strip()
+        if raw_path.lower().endswith('.json'):
+            # Legacy constructor support: previously a single aggregate file path.
+            base_dir = os.path.dirname(raw_path)
+            self.profile_dir = os.path.join(base_dir, STATION_PROFILE_DIRNAME)
+            self.legacy_file_path = str(legacy_file_path or raw_path)
+        else:
+            self.profile_dir = raw_path
+            default_legacy = os.path.join(os.path.dirname(self.profile_dir), STATION_PROFILE_FILENAME)
+            self.legacy_file_path = str(legacy_file_path or default_legacy)
+
+        self.alpha = float(alpha)
+        self.min_session_s = int(min_session_s)
+        self.min_stable_sessions = int(min_stable_sessions)
+        self._profiles = {}
+        self._dirty_keys = set()
+        self._last_flush_ts = 0.0
+        self._prepare_storage_dir()
+        self._migrate_legacy_aggregate()
+
+    def _prepare_storage_dir(self):
+        try:
+            if self.profile_dir and not os.path.exists(self.profile_dir):
+                os.makedirs(self.profile_dir, exist_ok=True)
+        except Exception:
+            pass
+
+    def _station_file_path(self, station_key):
+        if not self.profile_dir or not station_key:
+            return ''
+        key = str(station_key or '').strip().lower()
+        slug = ''.join(ch if ch.isalnum() else '_' for ch in key).strip('_')
+        if not slug:
+            slug = 'station'
+        slug = slug[:80]
+        key_hash = hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
+        file_name = f"{slug}__{key_hash}.json"
+        return os.path.join(self.profile_dir, file_name)
+
+    def _load_profile_from_file(self, station_key):
+        file_path = self._station_file_path(station_key)
+        if not file_path or not os.path.exists(file_path):
+            return None
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                if isinstance(payload.get('profile'), dict):
+                    return payload.get('profile')
+                return payload
+        except Exception:
+            return None
+        return None
+
+    def _migrate_legacy_aggregate(self):
+        try:
+            if not self.legacy_file_path or not os.path.exists(self.legacy_file_path):
+                return
+            with open(self.legacy_file_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+
+            stations = {}
+            if isinstance(payload, dict) and isinstance(payload.get('stations'), dict):
+                stations = payload.get('stations') or {}
+            if not stations:
+                return
+
+            for station_key, profile in stations.items():
+                if not isinstance(profile, dict):
+                    continue
+                ensured = self._profile_defaults()
+                for key, value in ensured.items():
+                    if key in profile:
+                        ensured[key] = profile[key]
+                self._profiles[str(station_key)] = ensured
+                self._dirty_keys.add(str(station_key))
+
+            self.flush()
+            migrated_path = f"{self.legacy_file_path}.migrated.bak"
+            try:
+                os.replace(self.legacy_file_path, migrated_path)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _profile_defaults(self):
+        return {
+            'dominant_source': '',
+            'icy_format': 'unknown',
+            'icy_generic_rate': 0.0,
+            'api_available': False,
+            'api_lag_cycles': 0.0,
+            'mp_reliable': False,
+            'confidence': 0.25,
+            'sessions': 0,
+            'sessions_above_threshold': 0,
+            'last_seen': '',
+            'last_change_detected': None,
+            'profile_alpha': self.alpha,
+            'source_share_ema': {family: 1.0 / 3.0 for family in FAMILIES},
+            'icy_format_share_ema': {key: (1.0 if key == 'unknown' else 0.0) for key in ICY_FORMAT_KEYS},
+            'icy_generic_rate_ema': 0.0,
+            'api_available_ema': 0.0,
+            'api_lag_cycles_ema': 0.0,
+            'mp_reliable_ema': 0.0,
+            '_pending_dominant_source': '',
+            '_pending_dominant_count': 0,
+            '_pending_icy_format': '',
+            '_pending_icy_format_count': 0,
+        }
+
+    def _ensure_profile(self, station_key):
+        key = str(station_key or '')
+        if not key:
+            return self._profile_defaults()
+
+        profile = self._profiles.get(key)
+        if not isinstance(profile, dict):
+            profile = self._load_profile_from_file(key)
+        if not isinstance(profile, dict):
+            profile = self._profile_defaults()
+            self._dirty_keys.add(key)
+        defaults = self._profile_defaults()
+        for field, value in defaults.items():
+            if field not in profile:
+                profile[field] = value
+        self._profiles[str(station_key)] = profile
+        return profile
+
+    def start_session(self, station_key, station_name=''):
+        if not station_key:
+            return None
+        return StationProfileSession(station_key=station_key, station_name=station_name)
+
+    def finish_session(self, session):
+        if session is None or not session.station_key:
+            return None
+
+        profile = self._ensure_profile(session.station_key)
+        metrics = session.build_metrics()
+        today = _today_iso()
+
+        profile['sessions'] = int(profile.get('sessions', 0)) + 1
+        profile['last_seen'] = today
+        above_threshold = metrics['duration_s'] >= float(self.min_session_s)
+        if above_threshold:
+            profile['sessions_above_threshold'] = int(profile.get('sessions_above_threshold', 0)) + 1
+            self._merge_ema(profile, metrics)
+            self._derive_profile_fields(profile)
+            changed = self._track_profile_changes(profile, today)
+            self._update_confidence(profile, metrics, changed, above_threshold=True)
+        else:
+            self._update_confidence(profile, metrics, changed=False, above_threshold=False)
+
+        self._mark_public(profile)
+        self._dirty_keys.add(str(session.station_key))
+        return profile
+
+    def _merge_ema(self, profile, metrics):
+        alpha = float(profile.get('profile_alpha', self.alpha) or self.alpha)
+
+        source_ema = profile.get('source_share_ema', {})
+        for family in FAMILIES:
+            prev = float(source_ema.get(family, 1.0 / 3.0))
+            sample = float(metrics['winner_shares'].get(family, 0.0))
+            source_ema[family] = (1.0 - alpha) * prev + alpha * sample
+        profile['source_share_ema'] = source_ema
+
+        format_ema = profile.get('icy_format_share_ema', {})
+        for key in ICY_FORMAT_KEYS:
+            prev = float(format_ema.get(key, 0.0))
+            sample = float(metrics['format_shares'].get(key, 0.0))
+            format_ema[key] = (1.0 - alpha) * prev + alpha * sample
+        profile['icy_format_share_ema'] = format_ema
+
+        profile['icy_generic_rate_ema'] = (1.0 - alpha) * float(profile.get('icy_generic_rate_ema', 0.0)) + alpha * float(metrics['icy_generic_rate'])
+        profile['api_available_ema'] = (1.0 - alpha) * float(profile.get('api_available_ema', 0.0)) + alpha * (1.0 if metrics['api_available'] else 0.0)
+        profile['mp_reliable_ema'] = (1.0 - alpha) * float(profile.get('mp_reliable_ema', 0.0)) + alpha * (1.0 if metrics['mp_reliable'] else 0.0)
+
+        if metrics['api_lag_cycles'] is not None:
+            profile['api_lag_cycles_ema'] = (1.0 - alpha) * float(profile.get('api_lag_cycles_ema', 0.0)) + alpha * float(metrics['api_lag_cycles'])
+
+    def _derive_profile_fields(self, profile):
+        source_ema = profile.get('source_share_ema', {})
+        dominant = max(FAMILIES, key=lambda fam: float(source_ema.get(fam, 0.0)))
+        profile['_derived_dominant_source'] = dominant
+
+        format_ema = profile.get('icy_format_share_ema', {})
+        icy_format = max(ICY_FORMAT_KEYS, key=lambda key: float(format_ema.get(key, 0.0)))
+        if float(format_ema.get(icy_format, 0.0)) < 0.35:
+            icy_format = 'unknown'
+        profile['_derived_icy_format'] = icy_format
+
+    def _track_profile_changes(self, profile, today):
+        changed = False
+        changed |= self._track_field_change(profile, 'dominant_source', profile.get('_derived_dominant_source', ''), today)
+        changed |= self._track_field_change(profile, 'icy_format', profile.get('_derived_icy_format', 'unknown'), today)
+        return changed
+
+    def _track_field_change(self, profile, field_name, candidate, today):
+        current = str(profile.get(field_name, '') or '')
+        candidate = str(candidate or '')
+        if not candidate:
+            return False
+        if not current:
+            profile[field_name] = candidate
+            return False
+        if candidate == current:
+            profile[f'_pending_{field_name}'] = ''
+            profile[f'_pending_{field_name}_count'] = 0
+            return False
+
+        pending_key = f'_pending_{field_name}'
+        count_key = f'_pending_{field_name}_count'
+        if profile.get(pending_key) == candidate:
+            profile[count_key] = int(profile.get(count_key, 0)) + 1
+        else:
+            profile[pending_key] = candidate
+            profile[count_key] = 1
+
+        if int(profile.get(count_key, 0)) >= 2:
+            profile[field_name] = candidate
+            profile[pending_key] = ''
+            profile[count_key] = 0
+            profile['last_change_detected'] = today
+            return True
+        return False
+
+    def _update_confidence(self, profile, metrics, changed, above_threshold):
+        confidence = float(profile.get('confidence', 0.25))
+
+        if not above_threshold:
+            confidence = max(0.10, confidence - 0.01)
+        else:
+            delta = 0.0
+            dominant = str(profile.get('dominant_source', '') or '')
+            session_dominant = str(metrics.get('dominant_source', '') or '')
+            if dominant and session_dominant:
+                delta += 0.08 if dominant == session_dominant else -0.10
+
+            expected_generic = float(profile.get('icy_generic_rate_ema', metrics.get('icy_generic_rate', 0.0)))
+            if abs(float(metrics.get('icy_generic_rate', 0.0)) - expected_generic) <= 0.20:
+                delta += 0.02
+            else:
+                delta -= 0.03
+
+            expected_mp_reliable = float(profile.get('mp_reliable_ema', 0.0)) >= 0.60
+            if bool(metrics.get('mp_reliable')) == expected_mp_reliable:
+                delta += 0.03
+            else:
+                delta -= 0.04
+
+            if changed:
+                delta -= 0.12
+
+            confidence = _clamp(confidence + delta, 0.0, 1.0)
+
+        if int(profile.get('sessions_above_threshold', 0)) < int(self.min_stable_sessions):
+            confidence = min(confidence, 0.45)
+
+        profile['confidence'] = round(confidence, 3)
+
+    def _mark_public(self, profile):
+        profile['icy_generic_rate'] = round(float(profile.get('icy_generic_rate_ema', 0.0)), 3)
+        profile['api_available'] = bool(float(profile.get('api_available_ema', 0.0)) >= 0.35)
+        profile['mp_reliable'] = bool(float(profile.get('mp_reliable_ema', 0.0)) >= 0.60)
+
+        api_lag = float(profile.get('api_lag_cycles_ema', 0.0))
+        profile['api_lag_cycles'] = round(api_lag, 2) if api_lag > 0 else 0.0
+
+        profile['profile_alpha'] = float(profile.get('profile_alpha', self.alpha))
+
+    def get_profile(self, station_key):
+        if not station_key:
+            return None
+        key = str(station_key)
+        profile = self._profiles.get(key)
+        if not isinstance(profile, dict):
+            profile = self._load_profile_from_file(key)
+            if isinstance(profile, dict):
+                self._profiles[key] = profile
+        if not isinstance(profile, dict):
+            return None
+        defaults = self._profile_defaults()
+        for field, value in defaults.items():
+            if field not in profile:
+                profile[field] = value
+                self._dirty_keys.add(key)
+        self._profiles[key] = profile
+        return profile
+
+    def _build_weights(self, profile):
+        confidence = float(profile.get('confidence', 0.0))
+        if confidence < STATION_PROFILE_CONFIDENCE_LOW:
+            return {family: 1.0 for family in FAMILIES}
+
+        source_ema = profile.get('source_share_ema', {})
+        icy_generic_rate = float(profile.get('icy_generic_rate_ema', 0.0))
+        api_available = float(profile.get('api_available_ema', 0.0)) >= 0.35
+        mp_reliable = float(profile.get('mp_reliable_ema', 0.0)) >= 0.60
+
+        weights = {}
+        for family in FAMILIES:
+            share = float(source_ema.get(family, 1.0 / 3.0))
+            weight = 1.0 + ((share - (1.0 / 3.0)) * 0.45)
+
+            if family == 'musicplayer' and not mp_reliable:
+                weight -= 0.15
+            if family == 'api' and not api_available:
+                weight -= 0.12
+            if family == 'icy' and icy_generic_rate > 0.45:
+                weight -= 0.10
+
+            weights[family] = round(_clamp(weight, 0.70, 1.30), 3)
+        return weights
+
+    def get_policy_profile(self, station_key):
+        profile = self.get_profile(station_key)
+        if not isinstance(profile, dict):
+            return {
+                'confidence': 0.0,
+                'preferred_family': '',
+                'weights': {family: 1.0 for family in FAMILIES},
+                'switch_margin': None,
+                'single_confirm_polls': None,
+            }
+
+        confidence = float(profile.get('confidence', 0.0))
+        preferred = ''
+        if confidence >= STATION_PROFILE_CONFIDENCE_LOW:
+            preferred = _normalize_family(profile.get('dominant_source'))
+
+        switch_margin = None
+        single_confirm_polls = None
+        if confidence >= STATION_PROFILE_CONFIDENCE_HIGH:
+            switch_margin = float(SOURCE_POLICY_SWITCH_MARGIN)
+            if preferred:
+                switch_margin += 0.08
+
+            if preferred == 'musicplayer' and bool(profile.get('mp_reliable')):
+                switch_margin += 0.05
+            if preferred == 'api':
+                lag = float(profile.get('api_lag_cycles', 0.0) or 0.0)
+                switch_margin += min(0.06, lag * 0.02)
+            if preferred == 'icy' and float(profile.get('icy_generic_rate', 0.0)) < 0.25:
+                switch_margin += 0.04
+
+            switch_margin = round(_clamp(switch_margin, 0.10, 0.35), 3)
+
+            single_confirm_polls = int(SOURCE_POLICY_SINGLE_CONFIRM_POLLS)
+            if preferred == 'api':
+                lag = float(profile.get('api_lag_cycles', 0.0) or 0.0)
+                if lag > 0:
+                    single_confirm_polls = max(single_confirm_polls, min(5, int(round(lag))))
+
+        return {
+            'confidence': round(confidence, 3),
+            'preferred_family': preferred,
+            'weights': self._build_weights(profile),
+            'switch_margin': switch_margin,
+            'single_confirm_polls': single_confirm_polls,
+        }
+
+    def flush_if_due(self, min_interval_s=30.0):
+        now_ts = time.time()
+        if (now_ts - self._last_flush_ts) < float(min_interval_s):
+            return
+        self.flush()
+
+    def flush(self):
+        if not self._dirty_keys or not self.profile_dir:
+            return
+        try:
+            self._prepare_storage_dir()
+            for station_key in list(self._dirty_keys):
+                profile = self._profiles.get(station_key)
+                if not isinstance(profile, dict):
+                    continue
+                file_path = self._station_file_path(station_key)
+                if not file_path:
+                    continue
+                payload = {
+                    'version': 2,
+                    'station_key': station_key,
+                    'profile': profile,
+                }
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+            self._dirty_keys.clear()
+            self._last_flush_ts = time.time()
+        except Exception:
+            pass
