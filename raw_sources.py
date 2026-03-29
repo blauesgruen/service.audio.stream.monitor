@@ -51,6 +51,7 @@ class RawSourceLabels:
         _P.RAW_ICY_PARSED,
         _P.RAW_PLAYING_ITEM,
         _P.RAW_JSONRPC_PLAYER,
+        _P.RAW_LISTITEM,
         _P.RAW_API_RADIODE_NOWPLAYING,
         _P.RAW_API_TUNEIN_JSON,
         _P.RAW_API_TUNEIN_TEXT,

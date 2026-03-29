@@ -143,6 +143,7 @@ class PropertyNames:
     RAW_ICY_PARSED = 'RadioMonitor.Source.IcyParsed'
     RAW_PLAYING_ITEM = 'RadioMonitor.Source.PlayingItemRaw'
     RAW_JSONRPC_PLAYER = 'RadioMonitor.Source.JsonRpcPlayerRaw'
+    RAW_LISTITEM = 'RadioMonitor.Source.ListItemRaw'
     RAW_API_RADIODE_NOWPLAYING = 'RadioMonitor.Source.Api.RadioDeNowPlayingRaw'
     RAW_API_TUNEIN_JSON = 'RadioMonitor.Source.Api.TuneInJsonRaw'
     RAW_API_TUNEIN_TEXT = 'RadioMonitor.Source.Api.TuneInTextRaw'

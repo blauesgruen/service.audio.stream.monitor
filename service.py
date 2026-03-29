@@ -76,6 +76,7 @@ class PlayerMonitor(xbmc.Player):
         try:
             playing_file = self.getPlayingFile()
             self.radio_monitor._capture_plugin_playback_raw(playing_file)
+            self.radio_monitor._capture_listitem_raw('onPlayBackStarted')
             if (
                 self.radio_monitor.current_url
                 and playing_file
@@ -955,6 +956,16 @@ class RadioMonitor(xbmc.Monitor):
         log_debug(f"API-RAW[{context}]: {text}")
         self.raw_sources.set_api_payload(context, payload)
 
+    def _debug_log_raw_payload(self, context, payload):
+        """Zentrales Debug-Logging fuer kompakte Rohdaten-Payloads."""
+        try:
+            text = str(payload)
+        except Exception:
+            text = repr(payload)
+        if len(text) > 500:
+            text = text[:500] + '...'
+        log_debug(f"RAW[{context}]: {text}")
+
     def _set_icy_nowplaying_label(self, stream_title=None, artist=None, title=None):
         raw = (stream_title or '').strip()
         value = raw if raw else self._compose_song_label(artist, title)
@@ -969,6 +980,24 @@ class RadioMonitor(xbmc.Monitor):
 
     def _capture_plugin_playback_raw(self, playback_url):
         self.raw_sources.set_text(_P.RAW_PLUGIN_URL, (playback_url or '').strip(), max_len=2000)
+
+    def _capture_listitem_raw(self, context=''):
+        try:
+            payload = {
+                'label': xbmc.getInfoLabel('ListItem.Label') or '',
+                'title': xbmc.getInfoLabel('ListItem.Title') or '',
+                'artist': xbmc.getInfoLabel('ListItem.Artist') or '',
+                'album': xbmc.getInfoLabel('ListItem.Album') or '',
+                'path': xbmc.getInfoLabel('ListItem.Path') or '',
+                'filenameandpath': xbmc.getInfoLabel('ListItem.FilenameAndPath') or '',
+                'icon': xbmc.getInfoLabel('ListItem.Icon') or '',
+                'thumb': xbmc.getInfoLabel('ListItem.Thumb') or '',
+            }
+            self.raw_sources.set_json(_P.RAW_LISTITEM, payload, max_len=12000)
+            ctx = context or 'capture'
+            self._debug_log_raw_payload(f"listitem.{ctx}", payload)
+        except Exception as e:
+            log_debug(f"Fehler beim Erfassen ListItem-Rohdaten: {e}")
 
     def _capture_playing_item_raw(self):
         try:
@@ -3377,6 +3406,7 @@ class RadioMonitor(xbmc.Monitor):
                         self.current_url = playing_file
                         self.is_playing = True
                         self._capture_stream_url_raw(playing_file)
+                        self._capture_listitem_raw('check_playing_new_url')
                         self._capture_playing_item_raw()
                         self._capture_jsonrpc_player_raw()
                         self._ensure_api_source_from_context(playing_file, 'check_playing_new_url')
