@@ -24,6 +24,7 @@ from constants import (
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
     SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
     STARTUP_SOURCE_QUALIFY_WINDOW_S, STARTUP_API_ONLY_STABLE_POLLS,
+    GENERIC_METADATA_TOKENS, GENERIC_METADATA_PHONE_RE,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
     MB_WINNER_MIN_SCORE as _MB_WINNER_MIN_SCORE,
@@ -435,15 +436,9 @@ class RadioMonitor(xbmc.Monitor):
         station_l = (station_name or '').strip().lower()
         if station_l and station_l in text_l:
             return True
-        generic_tokens = (
-            'wir sind',
-            'nachrichten',
-            'verkehr',
-            'wetter',
-            'news',
-            'jingle',
-        )
-        return any(token in text_l for token in generic_tokens)
+        if GENERIC_METADATA_PHONE_RE.search(text_l):
+            return True
+        return any(token in text_l for token in GENERIC_METADATA_TOKENS)
 
     def _is_generic_song_pair(self, pair, station_name=''):
         if not self._is_song_pair(pair):
@@ -469,6 +464,26 @@ class RadioMonitor(xbmc.Monitor):
         if self._is_generic_song_pair(pair, station_name):
             return ('', '')
         return pair
+
+    def _sanitize_stream_source_pair(self, pair, station_name=''):
+        if not self._is_song_pair(pair):
+            return ('', '')
+        if self._is_generic_song_pair(pair, station_name):
+            return ('', '')
+        return pair
+
+    def _append_non_generic_candidate(self, candidates, source, artist, title, station_name=''):
+        pair = (str(artist or '').strip(), str(title or '').strip())
+        if not self._is_song_pair(pair):
+            return False
+        if self._is_generic_song_pair(pair, station_name):
+            log_debug(
+                f"Kandidat verworfen (generisch): source='{source}', "
+                f"pair='{pair[0]} - {pair[1]}'"
+            )
+            return False
+        candidates.append({'source': source, 'artist': pair[0], 'title': pair[1]})
+        return True
 
     def _update_mp_generic_hold_state(self, last_winner_source, current_mp_pair, station_name=''):
         """
@@ -2574,23 +2589,44 @@ class RadioMonitor(xbmc.Monitor):
                     if self._api_timeout_block_key != ('', '') and api_key != self._api_timeout_block_key:
                         log_info(f"API-Song geaendert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'")
                         self._api_timeout_block_key = ('', '')
-                    candidates.append({'source': 'api', 'artist': api_artist, 'title': api_title})
-                    if api_artist != api_title:
-                        s_artist, s_title = self._normalize_song_candidate(api_title, api_artist, invalid)
-                        if s_artist and s_title:
-                            candidates.append({'source': 'api_swapped', 'artist': s_artist, 'title': s_title})
-                    api_candidate = (api_artist, api_title)
-                    api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
-                    self._last_seen_api_key = api_key
+                    if self._append_non_generic_candidate(
+                        candidates,
+                        'api',
+                        api_artist,
+                        api_title,
+                        station_name
+                    ):
+                        if api_artist != api_title:
+                            s_artist, s_title = self._normalize_song_candidate(api_title, api_artist, invalid)
+                            self._append_non_generic_candidate(
+                                candidates,
+                                'api_swapped',
+                                s_artist,
+                                s_title,
+                                station_name
+                            )
+                        api_candidate = (api_artist, api_title)
+                        api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
+                        self._last_seen_api_key = api_key
 
         # ICY-Kandidaten (direkt + ggf. swapped)
         icy_artist, icy_title = self._normalize_song_candidate(artist, title, invalid)
-        if icy_artist and icy_title:
-            candidates.append({'source': 'icy', 'artist': icy_artist, 'title': icy_title})
+        if self._append_non_generic_candidate(
+            candidates,
+            'icy',
+            icy_artist,
+            icy_title,
+            station_name
+        ):
             if not is_von and icy_artist != icy_title:
                 s_artist, s_title = self._normalize_song_candidate(icy_title, icy_artist, invalid)
-                if s_artist and s_title:
-                    candidates.append({'source': 'icy_swapped', 'artist': s_artist, 'title': s_title})
+                self._append_non_generic_candidate(
+                    candidates,
+                    'icy_swapped',
+                    s_artist,
+                    s_title,
+                    station_name
+                )
 
         icy_candidate_pairs = [
             (c.get('artist'), c.get('title'))
@@ -2713,7 +2749,7 @@ class RadioMonitor(xbmc.Monitor):
         # Sonderfall B: MB kann zwischen Kandidaten nicht entscheiden (alle score=0).
         # Dann API nur übernehmen, wenn sie sich gegenüber der letzten API-Antwort geändert hat.
         # Sonst gilt: keine verlässlichen Songdaten -> Artist/Title leer lassen.
-        if prioritize_stream and stream_candidates and evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
+        if stream_candidates and evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
             # MB=0 für die Stream-Quelle: API/ICY intern entscheiden.
             # MusicPlayer wird danach nur zum Abgleich/Trust genutzt.
             icy_pairs = {
@@ -2723,7 +2759,7 @@ class RadioMonitor(xbmc.Monitor):
             }
             locked_source_family, locked_source_pair = self._resolve_mb_zero_with_source_lock(
                 locked_source,
-                [],
+                mp_pairs,
                 api_candidate,
                 list(icy_pairs)
             )
@@ -2771,6 +2807,14 @@ class RadioMonitor(xbmc.Monitor):
             return None, None, '', '', '', '', 0
 
         # --- ICY-Analyse (bestehender Fallback) ---
+        if (
+            (artist and title and self._is_generic_song_pair((artist, title), station_name))
+            or ((not artist) and title and self._is_generic_metadata_text(title, station_name))
+        ):
+            log_debug(f"ICY-Fallback verworfen (generisch): '{stream_title}'")
+            self._set_last_song_decision('', None, None)
+            return None, None, '', '', '', '', 0
+
         if not artist and not title:
             self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
@@ -2911,6 +2955,7 @@ class RadioMonitor(xbmc.Monitor):
                             last_winner_source,
                             (icy_artist, icy_title)
                         )
+                        current_icy_pair = self._sanitize_stream_source_pair(current_icy_pair, station_name)
 
                         # API-Daten erst nach stabilem Start oder nach gesetzter Erstquelle aktualisieren.
                         # Dadurch wird waehrend sichtbarem Kodi-Buffering kein API-Property vorbefuellt.
@@ -2918,6 +2963,7 @@ class RadioMonitor(xbmc.Monitor):
                         if api_refresh_allowed:
                             self._refresh_api_nowplaying_property(station_name)
                             current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
+                            current_api_pair = self._sanitize_stream_source_pair(current_api_pair, station_name)
                         else:
                             self._latest_api_pair = ('', '')
                             current_api_pair = ('', '')
@@ -2983,8 +3029,10 @@ class RadioMonitor(xbmc.Monitor):
                                     last_winner_source,
                                     (icy_artist, icy_title)
                                 )
+                                current_icy_pair = self._sanitize_stream_source_pair(current_icy_pair, station_name)
                                 self._refresh_api_nowplaying_property(station_name)
                                 current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
+                                current_api_pair = self._sanitize_stream_source_pair(current_api_pair, station_name)
                                 if station_name:
                                     self.set_property_safe(_P.STATION, station_name)
                                 if stream_info.get('genre'):
