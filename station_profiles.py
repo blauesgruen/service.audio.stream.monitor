@@ -329,6 +329,7 @@ class StationProfileStore:
             'mp_reliable': False,
             'mp_song_rate': 0.0,
             'mp_flip_rate': 0.0,
+            'generic_keywords': [],
             'icy_structural_generic': False,
             'mp_absent': False,
             'mp_noise': False,

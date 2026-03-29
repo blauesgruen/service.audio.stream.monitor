@@ -24,7 +24,6 @@ from constants import (
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
     SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
     STARTUP_SOURCE_QUALIFY_WINDOW_S, STARTUP_API_ONLY_STABLE_POLLS,
-    GENERIC_METADATA_TOKENS, GENERIC_METADATA_PHONE_RE,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
     MB_WINNER_MIN_SCORE as _MB_WINNER_MIN_SCORE,
@@ -436,9 +435,8 @@ class RadioMonitor(xbmc.Monitor):
         station_l = (station_name or '').strip().lower()
         if station_l and station_l in text_l:
             return True
-        if GENERIC_METADATA_PHONE_RE.search(text_l):
-            return True
-        return any(token in text_l for token in GENERIC_METADATA_TOKENS)
+        station_keywords = self._get_station_generic_keywords(station_name)
+        return any(token in text_l for token in station_keywords)
 
     def _is_generic_song_pair(self, pair, station_name=''):
         if not self._is_song_pair(pair):
@@ -606,6 +604,32 @@ class RadioMonitor(xbmc.Monitor):
             'mp_noise': bool(profile.get('mp_noise', False)),
             'mp_absent': bool(profile.get('mp_absent', False)),
         }
+
+    def _get_station_generic_keywords(self, station_name=''):
+        """
+        Liest optionale Generic-Keywords aus der stationsspezifischen Profil-JSON.
+        Erwartetes Feld: generic_keywords = ["keyword1", "keyword2", ...]
+        """
+        if self._profile_store is None:
+            return ()
+        station_key = self._build_station_profile_key(station_name)
+        if not station_key:
+            return ()
+        try:
+            profile = self._profile_store.get_profile(station_key)
+        except Exception:
+            profile = None
+        if not isinstance(profile, dict):
+            return ()
+        raw_keywords = profile.get('generic_keywords')
+        if not isinstance(raw_keywords, (list, tuple, set)):
+            return ()
+        normalized = []
+        for entry in raw_keywords:
+            keyword = str(entry or '').strip().lower()
+            if keyword and keyword not in normalized:
+                normalized.append(keyword)
+        return tuple(normalized)
 
     def _classify_icy_format(self, stream_title, station_name=''):
         text = (stream_title or '').strip()

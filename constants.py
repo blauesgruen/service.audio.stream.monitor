@@ -35,21 +35,6 @@ DEFAULT_HTTP_HEADERS = {
 INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
 RADIODE_PLUGIN_IDS = ('plugin.audio.radiode', 'plugin.audio.radio_de_light')
 TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
-GENERIC_METADATA_TOKENS = (
-    'wir sind',
-    'nachrichten',
-    'verkehr',
-    'verkehrszentrum',
-    'wetter',
-    'news',
-    'jingle',
-    'am mikrofon',
-    'abendshow',
-    'studio unter',
-    'im osten zu hause',
-    'deine lieblingshits',
-)
-GENERIC_METADATA_PHONE_RE = re.compile(r'\b0\d{3,4}(?:[\s/-]?\d){3,}\b')
 
 # MB-Kandidat-Auswahl
 MB_WINNER_MIN_SCORE = 60
