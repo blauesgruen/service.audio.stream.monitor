@@ -40,6 +40,7 @@ TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
 MB_WINNER_MIN_SCORE = 60
 MB_WINNER_MIN_COMBINED = 55.0
 MP_TRUST_MAX_MISMATCHES = 2
+MP_DECISION_ENABLED = False
 
 # Trigger-Bezeichner fuer Quellenwechsel
 TRIGGER_TITLE_CHANGE = 'Titelwechsel'
@@ -70,6 +71,11 @@ API_NOW_REFRESH_INTERVAL_S = 10
 API_DATA_REFRESH_INTERVAL_S = API_NOW_REFRESH_INTERVAL_S
 API_METADATA_POLL_INTERVAL_S = 10
 MUSICPLAYER_FALLBACK_POLL_INTERVAL_S = 5
+# Analysis event persistence
+ANALYSIS_ENABLED = True
+ANALYSIS_EVENTS_FILENAME = 'analysis_events.jsonl'
+ANALYSIS_MAX_EVENTS = 1500
+ANALYSIS_FLUSH_INTERVAL_S = 5.0
 # Station profile learning
 STATION_PROFILE_DIRNAME = 'station_profiles'
 STATION_PROFILE_FILENAME = 'station_profiles.json'  # legacy aggregate filename (migration)
@@ -128,6 +134,32 @@ class PropertyNames:
     TMO_LEFT   = 'RadioMonitor.TimeoutRemaining'
     RADIODE_LOGO = 'RadioDE.StationLogo'
     RADIODE_NAME = 'RadioDE.StationName'
+    # Raw source labels (one label per raw source)
+    RAW_STREAM_URL = 'RadioMonitor.Source.StreamUrl'
+    RAW_PLUGIN_URL = 'RadioMonitor.Source.PluginPlaybackUrl'
+    RAW_STREAM_HOST = 'RadioMonitor.Source.StreamHost'
+    RAW_STREAM_QUERY = 'RadioMonitor.Source.StreamQuery'
+    RAW_STREAM_HEADERS = 'RadioMonitor.Source.StreamHeaders'
+    RAW_ICY_METADATA = 'RadioMonitor.Source.IcyMetadataRaw'
+    RAW_ICY_STREAMTITLE = 'RadioMonitor.Source.IcyStreamTitleRaw'
+    RAW_ICY_PARSED = 'RadioMonitor.Source.IcyParsed'
+    RAW_PLAYING_ITEM = 'RadioMonitor.Source.PlayingItemRaw'
+    RAW_JSONRPC_PLAYER = 'RadioMonitor.Source.JsonRpcPlayerRaw'
+    RAW_LISTITEM = 'RadioMonitor.Source.ListItemRaw'
+    RAW_PLAYER_ART = 'RadioMonitor.Source.PlayerArtRaw'
+    RAW_RADIODE_WINDOW = 'RadioMonitor.Source.RadioDeWindowRaw'
+    RAW_RDS = 'RadioMonitor.Source.RDSRaw'
+    RAW_API_RADIODE_DETAILS = 'RadioMonitor.Source.Api.RadioDeDetailsRaw'
+    RAW_API_RADIODE_NOWPLAYING = 'RadioMonitor.Source.Api.RadioDeNowPlayingRaw'
+    RAW_API_TUNEIN_JSON = 'RadioMonitor.Source.Api.TuneInJsonRaw'
+    RAW_API_TUNEIN_TEXT = 'RadioMonitor.Source.Api.TuneInTextRaw'
+    RAW_API_LAST_CONTEXT = 'RadioMonitor.Source.Api.LastContext'
+    RAW_API_LAST_PAYLOAD = 'RadioMonitor.Source.Api.LastPayloadRaw'
+    AN_TRACE_ID = 'RadioMonitor.Analysis.TraceId'
+    AN_TRIGGER = 'RadioMonitor.Analysis.Trigger'
+    AN_WINNER_SOURCE = 'RadioMonitor.Analysis.WinnerSource'
+    AN_WINNER_PAIR = 'RadioMonitor.Analysis.WinnerPair'
+    AN_LAST_EVENT = 'RadioMonitor.Analysis.LastEvent'
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames
