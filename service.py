@@ -18,6 +18,10 @@ from constants import (
     TUNEIN_DESCRIBE_API_URL, TUNEIN_TUNE_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
+    SONG_END_DETECTOR_ENABLED, SONG_END_MIN_SONG_AGE_S, SONG_END_HOLD_S,
+    SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
+    SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
+    SONG_END_NEAR_TIMEOUT_S,
     API_NOW_REFRESH_INTERVAL_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
@@ -43,6 +47,7 @@ from source_policy import SourcePolicy
 from station_profiles import StationProfileStore
 from startup_qualifier import StartupQualifier
 from musicplayer_trust import MusicPlayerTrust
+from song_end_detector import SongEndDetector
 from raw_sources import RawSourceLabels, snapshot_getters
 from analysis_events import AnalysisEventStore, new_trace_id
 from musicbrainz import (
@@ -249,6 +254,8 @@ class RadioMonitor(xbmc.Monitor):
         )
         self.api_client = APIClient(headers=DEFAULT_HTTP_HEADERS)
         self.raw_sources = RawSourceLabels(WINDOW, log_debug=log_debug)
+        self.song_end_detector = SongEndDetector()
+        self.song_end_detector_enabled = bool(SONG_END_DETECTOR_ENABLED)
         self.analysis_enabled = bool(ANALYSIS_ENABLED)
         self._analysis_seq = 0
         self.analysis_store = self._init_analysis_store() if self.analysis_enabled else None
@@ -631,6 +638,82 @@ class RadioMonitor(xbmc.Monitor):
                 normalized.append(keyword)
         return tuple(normalized)
 
+    def _default_song_end_policy(self, station_name=''):
+        return {
+            'enabled': bool(SONG_END_DETECTOR_ENABLED),
+            'min_song_age_s': float(SONG_END_MIN_SONG_AGE_S),
+            'hold_s': float(SONG_END_HOLD_S),
+            'min_keyword_hits': int(SONG_END_MIN_KEYWORD_HITS),
+            'min_non_song_sources': int(SONG_END_MIN_NON_SONG_SOURCES),
+            'require_additional_signal': bool(SONG_END_REQUIRE_ADDITIONAL_SIGNAL),
+            'stale_api_min_s': float(SONG_END_STALE_API_MIN_S),
+            'near_timeout_s': float(SONG_END_NEAR_TIMEOUT_S),
+            'generic_keywords': list(self._get_station_generic_keywords(station_name)),
+        }
+
+    def _get_station_song_end_policy(self, station_name=''):
+        policy = self._default_song_end_policy(station_name)
+        if self._profile_store is None:
+            return policy
+        station_key = self._build_station_profile_key(station_name)
+        if not station_key:
+            return policy
+        try:
+            stored = self._profile_store.get_song_end_policy(station_key)
+        except Exception:
+            stored = None
+        if isinstance(stored, dict):
+            for key in (
+                'enabled', 'min_song_age_s', 'hold_s', 'min_keyword_hits',
+                'min_non_song_sources', 'require_additional_signal',
+                'stale_api_min_s', 'near_timeout_s'
+            ):
+                if key in stored:
+                    policy[key] = stored.get(key)
+        policy['generic_keywords'] = list(self._get_station_generic_keywords(station_name))
+        return policy
+
+    def _record_station_keyword_stats(self, station_name, candidates, matched_keywords):
+        if self._profile_store is None:
+            return
+        station_key = self._build_station_profile_key(station_name)
+        if not station_key:
+            return
+        candidate_list = [str(item or '').strip().lower() for item in list(candidates or []) if str(item or '').strip()]
+        if not candidate_list:
+            return
+        try:
+            self._profile_store.record_keyword_candidates(
+                station_key,
+                candidate_list,
+                matched_keywords=matched_keywords or []
+            )
+            self._profile_store.flush_if_due(min_interval_s=STATION_PROFILE_SAVE_INTERVAL_S)
+        except Exception as e:
+            log_debug(f"Keyword-Statistik konnte nicht aktualisiert werden: {e}")
+
+    @staticmethod
+    def _label_from_pair(pair):
+        if not (pair and pair[0] and pair[1]):
+            return ''
+        return f"{pair[0]} - {pair[1]}"
+
+    def _get_aux_source_pairs_for_song_end(self, station_name=''):
+        invalid_values = INVALID_METADATA_VALUES + ["", station_name]
+        raw_listitem = WINDOW.getProperty(_P.RAW_LISTITEM) or ''
+        raw_playing_item = WINDOW.getProperty(_P.RAW_PLAYING_ITEM) or ''
+        raw_jsonrpc = WINDOW.getProperty(_P.RAW_JSONRPC_PLAYER) or ''
+
+        listitem_pair = self._normalize_song_candidate(*_extract_listitem_pair(raw_listitem), invalid_values)
+        playing_item_pair = self._normalize_song_candidate(*_extract_playing_item_pair(raw_playing_item), invalid_values)
+        jsonrpc_pair = self._normalize_song_candidate(*_extract_jsonrpc_pair(raw_jsonrpc), invalid_values)
+
+        return {
+            'listitem': (listitem_pair[0] or '', listitem_pair[1] or ''),
+            'playing_item': (playing_item_pair[0] or '', playing_item_pair[1] or ''),
+            'jsonrpc': (jsonrpc_pair[0] or '', jsonrpc_pair[1] or ''),
+        }
+
     def _classify_icy_format(self, stream_title, station_name=''):
         text = (stream_title or '').strip()
         if not text:
@@ -793,7 +876,7 @@ class RadioMonitor(xbmc.Monitor):
             return max(0.0, duration_s - SONG_TIMEOUT_EARLY_CLEAR_S)
         return SONG_TIMEOUT_FALLBACK_S
         
-    def _start_song_timeout(self, duration_ms):
+    def _start_song_timeout(self, duration_ms, song_key=('', ''), station_name=''):
         """
         Startet den Song-Timer zentral und setzt Debug-Properties:
         - RadioMonitor.MBDurationMs / RadioMonitor.MBDurationS
@@ -829,23 +912,12 @@ class RadioMonitor(xbmc.Monitor):
                 f"Song-Timeout: {self._song_timeout:.0f}s "
                 f"(MB-Laenge: unbekannt, fallback={SONG_TIMEOUT_FALLBACK_S}s)"
             )
+        if self.song_end_detector_enabled:
+            self.song_end_detector.on_song_started(song_key=song_key, station_name=station_name)
 
-    def _handle_song_timeout_expiry(self, last_song_key=('', ''), enable_api_block=False):
-        """
-        Aktualisiert Timeout-Remaining und loescht Song-Properties bei Ablauf.
-
-        Args:
-            last_song_key: Letzter gueltiger Song (artist, title), optional fuer API-Block.
-            enable_api_block: Aktiviert API-Block bis Titelwechsel nach Timeout.
-
-        Returns:
-            bool: True wenn Timeout abgelaufen und geloescht wurde, sonst False.
-        """
-        self._update_timeout_remaining_property()
-        if not (self._last_song_time and time.time() - self._last_song_time > self._song_timeout):
-            return False
-
-        log_debug(f"Song-Timeout abgelaufen ({self._song_timeout:.0f}s) - loesche Song-Properties")
+    def _clear_song_properties(self, reason_text, last_song_key=('', ''), enable_api_block=False):
+        if reason_text:
+            log_debug(str(reason_text))
 
         if enable_api_block and last_song_key[0] and last_song_key[1]:
             self._api_timeout_block_key = (last_song_key[0], last_song_key[1])
@@ -864,6 +936,28 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.BAND_MEM)
         WINDOW.clearProperty(_P.GENRE)
         self._reset_song_timeout_state(clear_debug=True)
+        self.song_end_detector.reset()
+
+    def _handle_song_timeout_expiry(self, last_song_key=('', ''), enable_api_block=False):
+        """
+        Aktualisiert Timeout-Remaining und loescht Song-Properties bei Ablauf.
+
+        Args:
+            last_song_key: Letzter gueltiger Song (artist, title), optional fuer API-Block.
+            enable_api_block: Aktiviert API-Block bis Titelwechsel nach Timeout.
+
+        Returns:
+            bool: True wenn Timeout abgelaufen und geloescht wurde, sonst False.
+        """
+        self._update_timeout_remaining_property()
+        if not (self._last_song_time and time.time() - self._last_song_time > self._song_timeout):
+            return False
+
+        self._clear_song_properties(
+            reason_text=f"Song-Timeout abgelaufen ({self._song_timeout:.0f}s) - loesche Song-Properties",
+            last_song_key=last_song_key,
+            enable_api_block=enable_api_block
+        )
         return True
 
     def clear_properties(self):
@@ -893,6 +987,7 @@ class RadioMonitor(xbmc.Monitor):
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
+        self.song_end_detector.reset()
         self.startup_qualifier.reset_session()
         self.source_policy = SourcePolicy(
             window=SOURCE_POLICY_WINDOW,
@@ -2356,7 +2451,11 @@ class RadioMonitor(xbmc.Monitor):
                             self.update_player_metadata(None, title, station_name, logo if logo else None, None)
 
                         # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                        self._start_song_timeout(duration_ms)
+                        self._start_song_timeout(
+                            duration_ms,
+                            song_key=(artist or '', title or ''),
+                            station_name=station_name
+                        )
 
                 # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                 self._handle_song_timeout_expiry()
@@ -2494,7 +2593,11 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.BAND_MEM)
 
                     # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
-                    self._start_song_timeout(duration_ms)
+                    self._start_song_timeout(
+                        duration_ms,
+                        song_key=(artist or '', title or ''),
+                        station_name=''
+                    )
 
                 # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                 self._handle_song_timeout_expiry()
@@ -3293,7 +3396,11 @@ class RadioMonitor(xbmc.Monitor):
                             # Bei MB-Laenge: Laenge - SONG_TIMEOUT_EARLY_CLEAR_S.
                             # Ohne MB-Laenge greift SONG_TIMEOUT_FALLBACK_S.
                             if title and is_new_song:
-                                self._start_song_timeout(duration_ms)
+                                self._start_song_timeout(
+                                    duration_ms,
+                                    song_key=(artist or '', title or ''),
+                                    station_name=station_name
+                                )
 
                             # Artist-Info (Gründungsjahr + Mitglieder) erst NACH Artist-Property setzen.
                             # Grund: RadioMonitor.Artist ist der AS-Trigger – er darf nicht durch den
@@ -3416,9 +3523,78 @@ class RadioMonitor(xbmc.Monitor):
                             )
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
+                    station_for_policy = stream_info.get('station', '')
                     if startup_stable_confirmed or last_winner_source:
-                        self._refresh_api_nowplaying_property(stream_info.get('station', ''))
-                    self._update_station_profile(stream_info.get('station', ''))
+                        self._refresh_api_nowplaying_property(station_for_policy)
+                    self._update_station_profile(station_for_policy)
+
+                    if (
+                        self.song_end_detector_enabled
+                        and last_song_key[0]
+                        and last_song_key[1]
+                        and self._last_song_time
+                    ):
+                        aux_pairs = self._get_aux_source_pairs_for_song_end(station_for_policy)
+                        source_pairs = {
+                            'api': current_api_pair,
+                            'icy': current_icy_pair,
+                            'listitem': aux_pairs.get('listitem', ('', '')),
+                            'playing_item': aux_pairs.get('playing_item', ('', '')),
+                            'jsonrpc': aux_pairs.get('jsonrpc', ('', '')),
+                        }
+                        source_texts = {
+                            'api': self._label_from_pair(current_api_pair) or (WINDOW.getProperty(_P.API_NOW) or ''),
+                            'icy': stream_title or self._label_from_pair(current_icy_pair),
+                            'listitem': self._label_from_pair(aux_pairs.get('listitem')),
+                            'playing_item': self._label_from_pair(aux_pairs.get('playing_item')),
+                            'jsonrpc': self._label_from_pair(aux_pairs.get('jsonrpc')),
+                        }
+                        end_policy = self._get_station_song_end_policy(station_for_policy)
+                        detector_result = self.song_end_detector.evaluate(
+                            now_ts=time.time(),
+                            station_name=station_for_policy,
+                            last_song_key=last_song_key,
+                            song_started_ts=self._last_song_time,
+                            song_timeout_s=self._song_timeout,
+                            source_pairs=source_pairs,
+                            source_texts=source_texts,
+                            policy=end_policy,
+                        )
+                        matched_keywords = detector_result.get('matched_keywords') or []
+                        candidate_keywords = detector_result.get('candidate_keywords') or []
+                        if matched_keywords or candidate_keywords:
+                            keyword_candidates = list(dict.fromkeys(list(candidate_keywords) + list(matched_keywords)))
+                            self._record_station_keyword_stats(
+                                station_for_policy,
+                                candidates=keyword_candidates,
+                                matched_keywords=matched_keywords
+                            )
+                        if detector_result.get('should_clear'):
+                            detector_reason = detector_result.get('reason') or 'mehrere Evidenzen'
+                            log_info(
+                                f"Songende-Detektor geloest aus: reason='{detector_reason}', "
+                                f"matched={matched_keywords}"
+                            )
+                            self._clear_song_properties(
+                                reason_text=(
+                                    f"Songende-Detektor: loesche Song-Properties "
+                                    f"(reason={detector_reason})"
+                                ),
+                                last_song_key=last_song_key,
+                                enable_api_block=True
+                            )
+                            self._emit_analysis_event(
+                                station_name=station_for_policy,
+                                stream_title=stream_title,
+                                trigger_reason='song_end_detector',
+                                decision_source=last_winner_source,
+                                decision_pair=last_winner_pair,
+                                current_api_pair=current_api_pair,
+                                current_icy_pair=current_icy_pair,
+                                current_mp_pair=current_mp_pair,
+                                source_changed=False,
+                                note=f"song_end_detector_clear:{detector_reason}"
+                            )
                     # Laeuft jede Iteration (~1s) - kein extra Thread notwendig.
                     self._handle_song_timeout_expiry(
                         last_song_key=last_song_key,

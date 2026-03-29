@@ -6,6 +6,14 @@ from datetime import datetime
 
 from constants import (
     SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
+    SONG_END_DETECTOR_ENABLED,
+    SONG_END_HOLD_S,
+    SONG_END_MIN_KEYWORD_HITS,
+    SONG_END_MIN_NON_SONG_SOURCES,
+    SONG_END_MIN_SONG_AGE_S,
+    SONG_END_NEAR_TIMEOUT_S,
+    SONG_END_REQUIRE_ADDITIONAL_SIGNAL,
+    SONG_END_STALE_API_MIN_S,
     SOURCE_POLICY_SWITCH_MARGIN,
     STATION_PROFILE_ALPHA,
     STATION_PROFILE_CONFIDENCE_HIGH,
@@ -16,6 +24,7 @@ from constants import (
     STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX,
     STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN,
     STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX,
+    STATION_PROFILE_KEYWORD_STATS_MAX,
     STATION_PROFILE_MIN_SESSION_S,
     STATION_PROFILE_MIN_STABLE_SESSIONS,
 )
@@ -44,6 +53,19 @@ def _normalize_family(value):
     if family in FAMILIES:
         return family
     return ''
+
+
+def _default_song_end_policy():
+    return {
+        'enabled': bool(SONG_END_DETECTOR_ENABLED),
+        'min_song_age_s': float(SONG_END_MIN_SONG_AGE_S),
+        'hold_s': float(SONG_END_HOLD_S),
+        'min_keyword_hits': int(SONG_END_MIN_KEYWORD_HITS),
+        'min_non_song_sources': int(SONG_END_MIN_NON_SONG_SOURCES),
+        'require_additional_signal': bool(SONG_END_REQUIRE_ADDITIONAL_SIGNAL),
+        'stale_api_min_s': float(SONG_END_STALE_API_MIN_S),
+        'near_timeout_s': float(SONG_END_NEAR_TIMEOUT_S),
+    }
 
 
 def _valid_pair(pair):
@@ -330,6 +352,8 @@ class StationProfileStore:
             'mp_song_rate': 0.0,
             'mp_flip_rate': 0.0,
             'generic_keywords': [],
+            'keyword_stats': {},
+            'song_end_policy': _default_song_end_policy(),
             'icy_structural_generic': False,
             'mp_absent': False,
             'mp_noise': False,
@@ -353,6 +377,29 @@ class StationProfileStore:
             '_pending_icy_format_count': 0,
         }
 
+    def _normalize_song_end_policy(self, policy):
+        defaults = _default_song_end_policy()
+        data = policy if isinstance(policy, dict) else {}
+        normalized = dict(defaults)
+
+        if 'enabled' in data:
+            normalized['enabled'] = bool(data.get('enabled'))
+        for key in ('min_song_age_s', 'hold_s', 'stale_api_min_s', 'near_timeout_s'):
+            if key in data:
+                try:
+                    normalized[key] = max(0.0, float(data.get(key)))
+                except Exception:
+                    pass
+        for key in ('min_keyword_hits', 'min_non_song_sources'):
+            if key in data:
+                try:
+                    normalized[key] = max(1, int(data.get(key)))
+                except Exception:
+                    pass
+        if 'require_additional_signal' in data:
+            normalized['require_additional_signal'] = bool(data.get('require_additional_signal'))
+        return normalized
+
     def _ensure_profile(self, station_key):
         key = str(station_key or '')
         if not key:
@@ -368,6 +415,9 @@ class StationProfileStore:
         for field, value in defaults.items():
             if field not in profile:
                 profile[field] = value
+        profile['song_end_policy'] = self._normalize_song_end_policy(profile.get('song_end_policy'))
+        if not isinstance(profile.get('keyword_stats'), dict):
+            profile['keyword_stats'] = {}
         self._profiles[str(station_key)] = profile
         return profile
 
@@ -562,8 +612,67 @@ class StationProfileStore:
             if field not in profile:
                 profile[field] = value
                 self._dirty_keys.add(key)
+        profile['song_end_policy'] = self._normalize_song_end_policy(profile.get('song_end_policy'))
+        if not isinstance(profile.get('keyword_stats'), dict):
+            profile['keyword_stats'] = {}
+            self._dirty_keys.add(key)
         self._profiles[key] = profile
         return profile
+
+    def get_song_end_policy(self, station_key):
+        profile = self.get_profile(station_key)
+        if not isinstance(profile, dict):
+            return _default_song_end_policy()
+        return self._normalize_song_end_policy(profile.get('song_end_policy'))
+
+    def record_keyword_candidates(self, station_key, candidates, matched_keywords=None):
+        if not station_key:
+            return
+        profile = self._ensure_profile(station_key)
+        stats = profile.get('keyword_stats')
+        if not isinstance(stats, dict):
+            stats = {}
+
+        matched = set(
+            str(item or '').strip().lower()
+            for item in list(matched_keywords or [])
+            if str(item or '').strip()
+        )
+        today = _today_iso()
+        changed = False
+        for keyword in list(candidates or []):
+            token = str(keyword or '').strip().lower()
+            if not token:
+                continue
+            entry = stats.get(token)
+            if not isinstance(entry, dict):
+                entry = {'seen': 0, 'matched': 0, 'last_seen': ''}
+            entry['seen'] = int(entry.get('seen', 0)) + 1
+            if token in matched:
+                entry['matched'] = int(entry.get('matched', 0)) + 1
+            entry['last_seen'] = today
+            stats[token] = entry
+            changed = True
+
+        if not changed:
+            return
+
+        max_entries = int(STATION_PROFILE_KEYWORD_STATS_MAX)
+        if len(stats) > max_entries:
+            ranked = sorted(
+                stats.items(),
+                key=lambda kv: (
+                    int((kv[1] or {}).get('seen', 0)),
+                    int((kv[1] or {}).get('matched', 0)),
+                    str((kv[1] or {}).get('last_seen', '') or ''),
+                ),
+                reverse=True,
+            )
+            stats = dict(ranked[:max_entries])
+
+        profile['keyword_stats'] = stats
+        self._profiles[str(station_key)] = profile
+        self._dirty_keys.add(str(station_key))
 
     def _build_weights(self, profile):
         confidence = float(profile.get('confidence', 0.0))
