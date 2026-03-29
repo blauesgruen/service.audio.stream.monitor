@@ -148,7 +148,6 @@ class PropertyNames:
     RAW_LISTITEM = 'RadioMonitor.Source.ListItemRaw'
     RAW_PLAYER_ART = 'RadioMonitor.Source.PlayerArtRaw'
     RAW_RADIODE_WINDOW = 'RadioMonitor.Source.RadioDeWindowRaw'
-    RAW_RDS = 'RadioMonitor.Source.RDSRaw'
     RAW_API_RADIODE_DETAILS = 'RadioMonitor.Source.Api.RadioDeDetailsRaw'
     RAW_API_RADIODE_NOWPLAYING = 'RadioMonitor.Source.Api.RadioDeNowPlayingRaw'
     RAW_API_TUNEIN_JSON = 'RadioMonitor.Source.Api.TuneInJsonRaw'

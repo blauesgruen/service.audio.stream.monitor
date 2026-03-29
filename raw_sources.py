@@ -56,7 +56,6 @@ class RawSourceLabels:
         _P.RAW_LISTITEM,
         _P.RAW_PLAYER_ART,
         _P.RAW_RADIODE_WINDOW,
-        _P.RAW_RDS,
         _P.RAW_API_RADIODE_DETAILS,
         _P.RAW_API_RADIODE_NOWPLAYING,
         _P.RAW_API_TUNEIN_JSON,

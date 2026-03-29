@@ -1029,18 +1029,6 @@ class RadioMonitor(xbmc.Monitor):
         except Exception as e:
             log_debug(f"Fehler beim Erfassen JSON-RPC-Rohdaten: {e}")
 
-    def _capture_rds_raw(self):
-        try:
-            get_rds_tag = getattr(self.player, 'getRadioRDSInfoTag', None)
-            if not callable(get_rds_tag):
-                self.raw_sources.set_text(_P.RAW_RDS, '')
-                return
-            rds_tag = get_rds_tag()
-            rds_data = snapshot_getters(rds_tag)
-            self.raw_sources.set_json(_P.RAW_RDS, rds_data, max_len=12000)
-        except Exception as e:
-            log_debug(f"Fehler beim Erfassen RDS-Rohdaten: {e}")
-
     def _capture_logo_raw_sources(self, listitem_icon='', player_art=None):
         player_art = player_art or {}
         self.raw_sources.set_json(
@@ -2374,7 +2362,6 @@ class RadioMonitor(xbmc.Monitor):
                     info_tag = self.player.getMusicInfoTag()
                     mp_artist = (info_tag.getArtist() or '').strip()
                     mp_title = (info_tag.getTitle() or '').strip()
-                    self._capture_rds_raw()
                 except Exception as e:
                     log_debug(f"MusicPlayer-Fallback: Fehler beim Lesen der Metadaten: {e}")
                     WINDOW.clearProperty(_P.PLAYING)
@@ -3286,7 +3273,6 @@ class RadioMonitor(xbmc.Monitor):
                             
                             self._capture_playing_item_raw()
                             self._capture_jsonrpc_player_raw()
-                            self._capture_rds_raw()
                             
                             log_debug("========================")
                             
@@ -3355,7 +3341,6 @@ class RadioMonitor(xbmc.Monitor):
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
                     if startup_stable_confirmed or last_winner_source:
                         self._refresh_api_nowplaying_property(stream_info.get('station', ''))
-                    self._capture_rds_raw()
                     self._update_station_profile(stream_info.get('station', ''))
                     # Laeuft jede Iteration (~1s) - kein extra Thread notwendig.
                     self._handle_song_timeout_expiry(
@@ -3432,7 +3417,6 @@ class RadioMonitor(xbmc.Monitor):
                         self._capture_stream_url_raw(playing_file)
                         self._capture_playing_item_raw()
                         self._capture_jsonrpc_player_raw()
-                        self._capture_rds_raw()
                         self._ensure_api_source_from_context(playing_file, 'check_playing_new_url')
                         if self._can_use_tunein_api() and not self.tunein_station_id:
                             tunein_id = self._extract_tunein_station_id(playing_file)
