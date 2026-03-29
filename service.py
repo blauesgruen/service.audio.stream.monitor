@@ -3095,6 +3095,10 @@ class RadioMonitor(xbmc.Monitor):
                                 )
                                 last_winner_source = ''
                                 last_winner_pair = ('', '')
+                                # Kein verwertbares Ergebnis: initial_source_pending zuruecksetzen,
+                                # damit die Policy nicht sofort wieder triggert (Busy-Loop).
+                                # Bei naechstem echten StreamTitle-Wechsel wird es erneut gesetzt.
+                                initial_source_pending = False
                                 continue
                             
                             if stream_title not in INVALID_METADATA_VALUES:

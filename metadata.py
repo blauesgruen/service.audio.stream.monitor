@@ -179,6 +179,18 @@ def get_artist_variants(artist: str) -> List[str]:
         if slash_compact != artist:
             add_v(slash_compact)
 
+    # 5. Semikolon-Splitting fuer Duette/Kollaborationen:
+    # Manche Sender liefern "Artist1; Artist2" als kombinierten Artist-String.
+    # MusicBrainz kennt keinen Artist "Artist1; Artist2" – nur die Einzelkuenstler.
+    # Varianten: erster Kuenstler allein, zweiter allein, beide mit " & " und " feat. ".
+    if ';' in artist:
+        parts = [p.strip() for p in artist.split(';') if p.strip()]
+        if len(parts) >= 2:
+            add_v(parts[0])
+            add_v(parts[1])
+            add_v(f"{parts[0]} & {parts[1]}")
+            add_v(f"{parts[0]} feat. {parts[1]}")
+
     return variants
 
 
