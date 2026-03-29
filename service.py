@@ -2147,7 +2147,7 @@ class RadioMonitor(xbmc.Monitor):
         )
         log_info(
             f"MB-Winner: source={winner['source']} "
-            f"('{winner['mb_artist']} - {winner['mb_title']}'), "
+            f"('{winner['input_artist']} - {winner['input_title']}'), "
             f"score={winner['score']}, combined={winner['combined']:.1f}"
         )
         return winner, evaluations
@@ -2530,8 +2530,9 @@ class RadioMonitor(xbmc.Monitor):
                     _, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, duration_ms = \
                         _musicbrainz_query_recording(mp_title, mp_artist)
 
-                    artist = mb_artist or mp_artist
-                    title = mb_title or mp_title
+                    # MB darf Artist/Title nie ueberschreiben.
+                    artist = mp_artist
+                    title = mp_title
 
                     if generation != self.metadata_generation:
                         return
@@ -2833,8 +2834,8 @@ class RadioMonitor(xbmc.Monitor):
                     mp_pairs
                 )
             return (
-                winner['mb_artist'],
-                winner['mb_title'],
+                winner['input_artist'],
+                winner['input_title'],
                 winner['mb_album'],
                 winner['mb_album_date'],
                 winner['mbid'],
@@ -2863,8 +2864,8 @@ class RadioMonitor(xbmc.Monitor):
                         mp_pairs
                     )
                 return (
-                    fb_winner['mb_artist'],
-                    fb_winner['mb_title'],
+                    fb_winner['input_artist'],
+                    fb_winner['input_title'],
                     fb_winner['mb_album'],
                     fb_winner['mb_album_date'],
                     fb_winner['mbid'],
@@ -2947,6 +2948,8 @@ class RadioMonitor(xbmc.Monitor):
             return None, None, '', '', '', '', 0
 
         # MusicBrainz zur Verifikation und Vervollständigung
+        source_artist = artist
+        source_title = title
         mb_first_release = ''
         duration_ms = 0
         
@@ -2962,21 +2965,22 @@ class RadioMonitor(xbmc.Monitor):
             mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
 
         if uncertain:
-            # ICY-Standard beibehalten
-            mb_artist, mb_title = artist or None, title or None
+            # Unsicherer MB-Treffer: nur Zusatzdaten verwerfen.
             mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
             
-        if mb_artist in invalid: mb_artist = None
-        if mb_title in invalid:  mb_title  = None
-        if not mb_artist and not mb_title:
+        if source_artist in invalid:
+            source_artist = None
+        if source_title in invalid:
+            source_title = None
+        if not source_artist and not source_title:
             self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
 
-        self._set_last_song_decision('icy', mb_artist, mb_title)
+        self._set_last_song_decision('icy', source_artist, source_title)
         if self.mp_decision_enabled:
-            self._log_musicplayer_comparison('icy', (mb_artist, mb_title), mp_pairs)
-            self._update_musicplayer_trust_after_decision('icy', (mb_artist, mb_title), mp_pairs)
-        return mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
+            self._log_musicplayer_comparison('icy', (source_artist, source_title), mp_pairs)
+            self._update_musicplayer_trust_after_decision('icy', (source_artist, source_title), mp_pairs)
+        return source_artist, source_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
         
     def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
