@@ -115,6 +115,10 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 
 2. Starte Kodi neu. Das Service wird automatisch aktiviert und läuft im Hintergrund.
 
+## Support
+
+- Support-Thread (Kodinerds): https://www.kodinerds.net/thread/80816-release-audio-stream-monitor-service-addon/
+
 ## Technische Details
 
 ### ICY-Metadata
