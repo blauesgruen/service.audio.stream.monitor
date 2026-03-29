@@ -7,6 +7,12 @@ import xbmc
 from constants import ADDON_NAME, ADDON
 
 
+def _as_bool(value):
+    """Robustes Bool-Parsing fuer Kodi-Setting-Strings."""
+    text = str(value or "").strip().lower()
+    return text in ("true", "1", "yes", "on")
+
+
 def _is_debug_logging_enabled():
     """
     Liefert True, wenn Debug-Logging aktiv ist.
@@ -14,8 +20,10 @@ def _is_debug_logging_enabled():
     1) Addon-Setting 'debug_logging' (falls vorhanden)
     2) Kodi globales Debug-Flag
     """
+    # Wichtig: getSettingBool() kann in Kodi "Invalid setting type" ins Log schreiben,
+    # wenn das Setting fehlt oder anders typisiert ist. Deshalb nur String-API nutzen.
     try:
-        if ADDON.getSettingBool('debug_logging'):
+        if _as_bool(ADDON.getSetting('debug_logging')):
             return True
     except Exception:
         pass
