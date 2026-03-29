@@ -59,6 +59,11 @@ from metadata import (
     parse_stream_title_complex as _parse_metadata_complex,
     get_last_separator_variant as _get_last_separator_variant
 )
+from raw_candidate_extractors import (
+    extract_listitem_pair as _extract_listitem_pair,
+    extract_playing_item_pair as _extract_playing_item_pair,
+    extract_jsonrpc_pair as _extract_jsonrpc_pair,
+)
 
 
 # Window-Properties für die Skin
@@ -1068,6 +1073,12 @@ class RadioMonitor(xbmc.Monitor):
             winner_artist = (decision_pair[0] if decision_pair else '') or ''
             winner_title = (decision_pair[1] if decision_pair else '') or ''
             winner_pair_label = f"{winner_artist} - {winner_title}".strip(' -')
+            raw_listitem = WINDOW.getProperty(_P.RAW_LISTITEM) or ''
+            raw_playing_item = WINDOW.getProperty(_P.RAW_PLAYING_ITEM) or ''
+            raw_jsonrpc = WINDOW.getProperty(_P.RAW_JSONRPC_PLAYER) or ''
+            listitem_pair = _extract_listitem_pair(raw_listitem)
+            playing_item_pair = _extract_playing_item_pair(raw_playing_item)
+            jsonrpc_pair = _extract_jsonrpc_pair(raw_jsonrpc)
             event = {
                 'seq': self._analysis_seq,
                 'ts': round(time.time(), 3),
@@ -1084,6 +1095,9 @@ class RadioMonitor(xbmc.Monitor):
                 'candidates': {
                     'api': list(current_api_pair or ('', '')),
                     'icy': list(current_icy_pair or ('', '')),
+                    'listitem': list(listitem_pair or ('', '')),
+                    'playing_item': list(playing_item_pair or ('', '')),
+                    'jsonrpc': list(jsonrpc_pair or ('', '')),
                 },
                 'policy': dict(self._last_policy_context or {}),
                 'source_hints': self._get_station_profile_hints(station_name),
