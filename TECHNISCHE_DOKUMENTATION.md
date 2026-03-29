@@ -32,6 +32,10 @@ Wichtig:
   - Thread-safe MB Song-Cache mit TTL
 - `api_client.py`
   - HTTP-Client mit Retry + Exponential-Backoff
+- `source_policy.py`
+  - zustandsbasierte Trigger-Entscheidung ueber Quellenfamilien (`musicplayer`, `api`, `icy`)
+- `station_profiles.py`
+  - persistente Senderprofile je Station (EMA-Lernen, Confidence, Policy-Profilableitung)
 - `constants.py`
   - Endpunkte, Header, Timeouts, Property-Namen, Regex-Konstanten
 - `logger.py`
@@ -63,6 +67,9 @@ Wichtige Runtime-Felder in `RadioMonitor`:
 - `metadata_generation` (stale worker invalidation)
 - `api_source`, `use_api_fallback`, `station_slug`, `plugin_slug`, `tunein_station_id`, `station_logo`
 - `_last_song_time`, `_song_timeout` (song timeout management)
+- `source_policy`, `_last_policy_context`, `_policy_preferred_source`
+- `_profile_store`, `_station_profile_session`, `_active_policy_profile`, `_station_profile_policy_enabled`
+- `_session_icy_song_seen`, `_session_api_stable_pair`, `_session_api_stable_polls` (API-only Startup-Heuristik)
 
 Thread-Kontrolle:
 - `start_metadata_monitoring()` stoppt zuerst alten Worker, inkrementiert `metadata_generation`, startet neuen Thread
@@ -123,7 +130,7 @@ Im Loop:
   - parst Artist/Title via `parse_stream_title(stream_title, station_name, url)`
 - aktualisiert periodisch `RadioMonitor.ApiNowPlaying` aus der aktiven API-Quelle (throttled)
 
-### 6.2 parse_stream_title() Prioritaet
+### 6.2 parse_stream_title() und Source-Policy
 
 1. Kandidatenbildung (MusicPlayer + API + ICY)
 - MusicPlayer-Kandidaten (direkt + swapped)
@@ -153,6 +160,14 @@ Im Loop:
 - `identify_artist_title_via_musicbrainz(...)`
 - bei `uncertain=True` bleiben Eingabewerte konservativ erhalten, unsichere MB-Felder werden geleert
 
+6. Trigger-Entscheidung
+- `_determine_source_change_trigger(...)` delegiert die Trigger-Entscheidung an `SourcePolicy.decide_trigger(...)`.
+- Policy-Scoring basiert auf Validitaet, Generic-Anteil, Churn, Uebereinstimmung mit letzter Gewinnerquelle und Lead-Errors.
+- API-Konflikte werden nur noch gegen verlaessliche Vergleichsquellen geprueft:
+  - Vergleich via MusicPlayer nur wenn nicht `mp_absent`/`mp_noise`
+  - Vergleich via ICY nur wenn nicht `icy_structural_generic`
+- Bei gesetzter Gewinnerquelle bleiben Trigger konservativ; Quelle wechselt nur bei bestaetigten, plausiblen Signalen.
+
 ### 6.3 API-Fallback-Worker
 
 `api_metadata_worker()` (Intervall 10s):
@@ -174,6 +189,34 @@ Im Loop:
   - MB-Recording-Query fuer Normalisierung + MB-Felder
   - aktualisiert Logo optional aus `Player.Icon` (z.B. AzuraCast per-song Cover)
 - wenn keine verwertbaren Artist/Title-Daten mehr vorhanden: deaktiviert `Playing`
+
+### 6.5 Senderprofile und adaptive Policy
+
+`StationProfileStore` sammelt pro Station Session-Metriken und speichert sie in `profile_store/*.json`.
+
+Session-Metriken (Auszug):
+- Winner-Shares je Quellenfamilie
+- ICY-Generic-Rate
+- API-Verfuegbarkeit und API-Lag (in Poll-Zyklen)
+- MP-Zuverlaessigkeit, MP-Song-Rate, MP-Flip-Rate
+
+Ableitungen aus EMA-Profilen:
+- `icy_structural_generic`: ICY ist strukturell meist generisch
+- `mp_absent`: MusicPlayer liefert quasi nie Songdaten
+- `mp_noise`: MusicPlayer schwankt stark und ist dabei unzuverlaessig
+
+Policy-Integration:
+- Beim Start einer Stations-Session wird eine Profil-Session geoeffnet.
+- Das Policy-Profil wird erst aktiviert, wenn Startup stabil ist und verwertbare Daten vorliegen (ICY-Song oder API-only-Freigabe).
+- Bei Session-Ende werden Metriken in das Profil zurueckgeschrieben (Confidence/Felder aktualisiert).
+
+API-only Startup-Heuristik:
+- Falls ICY/MP initial nur generisch/leer sind, kann der "Initialer Song-Block" aufgehoben werden.
+- Voraussetzungen:
+  - API liefert ein nicht-generisches Song-Paar
+  - API-Paar ist ueber mindestens `STARTUP_API_ONLY_STABLE_POLLS` (aktuell `3`) Polls stabil
+  - in der Session wurde noch kein valider ICY-Song gesehen
+- Alternativ kann ein bestehendes Stationsprofil den API-only-Fall direkt freigeben (`confidence >= 0.20` plus Rollen-Flags).
 
 ## 7) Property-Contract (kritisch)
 
@@ -254,11 +297,12 @@ Timer-Debug-Properties:
 
 Nicht verletzen ohne expliziten Grund:
 - Property-Setzreihenfolge (insb. MBID vor Artist)
-- Source-Lock nach Erstentscheidung (Quellenwechsel nur bei fehlenden/ungueltigen Lock-Daten)
+- Source-Policy-Entscheidung nach Erstentscheidung (Quellenwechsel nur bei bestaetigten, plausiblen Signalen)
 - getrennte, aehnlich aussehende Property-Bloecke nicht blind zusammenfuehren
 - numerische ICY-Titel als "kein ICY" behandeln
 - MB-Cache bei StreamTitle-Wechsel invalidieren
 - API nur fuer whitelisted Quellen nutzen
+- API-only Startup-Bypass nur unter den vorgesehenen Heuristik-/Profilbedingungen aktivieren
 
 ## 11) Debugging-Playbook
 

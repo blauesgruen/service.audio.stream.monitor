@@ -18,9 +18,12 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
-- ✅ Source-Lock nach Erstentscheidung: nach gesetzter Quelle (MusicPlayer/API/ICY) werden Songwechsel nur noch an dieser Quelle erkannt; Wechsel nur bei ungueltigen/fehlenden Daten der Lock-Quelle
+- ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
+- ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
+- ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
+- ✅ Startup-Bypass fuer API-only-Sender: initialer Song-Block wird aufgehoben, wenn API stabil liefert und ICY/MusicPlayer keine belastbaren Songs liefern
 - ✅ `RadioMonitor.ApiNowPlaying` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel)
 - ✅ API/ICY-Property-Befuellung erst nach stabilem Start (Kodi-Buffering vorbei), Logo weiterhin sofort
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
@@ -131,6 +134,16 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
 - Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, bleibt bei aktivem Source-Lock die gelockte Quelle massgeblich; ohne Lock greifen die bestehenden Fallback-Regeln.
 
+### Source-Policy und Senderprofile
+- Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
+- Pro Station lernt das Addon ein Profil (`profile_store/*.json`) und uebergibt dieses als Policy-Profil an die Laufzeit.
+- Bei ausreichend hoher Profil-Confidence werden `weights`, `switch_margin` und `single_confirm_polls` adaptiv gesetzt.
+- Struktur-Flags werden aus EMA-Metriken abgeleitet:
+  - `icy_structural_generic` bei hoher ICY-Generic-Rate (>= `0.90`)
+  - `mp_absent` bei sehr niedriger MusicPlayer-Song-Rate (<= `0.05`)
+  - `mp_noise` bei hoher MP-Zustandsfluktuation (Flip-Rate >= `0.35` bei niedriger MP-Zuverlaessigkeit <= `0.25`)
+- Startup-Sonderfall API-only: Der initiale Generic-Programmblock wird aufgehoben, wenn API mindestens `3` stabile Polls dasselbe Song-Paar liefert und ICY/MP keine verwertbaren Song-Paare liefern.
+
 ### Modulstruktur
 
 | Modul | Inhalt |
@@ -140,6 +153,8 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 | `musicbrainz.py` | Alle MusicBrainz-API-Funktionen, Album-Auswahl, Artist-Info |
 | `radiode.py` | radio.de API Titel-Parser |
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
+| `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
+| `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
 | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
 | `api_client.py` | HTTP-Client mit Retry und Exponential-Backoff |
