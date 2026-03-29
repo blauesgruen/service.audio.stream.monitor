@@ -39,6 +39,8 @@ from logger import log_debug, log_info, log_warning, log_error
 from api_client import APIClient
 from source_policy import SourcePolicy
 from station_profiles import StationProfileStore
+from startup_qualifier import StartupQualifier
+from musicplayer_trust import MusicPlayerTrust
 from musicbrainz import (
     identify_artist_title_via_musicbrainz as _identify_artist_title_via_musicbrainz,
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
@@ -199,9 +201,6 @@ class RadioMonitor(xbmc.Monitor):
         self._api_timeout_block_key = ('', '')  # (artist, title)
         self._last_seen_api_key = ('', '')      # zuletzt gelesener API-Kandidat (artist, title)
         self._last_api_now_refresh_ts = 0.0
-        self._mp_trusted = False
-        self._mp_mismatch_count = 0
-        self._mp_trust_generation = 0
         self._latest_api_pair = ('', '')
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
@@ -219,15 +218,23 @@ class RadioMonitor(xbmc.Monitor):
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
-        self._session_icy_song_seen = False
-        self._session_api_stable_pair = ('', '')
-        self._session_api_stable_polls = 0
         self.source_policy = SourcePolicy(
             window=SOURCE_POLICY_WINDOW,
             switch_margin=SOURCE_POLICY_SWITCH_MARGIN,
             single_confirm_polls=SOURCE_POLICY_SINGLE_CONFIRM_POLLS
         )
         self._profile_store = self._init_station_profile_store()
+        self.musicplayer_trust = MusicPlayerTrust(
+            max_mismatches=self.MP_TRUST_MAX_MISMATCHES,
+            log_info=log_info,
+            log_debug=log_debug,
+            log_warning=log_warning
+        )
+        self.startup_qualifier = StartupQualifier(
+            has_non_generic_song_pair=self._has_non_generic_song_pair,
+            get_station_profile_hints=self._get_station_profile_hints,
+            api_only_stable_polls=STARTUP_API_ONLY_STABLE_POLLS
+        )
         self.api_client = APIClient(headers=DEFAULT_HTTP_HEADERS)
         
         # Event-Handler für Player-Events
@@ -547,79 +554,6 @@ class RadioMonitor(xbmc.Monitor):
             'mp_absent': bool(profile.get('mp_absent', False)),
         }
 
-    def _update_session_source_characteristics(self, current_api_pair, current_icy_pair, station_name=''):
-        if self._has_non_generic_song_pair(current_icy_pair, station_name):
-            self._session_icy_song_seen = True
-
-        if self._has_non_generic_song_pair(current_api_pair, station_name):
-            api_pair = (current_api_pair[0], current_api_pair[1])
-            if api_pair == self._session_api_stable_pair:
-                self._session_api_stable_polls += 1
-            else:
-                self._session_api_stable_pair = api_pair
-                self._session_api_stable_polls = 1
-            return
-
-        self._session_api_stable_pair = ('', '')
-        self._session_api_stable_polls = 0
-
-    def _session_api_only_ready(self, current_mp_pair, current_api_pair, current_icy_pair, station_name=''):
-        if self._has_non_generic_song_pair(current_mp_pair, station_name):
-            return False
-        if self._has_non_generic_song_pair(current_icy_pair, station_name):
-            return False
-        if self._session_icy_song_seen:
-            return False
-        if not self._has_non_generic_song_pair(current_api_pair, station_name):
-            return False
-        return self._session_api_stable_polls >= int(STARTUP_API_ONLY_STABLE_POLLS)
-
-    def _profile_api_only_ready(self, station_name, current_api_pair):
-        hints = self._get_station_profile_hints(station_name)
-        if hints['confidence'] < 0.20:
-            return False
-        if not hints['icy_structural_generic']:
-            return False
-        if not (hints['mp_noise'] or hints['mp_absent']):
-            return False
-        return self._has_non_generic_song_pair(current_api_pair, station_name)
-
-    def _should_bypass_initial_program_block(
-        self,
-        station_name,
-        current_mp_pair,
-        current_api_pair,
-        current_icy_pair
-    ):
-        if self._profile_api_only_ready(station_name, current_api_pair):
-            return True
-        return self._session_api_only_ready(
-            current_mp_pair,
-            current_api_pair,
-            current_icy_pair,
-            station_name
-        )
-
-    def _has_startup_source_consensus(self, current_mp_pair, current_api_pair, current_icy_pair, station_name=''):
-        if self._profile_api_only_ready(station_name, current_api_pair):
-            return True
-        if self._session_api_only_ready(current_mp_pair, current_api_pair, current_icy_pair, station_name):
-            return True
-
-        pairs = []
-        for pair in (current_mp_pair, current_api_pair, current_icy_pair):
-            if self._has_non_generic_song_pair(pair, station_name):
-                pairs.append((pair[0], pair[1]))
-        if len(pairs) < 2:
-            return False
-
-        counts = {}
-        for pair in pairs:
-            counts[pair] = int(counts.get(pair, 0)) + 1
-            if counts[pair] >= 2:
-                return True
-        return False
-
     def _classify_icy_format(self, stream_title, station_name=''):
         text = (stream_title or '').strip()
         if not text:
@@ -680,7 +614,7 @@ class RadioMonitor(xbmc.Monitor):
             self._is_song_pair(current_icy_pair)
             and not self._is_generic_song_pair(current_icy_pair, station_name)
         )
-        api_only_ready = self._profile_api_only_ready(station_name, current_api_pair)
+        api_only_ready = self.startup_qualifier.profile_api_only_ready(station_name, current_api_pair)
         if not (icy_song_ready or api_only_ready):
             return
 
@@ -754,12 +688,7 @@ class RadioMonitor(xbmc.Monitor):
 
     def _reset_musicplayer_trust_state(self, reason=''):
         """Setzt den MusicPlayer-Trust-Zustand zentral zurueck."""
-        was_trusted = self._mp_trusted
-        self._mp_trusted = False
-        self._mp_mismatch_count = 0
-        self._mp_trust_generation = self.metadata_generation
-        if reason and was_trusted:
-            log_debug(f"MusicPlayer-Trust zurueckgesetzt: {reason}")
+        self.musicplayer_trust.reset(self.metadata_generation, reason=reason)
 
     def _update_timeout_remaining_property(self):
         """Aktualisiert den verbleibenden Song-Timer fuer Skin-Debugging."""
@@ -887,9 +816,7 @@ class RadioMonitor(xbmc.Monitor):
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
-        self._session_icy_song_seen = False
-        self._session_api_stable_pair = ('', '')
-        self._session_api_stable_polls = 0
+        self.startup_qualifier.reset_session()
         self.source_policy = SourcePolicy(
             window=SOURCE_POLICY_WINDOW,
             switch_margin=SOURCE_POLICY_SWITCH_MARGIN,
@@ -1743,28 +1670,11 @@ class RadioMonitor(xbmc.Monitor):
 
     def _is_musicplayer_trusted(self):
         """MusicPlayer ist nur innerhalb der aktuellen Metadata-Generation vertrauenswürdig."""
-        return self._mp_trusted and self._mp_trust_generation == self.metadata_generation
-
-    def _mark_musicplayer_trusted(self, reason=''):
-        """Promotet MusicPlayer als vertrauenswürdige Songquelle."""
-        was_trusted = self._is_musicplayer_trusted()
-        self._mp_trusted = True
-        self._mp_trust_generation = self.metadata_generation
-        self._mp_mismatch_count = 0
-        if not was_trusted:
-            suffix = f" ({reason})" if reason else ""
-            log_info(f"MusicPlayer als Songquelle verifiziert{suffix}")
+        return self.musicplayer_trust.is_trusted(self.metadata_generation)
 
     def _register_musicplayer_mismatch(self, reason=''):
         """Registriert einen Trust-Fehler (z. B. fehlende/ungueltige MusicPlayer-Daten)."""
-        if not self._is_musicplayer_trusted():
-            return
-        self._mp_mismatch_count += 1
-        xbmc.log(
-            f"[{ADDON_NAME}] MusicPlayer-Widerspruch ({self._mp_mismatch_count}/{self.MP_TRUST_MAX_MISMATCHES})"
-            f"{': ' + reason if reason else ''}")
-        if self._mp_mismatch_count >= self.MP_TRUST_MAX_MISMATCHES:
-            self._reset_musicplayer_trust_state('zu viele Widersprueche')
+        self.musicplayer_trust.register_mismatch(self.metadata_generation, reason=reason)
 
     def _update_musicplayer_trust_after_decision(self, decision_source, decision_pair, mp_pairs):
         """
@@ -1773,20 +1683,12 @@ class RadioMonitor(xbmc.Monitor):
         - Trust wird nur dann aufgebaut, wenn eine externe Entscheidung (api/icy) den MP bestätigt.
         - Im MP-master Modus wird bei externem Widerspruch nicht automatisch de-vertraut.
         """
-        if not mp_pairs:
-            return
-        source = str(decision_source or '')
-        pair = decision_pair if decision_pair and decision_pair[0] and decision_pair[1] else None
-        mp_set = set(mp_pairs)
-
-        if source.startswith('musicplayer'):
-            if self._is_musicplayer_trusted():
-                self._mp_mismatch_count = 0
-            return
-
-        if source.startswith('api') or source.startswith('icy'):
-            if pair and pair in mp_set:
-                self._mark_musicplayer_trusted(f"Konsens mit {source}: '{pair[0]} - {pair[1]}'")
+        self.musicplayer_trust.update_after_decision(
+            self.metadata_generation,
+            decision_source,
+            decision_pair,
+            mp_pairs
+        )
 
     def _should_use_musicplayer_candidates(self, mp_pairs, api_candidate, icy_pairs, station_name=''):
         """
@@ -2457,7 +2359,7 @@ class RadioMonitor(xbmc.Monitor):
             station_name
         )
         if mp_pairs and self._is_musicplayer_trusted():
-            self._mp_mismatch_count = 0
+            self.musicplayer_trust.reset_mismatch_if_trusted(self.metadata_generation)
         elif not mp_pairs and self._is_musicplayer_trusted():
             self._register_musicplayer_mismatch('MusicPlayer leer/ungueltig')
 
@@ -2710,9 +2612,7 @@ class RadioMonitor(xbmc.Monitor):
         # Timer-Status beim Start des Workers sauber initialisieren.
         # Gilt auch für den No-ICY-Pfad (API/MusicPlayer-Fallback).
         self._reset_song_timeout_state(clear_debug=True)
-        self._session_icy_song_seen = False
-        self._session_api_stable_pair = ('', '')
-        self._session_api_stable_polls = 0
+        self.startup_qualifier.reset_session()
 
         stream_info = self.parse_icy_metadata(url)
         if not stream_info:
@@ -2822,7 +2722,7 @@ class RadioMonitor(xbmc.Monitor):
                             log_debug(f"Neuer StreamTitle erkannt: '{stream_title}'")
                             self._last_icy_format_hint = self._classify_icy_format(stream_title, station_name)
 
-                        self._update_session_source_characteristics(
+                        self.startup_qualifier.update_session_characteristics(
                             current_api_pair,
                             current_icy_pair,
                             station_name
@@ -2883,7 +2783,7 @@ class RadioMonitor(xbmc.Monitor):
                             and startup_qualify_until_ts > 0.0
                             and time.time() < startup_qualify_until_ts
                         )
-                        startup_consensus = self._has_startup_source_consensus(
+                        startup_consensus = self.startup_qualifier.has_startup_source_consensus(
                             current_mp_pair,
                             current_api_pair,
                             current_icy_pair,
@@ -2925,7 +2825,7 @@ class RadioMonitor(xbmc.Monitor):
                             and not self._has_non_generic_song_pair(current_mp_pair, station_name)
                         )
                         if initial_program_block and source_changed_trigger:
-                            if self._should_bypass_initial_program_block(
+                            if self.startup_qualifier.should_bypass_initial_program_block(
                                 station_name,
                                 current_mp_pair,
                                 current_api_pair,
