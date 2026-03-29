@@ -420,7 +420,12 @@ class SourcePolicy:
             and pairs['icy'] != last_winner_pair
             and not self._contains_station(pairs['icy'], station_name)
         ):
-            if preferred == 'icy' or (preferred == '' and not self._valid_pair(pairs['api'])):
+            api_is_stale = self._valid_pair(api_pair) and api_pair == last_winner_pair
+            if (
+                preferred == 'icy'
+                or (preferred == '' and not self._valid_pair(api_pair))
+                or api_is_stale
+            ):
                 if self._confirm('icy', pairs['icy'], 1):
                     return _finish(True, reasons['icy_stale'])
 
