@@ -12,6 +12,10 @@ from constants import (
     STATION_PROFILE_CONFIDENCE_LOW,
     STATION_PROFILE_DIRNAME,
     STATION_PROFILE_FILENAME,
+    STATION_PROFILE_ICY_STRUCTURAL_GENERIC_THRESHOLD,
+    STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX,
+    STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN,
+    STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX,
     STATION_PROFILE_MIN_SESSION_S,
     STATION_PROFILE_MIN_STABLE_SESSIONS,
 )
@@ -77,6 +81,9 @@ class StationProfileSession:
         self.mp_song_samples = 0
         self.mp_match_samples = 0
         self.mp_other_song_samples = 0
+        self._last_mp_state = ''
+        self.mp_state_flips = 0
+        self.mp_state_observations = 0
 
         self.api_lag_sum = 0.0
         self.api_lag_count = 0
@@ -119,6 +126,11 @@ class StationProfileSession:
                     self.mp_match_samples += 1
                 if src.get('other_song'):
                     self.mp_other_song_samples += 1
+            if family == 'musicplayer':
+                self.mp_state_observations += 1
+                if self._last_mp_state and state != self._last_mp_state:
+                    self.mp_state_flips += 1
+                self._last_mp_state = state
 
         if api_has_data_now:
             self.api_present_samples += 1
@@ -172,6 +184,8 @@ class StationProfileSession:
 
         mp_match_rate = _safe_div(self.mp_match_samples, self.mp_song_samples)
         mp_other_rate = _safe_div(self.mp_other_song_samples, self.mp_song_samples)
+        mp_song_rate = _safe_div(self.mp_song_samples, self.polls)
+        mp_flip_rate = _safe_div(self.mp_state_flips, max(0, self.mp_state_observations - 1))
         mp_reliable = bool(
             self.mp_song_samples >= 3
             and mp_match_rate >= 0.65
@@ -198,6 +212,8 @@ class StationProfileSession:
             'api_available': api_available,
             'api_lag_cycles': api_lag_cycles,
             'mp_reliable': mp_reliable,
+            'mp_song_rate': mp_song_rate,
+            'mp_flip_rate': mp_flip_rate,
             'format_shares': format_shares,
             'icy_format': icy_format,
         }
@@ -311,6 +327,11 @@ class StationProfileStore:
             'api_available': False,
             'api_lag_cycles': 0.0,
             'mp_reliable': False,
+            'mp_song_rate': 0.0,
+            'mp_flip_rate': 0.0,
+            'icy_structural_generic': False,
+            'mp_absent': False,
+            'mp_noise': False,
             'confidence': 0.25,
             'sessions': 0,
             'sessions_above_threshold': 0,
@@ -323,6 +344,8 @@ class StationProfileStore:
             'api_available_ema': 0.0,
             'api_lag_cycles_ema': 0.0,
             'mp_reliable_ema': 0.0,
+            'mp_song_rate_ema': 0.0,
+            'mp_flip_rate_ema': 0.0,
             '_pending_dominant_source': '',
             '_pending_dominant_count': 0,
             '_pending_icy_format': '',
@@ -396,6 +419,8 @@ class StationProfileStore:
         profile['icy_generic_rate_ema'] = (1.0 - alpha) * float(profile.get('icy_generic_rate_ema', 0.0)) + alpha * float(metrics['icy_generic_rate'])
         profile['api_available_ema'] = (1.0 - alpha) * float(profile.get('api_available_ema', 0.0)) + alpha * (1.0 if metrics['api_available'] else 0.0)
         profile['mp_reliable_ema'] = (1.0 - alpha) * float(profile.get('mp_reliable_ema', 0.0)) + alpha * (1.0 if metrics['mp_reliable'] else 0.0)
+        profile['mp_song_rate_ema'] = (1.0 - alpha) * float(profile.get('mp_song_rate_ema', 0.0)) + alpha * float(metrics.get('mp_song_rate', 0.0))
+        profile['mp_flip_rate_ema'] = (1.0 - alpha) * float(profile.get('mp_flip_rate_ema', 0.0)) + alpha * float(metrics.get('mp_flip_rate', 0.0))
 
         if metrics['api_lag_cycles'] is not None:
             profile['api_lag_cycles_ema'] = (1.0 - alpha) * float(profile.get('api_lag_cycles_ema', 0.0)) + alpha * float(metrics['api_lag_cycles'])
@@ -484,11 +509,41 @@ class StationProfileStore:
         profile['icy_generic_rate'] = round(float(profile.get('icy_generic_rate_ema', 0.0)), 3)
         profile['api_available'] = bool(float(profile.get('api_available_ema', 0.0)) >= 0.35)
         profile['mp_reliable'] = bool(float(profile.get('mp_reliable_ema', 0.0)) >= 0.60)
+        profile['mp_song_rate'] = round(float(profile.get('mp_song_rate_ema', 0.0)), 3)
+        profile['mp_flip_rate'] = round(float(profile.get('mp_flip_rate_ema', 0.0)), 3)
 
         api_lag = float(profile.get('api_lag_cycles_ema', 0.0))
         profile['api_lag_cycles'] = round(api_lag, 2) if api_lag > 0 else 0.0
 
+        role_flags = self._derive_source_role_flags(profile)
+        profile['icy_structural_generic'] = bool(role_flags.get('icy_structural_generic'))
+        profile['mp_absent'] = bool(role_flags.get('mp_absent'))
+        profile['mp_noise'] = bool(role_flags.get('mp_noise'))
+
         profile['profile_alpha'] = float(profile.get('profile_alpha', self.alpha))
+
+    def _derive_source_role_flags(self, profile):
+        icy_generic_rate = float(profile.get('icy_generic_rate_ema', 0.0))
+        mp_song_rate = float(profile.get('mp_song_rate_ema', 0.0))
+        mp_flip_rate = float(profile.get('mp_flip_rate_ema', 0.0))
+        mp_reliable_ema = float(profile.get('mp_reliable_ema', 0.0))
+
+        icy_structural_generic = bool(
+            icy_generic_rate >= float(STATION_PROFILE_ICY_STRUCTURAL_GENERIC_THRESHOLD)
+        )
+        mp_absent = bool(
+            mp_song_rate <= float(STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX)
+        )
+        mp_noise = bool(
+            (not mp_absent)
+            and mp_flip_rate >= float(STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN)
+            and mp_reliable_ema <= float(STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX)
+        )
+        return {
+            'icy_structural_generic': icy_structural_generic,
+            'mp_absent': mp_absent,
+            'mp_noise': mp_noise,
+        }
 
     def get_profile(self, station_key):
         if not station_key:
@@ -543,6 +598,9 @@ class StationProfileStore:
                 'weights': {family: 1.0 for family in FAMILIES},
                 'switch_margin': None,
                 'single_confirm_polls': None,
+                'icy_structural_generic': False,
+                'mp_absent': False,
+                'mp_noise': False,
             }
 
         confidence = float(profile.get('confidence', 0.0))
@@ -573,12 +631,16 @@ class StationProfileStore:
                 if lag > 0:
                     single_confirm_polls = max(single_confirm_polls, min(5, int(round(lag))))
 
+        role_flags = self._derive_source_role_flags(profile)
         return {
             'confidence': round(confidence, 3),
             'preferred_family': preferred,
             'weights': self._build_weights(profile),
             'switch_margin': switch_margin,
             'single_confirm_polls': single_confirm_polls,
+            'icy_structural_generic': bool(role_flags.get('icy_structural_generic')),
+            'mp_absent': bool(role_flags.get('mp_absent')),
+            'mp_noise': bool(role_flags.get('mp_noise')),
         }
 
     def flush_if_due(self, min_interval_s=30.0):

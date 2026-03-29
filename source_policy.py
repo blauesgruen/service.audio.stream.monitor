@@ -51,6 +51,9 @@ class SourcePolicy:
         self._profile_preferred_family = ''
         self._profile_switch_margin = None
         self._profile_single_confirm_polls = None
+        self._icy_structural_generic = False
+        self._mp_absent = False
+        self._mp_noise = False
 
         self._pending_source = ''
         self._pending_pair = ('', '')
@@ -171,6 +174,10 @@ class SourcePolicy:
             except Exception:
                 self._profile_single_confirm_polls = None
 
+        self._icy_structural_generic = bool(data.get('icy_structural_generic', False))
+        self._mp_absent = bool(data.get('mp_absent', False))
+        self._mp_noise = bool(data.get('mp_noise', False))
+
         self.set_learned_weights(data.get('weights') or {})
 
     def clear_station_profile(self):
@@ -178,15 +185,48 @@ class SourcePolicy:
         self._profile_preferred_family = ''
         self._profile_switch_margin = None
         self._profile_single_confirm_polls = None
+        self._icy_structural_generic = False
+        self._mp_absent = False
+        self._mp_noise = False
         self.set_learned_weights({})
+
+    def _mp_unusable(self):
+        return bool(self._mp_absent or self._mp_noise)
+
+    def _api_reliable_comparator_conflicts(self, api_pair, mp_pair, icy_pair):
+        """
+        Liefert die Anzahl valider Vergleichsquellen und wie viele davon API widersprechen.
+        Quellen, die der Senderprofil-Analyse nach strukturell unbrauchbar sind, werden ignoriert.
+        """
+        comparator_count = 0
+        conflict_count = 0
+
+        mp_reliable_comparator = not self._mp_unusable()
+        icy_reliable_comparator = not self._icy_structural_generic
+
+        if mp_reliable_comparator and self._valid_pair(mp_pair):
+            comparator_count += 1
+            if mp_pair != api_pair:
+                conflict_count += 1
+
+        if icy_reliable_comparator and self._valid_pair(icy_pair):
+            comparator_count += 1
+            if icy_pair != api_pair:
+                conflict_count += 1
+
+        return comparator_count, conflict_count
 
     def _preferred_family(self, valid_pairs, last_winner_family):
         if not valid_pairs:
             return ''
 
         # MP hat Prioritaet, sobald valide Songdaten vorliegen.
-        # Generische MP-Daten werden bereits im Service gefiltert.
-        if 'musicplayer' in valid_pairs and self._valid_pair(valid_pairs.get('musicplayer')):
+        # Ausnahme: Senderprofil markiert MP als strukturell unbrauchbar (absent/noise).
+        if (
+            'musicplayer' in valid_pairs
+            and self._valid_pair(valid_pairs.get('musicplayer'))
+            and not self._mp_unusable()
+        ):
             return 'musicplayer'
 
         ranked = sorted(
@@ -342,9 +382,12 @@ class SourcePolicy:
         # Active source reports a real track change.
         if self._valid_pair(active_pair) and active_pair != last_winner_pair:
             if winner_family == 'api':
-                mp_conflict = self._valid_pair(mp_pair) and mp_pair != active_pair
-                icy_conflict = self._valid_pair(icy_pair) and icy_pair != active_pair
-                if mp_conflict and icy_conflict:
+                comparator_count, conflict_count = self._api_reliable_comparator_conflicts(
+                    active_pair,
+                    mp_pair,
+                    icy_pair
+                )
+                if comparator_count > 0 and conflict_count == comparator_count:
                     self.mark_lead_error('api')
                     self._reset_confirm()
                     return _finish(False, reasons['api'])
