@@ -182,11 +182,86 @@ def get_artist_variants(artist: str) -> List[str]:
     return variants
 
 
+# --- Generik-Filter ---
+
+def is_song_pair(pair) -> bool:
+    """Prueft ob ein (artist, title)-Tupel beide Felder belegt hat."""
+    return bool(pair and pair[0] and pair[1])
+
+
+def is_generic_metadata_text(text: str, station_name: str = '', extra_keywords=()) -> bool:
+    """
+    Prueft ob ein Metadaten-Text generisch ist (Sendername oder bekannte Keywords enthalten).
+    extra_keywords: sendersspezifische Schluesselbegriffe aus dem Stationsprofil.
+    """
+    text_l = str(text or '').strip().lower()
+    if not text_l:
+        return False
+    station_l = (station_name or '').strip().lower()
+    if station_l and station_l in text_l:
+        return True
+    return any(token in text_l for token in extra_keywords)
+
+
+def is_generic_song_pair(pair, station_name: str = '', extra_keywords=()) -> bool:
+    """
+    Prueft ob ein (artist, title)-Paar generisch ist.
+    Verwendet is_generic_metadata_text fuer alle Felder inkl. Kombination.
+    """
+    if not is_song_pair(pair):
+        return False
+    a_l = str(pair[0] or '').strip().lower()
+    t_l = str(pair[1] or '').strip().lower()
+    return (
+        is_generic_metadata_text(a_l, station_name, extra_keywords)
+        or is_generic_metadata_text(t_l, station_name, extra_keywords)
+        or is_generic_metadata_text(f"{a_l} - {t_l}", station_name, extra_keywords)
+    )
+
+
+def has_non_generic_song_pair(pair, station_name: str = '', extra_keywords=()) -> bool:
+    """Gibt True zurueck wenn das Paar belegt und nicht generisch ist."""
+    return is_song_pair(pair) and not is_generic_song_pair(pair, station_name, extra_keywords)
+
+
+def filter_non_generic_song_pairs(pairs, station_name: str = '', extra_keywords=()):
+    """Filtert eine Liste von (artist, title)-Paaren – nur nicht-generische Paare bleiben."""
+    return [p for p in (pairs or []) if has_non_generic_song_pair(p, station_name, extra_keywords)]
+
+
+def append_non_generic_candidate(candidates: list, source: str, artist, title,
+                                 station_name: str = '', extra_keywords=(),
+                                 log_fn=None) -> bool:
+    """
+    Fuegt einen Kandidaten zur Liste hinzu, sofern er nicht generisch ist.
+    Gibt True zurueck wenn der Kandidat hinzugefuegt wurde.
+    log_fn: optionales callable(msg) fuer Debug-Ausgaben.
+    """
+    pair = (str(artist or '').strip(), str(title or '').strip())
+    if not is_song_pair(pair):
+        return False
+    if is_generic_song_pair(pair, station_name, extra_keywords):
+        if log_fn:
+            log_fn(
+                f"Kandidat verworfen (generisch): source='{source}', "
+                f"pair='{pair[0]} - {pair[1]}'"
+            )
+        return False
+    candidates.append({'source': source, 'artist': pair[0], 'title': pair[1]})
+    return True
+
+
 __all__ = [
     'extract_stream_title',
     'parse_stream_title_simple',
     'parse_stream_title_complex',
     'get_last_separator_variant',
     'clean_title_part',
-    'get_artist_variants'
+    'get_artist_variants',
+    'is_song_pair',
+    'is_generic_metadata_text',
+    'is_generic_song_pair',
+    'has_non_generic_song_pair',
+    'filter_non_generic_song_pairs',
+    'append_non_generic_candidate',
 ]

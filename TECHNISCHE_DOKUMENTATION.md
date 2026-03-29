@@ -23,11 +23,13 @@ Wichtig:
 - `service.py`
   - Runtime-Orchestrierung, Worker-Threads, Fallback-Reihenfolge, Property-Write/Clear-Logik
 - `metadata.py`
-  - ICY `StreamTitle` Extraktion, Trennung Artist/Title, Trennzeichenlogik, Titel-Bereinigung, Artist-Varianten
+  - ICY `StreamTitle` Extraktion, Trennung Artist/Title, Trennzeichenlogik, Titel-Bereinigung, Artist-Varianten, Generik-Filter-Funktionen
 - `musicbrainz.py`
   - Matching-Entscheidungen, Recording/Artist Lookups, Album-Auswahl, Song-Kontext-Aufloesung, Similarity
 - `radiode.py`
-  - Parsing des radio.de now-playing Titelformats
+  - Parsing des radio.de now-playing Titelformats, Now-Playing-Abfrage (Slug/Suche), Logo-Aufloesung
+- `tunein.py`
+  - Station-ID-Erkennung aus Plugin-URL, Parsing TuneIn-Titelformate (JSON/Text), Now-Playing-Abfrage
 - `cache.py`
   - Thread-safe MB Song-Cache mit TTL
 - `api_client.py`
@@ -139,8 +141,9 @@ Im Loop:
 
 2. MB-Winner
 - jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
-- Winner nur oberhalb der Schwellwerte
+- Winner nur oberhalb der Schwellwerte (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
 - Tie-Break bei Gleichstand: ICY wird bevorzugt
+- MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte
 
 3. Sonderfall alle MB-Scores = 0
 - bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich (kein API-Override gegen Lock)
@@ -159,6 +162,7 @@ Im Loop:
 5. MB-Entscheidung fuer ICY-Fallback
 - `identify_artist_title_via_musicbrainz(...)`
 - bei `uncertain=True` bleiben Eingabewerte konservativ erhalten, unsichere MB-Felder werden geleert
+- MB-Bereinigung: wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`, werden `display_artist`/`display_title` auf MB-Werte korrigiert; Quellentracking (`_set_last_song_decision`) nutzt unveraendert die Originalwerte
 
 6. Trigger-Entscheidung
 - `_determine_source_change_trigger(...)` delegiert die Trigger-Entscheidung an `SourcePolicy.decide_trigger(...)`.
@@ -176,6 +180,7 @@ Im Loop:
 - bei Artist+Title:
   - MB-Validierung/Anreicherung
   - MB-Felder nur behalten wenn MB zum API-Titel plausibel passt
+  - MB-Bereinigung: `display_artist`/`display_title` werden auf MB-Werte korrigiert wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; Titelwechsel-Erkennung verwendet stets den originalen API-Wert
 - bei nur Title:
   - Artist/MBID werden bewusst nicht aggressiv geloescht (stabileres AS-Verhalten)
 - `RadioMonitor.ApiNowPlaying` zeigt nur echte API-Titel (radio.de/TuneIn), nicht MusicPlayer-Fallback
@@ -187,6 +192,7 @@ Im Loop:
 - pollt `MusicInfoTag` Artist/Title auf Aenderung
 - bei Aenderung:
   - MB-Recording-Query fuer Normalisierung + MB-Felder
+  - MB-Bereinigung: wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`, werden die Labels auf MB-Werte korrigiert; andernfalls werden die MusicPlayer-Originalwerte beibehalten
   - aktualisiert Logo optional aus `Player.Icon` (z.B. AzuraCast per-song Cover)
 - wenn keine verwertbaren Artist/Title-Daten mehr vorhanden: deaktiviert `Playing`
 
@@ -274,9 +280,13 @@ Timer-Debug-Properties:
 - Q2: `recording:part2 AND artistname:part1`
 - Q3 Fallback (nur Titel) wenn Q1+Q2 keine Treffer liefern
 - Entscheidung ueber kombinierten Wert: `MB score * artist similarity`
-- Schwellwerte:
-  - `MIN_SCORE = 85`
-  - `THRESHOLD = 0.7`
+- Schwellwerte Kandidatenauswahl:
+  - `MB_WINNER_MIN_SCORE = 60`
+  - `MB_WINNER_MIN_COMBINED = 55.0`
+- Schwellwert Label-Bereinigung:
+  - `MB_LABEL_CORRECTION_MIN_SIM = 0.85` (gilt fuer artist_sim UND title_sim gleichzeitig)
+  - nur wenn beide Aehnlichkeiten >= 0.85: Labels werden auf MB-Schreibweise korrigiert
+  - sonst: Originalwerte aus der Quelle bleiben als Labels erhalten
 
 ### 9.2 Album-/FirstRelease-Auswahl
 
@@ -303,6 +313,8 @@ Nicht verletzen ohne expliziten Grund:
 - MB-Cache bei StreamTitle-Wechsel invalidieren
 - API nur fuer whitelisted Quellen nutzen
 - API-only Startup-Bypass nur unter den vorgesehenen Heuristik-/Profilbedingungen aktivieren
+- MB-Bereinigung nur wenn beide Aehnlichkeitsschwellen erfuellt (`MB_LABEL_CORRECTION_MIN_SIM`); MB darf Labels niemals komplett ersetzen wenn der Treffer ein anderer Song ist
+- Quellentracking (`_set_last_song_decision`) immer mit Originalwerten aus der Quelle – nie mit MB-korrigierten Werten
 
 ## 11) Debugging-Playbook
 
@@ -326,7 +338,7 @@ Skin-Debug-Anzeige:
 ## 12) Erweiterungspunkte
 
 Sichere Erweiterungen:
-- neue API-Quelle in `get_nowplaying_from_apis()` integrieren
+- neue API-Quelle als eigenes Modul (analog `radiode.py`/`tunein.py`) anlegen und in `get_nowplaying_from_apis()` integrieren
 - neue Normalisierungen in `metadata.py` ergaenzen
 - zusaetzliche MB-Heuristiken in `musicbrainz.py` hinter bestehende Schwellenwerte legen
 

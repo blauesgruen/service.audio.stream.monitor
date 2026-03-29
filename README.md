@@ -12,8 +12,9 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Auslesen von ICY-Metadaten (Icecast/Shoutcast)
 - ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format, last-separator-Variante)
 - ✅ Stationsname-Filterung: ICY-Strings, die nur den Sendernamen enthalten, werden nicht als Artist/Title übernommen
-- ✅ MusicBrainz-Abgleich zur Validierung und Korrektur von Artist, Title, Album, AlbumDate, FirstRelease und MBID
-- ✅ Konservative MB-Entscheidung bei vertauschten Kandidaten über kombinierten Score (`MB score * artist similarity`) mit Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`)
+- ✅ MusicBrainz-Abgleich zur Kandidatenauswahl und Datenanreicherung (Album, AlbumDate, FirstRelease, MBID, Genre, Banddaten)
+- ✅ MB-Bereinigung der Schreibweise: Artist/Title werden korrigiert wenn MB eindeutig denselben Song bestätigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei komplett anderem MB-Treffer bleiben Originalwerte erhalten
+- ✅ Konservative MB-Kandidatenauswahl über kombinierten Score (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
 - ✅ Erweitertes Artist-Matching: CamelCase-Splitting ("DeBurgh" → "De Burgh"), Komma-Umkehr, Apostroph-Normalisierung und tokenbasierter Fallback
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
@@ -135,7 +136,8 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 ### API-Whitelist und MB-Schwelle
 - API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
-- Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierte Bewertung (`MB score * artist similarity`) und akzeptiert Korrekturen erst oberhalb der Schwellen (`MIN_SCORE=85`, `THRESHOLD=0.7`).
+- Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierten Score (`MB score * artist similarity`) und akzeptiert Kandidaten erst oberhalb der Schwellen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`).
+- MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
 - Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, bleibt bei aktivem Source-Lock die gelockte Quelle massgeblich; ohne Lock greifen die bestehenden Fallback-Regeln.
 
 ### Source-Policy und Senderprofile
@@ -145,17 +147,18 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - Struktur-Flags werden aus EMA-Metriken abgeleitet:
   - `icy_structural_generic` bei hoher ICY-Generic-Rate (>= `0.90`)
   - `mp_absent` bei sehr niedriger MusicPlayer-Song-Rate (<= `0.05`)
-  - `mp_noise` bei hoher MP-Zustandsfluktuation (Flip-Rate >= `0.35` bei niedriger MP-Zuverlaessigkeit <= `0.25`)
+  - `mp_noise` bei hoher MP-Zustandsfluktuation (Flip-Rate >= `0.30` bei niedriger MP-Zuverlaessigkeit <= `0.25`)
 - Startup-Sonderfall API-only: Der initiale Generic-Programmblock wird aufgehoben, wenn API mindestens `3` stabile Polls dasselbe Song-Paar liefert und ICY/MP keine verwertbaren Song-Paare liefern.
 
 ### Modulstruktur
 
 | Modul | Inhalt |
 |-------|--------|
-| `metadata.py` | Metadaten-Parsing & Normalisierung, ICY-Extraktion, Artist-Varianten |
+| `metadata.py` | Metadaten-Parsing & Normalisierung, ICY-Extraktion, Artist-Varianten, Generik-Filter |
 | `service.py` | PlayerMonitor, RadioMonitor, Service-Steuerung, Property-Management |
 | `musicbrainz.py` | Alle MusicBrainz-API-Funktionen, Album-Auswahl, Artist-Info |
-| `radiode.py` | radio.de API Titel-Parser |
+| `radiode.py` | radio.de API: Titel-Parser und Now-Playing-Abfrage |
+| `tunein.py` | TuneIn API: Station-ID-Erkennung, Titel-Parser und Now-Playing-Abfrage |
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
 | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |

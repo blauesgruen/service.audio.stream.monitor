@@ -39,6 +39,9 @@ TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
 # MB-Kandidat-Auswahl
 MB_WINNER_MIN_SCORE = 60
 MB_WINNER_MIN_COMBINED = 55.0
+# MB-Bereinigung: Mindest-Aehnlichkeit damit MB den Artist/Title-Label korrigieren darf.
+# Unter diesem Schwellwert wird der Originalwert aus der Quelle behalten.
+MB_LABEL_CORRECTION_MIN_SIM = 0.85
 MP_TRUST_MAX_MISMATCHES = 2
 MP_DECISION_ENABLED = False
 

@@ -14,8 +14,7 @@ except Exception:  # pragma: no cover - Kodi runtime dependency
 # --- Modul-Imports ---
 from constants import (
     ADDON, ADDON_ID, ADDON_NAME, ADDON_VERSION,
-    RADIODE_SEARCH_API_URL, RADIODE_NOWPLAYING_API_URL, RADIODE_DETAILS_API_URL,
-    TUNEIN_DESCRIBE_API_URL, TUNEIN_TUNE_API_URL,
+    RADIODE_SEARCH_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
     SONG_END_DETECTOR_ENABLED, SONG_END_MIN_SONG_AGE_S, SONG_END_HOLD_S,
@@ -32,6 +31,7 @@ from constants import (
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
     MB_WINNER_MIN_SCORE as _MB_WINNER_MIN_SCORE,
     MB_WINNER_MIN_COMBINED as _MB_WINNER_MIN_COMBINED,
+    MB_LABEL_CORRECTION_MIN_SIM as _MB_LABEL_CORRECTION_MIN_SIM,
     MP_TRUST_MAX_MISMATCHES as _MP_TRUST_MAX_MISMATCHES,
     MP_DECISION_ENABLED as _MP_DECISION_ENABLED,
     TRIGGER_TITLE_CHANGE as _TRIGGER_TITLE_CHANGE,
@@ -57,12 +57,25 @@ from musicbrainz import (
     mb_similarity as _mb_similarity,
     _mb_cache,
 )
-from radiode import parse_radiode_api_title as _parse_radiode_api_title
+from radiode import (
+    parse_radiode_api_title as _parse_radiode_api_title,
+    get_nowplaying as _radiode_get_nowplaying,
+)
+from tunein import (
+    extract_station_id as _tunein_extract_station_id,
+    get_nowplaying as _tunein_get_nowplaying,
+)
 from metadata import (
     extract_stream_title as _extract_stream_title,
     parse_stream_title_simple as _parse_stream_title_simple,
     parse_stream_title_complex as _parse_metadata_complex,
-    get_last_separator_variant as _get_last_separator_variant
+    get_last_separator_variant as _get_last_separator_variant,
+    is_song_pair as _is_song_pair,
+    is_generic_metadata_text as _is_generic_metadata_text,
+    is_generic_song_pair as _is_generic_song_pair,
+    has_non_generic_song_pair as _has_non_generic_song_pair,
+    filter_non_generic_song_pairs as _filter_non_generic_song_pairs,
+    append_non_generic_candidate as _append_non_generic_candidate,
 )
 from raw_candidate_extractors import (
     extract_listitem_pair as _extract_listitem_pair,
@@ -112,7 +125,7 @@ class PlayerMonitor(xbmc.Player):
                 log_debug("radio.de Addon erkannt (plugin.audio.radiode)")
             elif 'plugin.audio.tunein2017' in playing_file:
                 self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_TUNEIN)
-                tunein_id = self.radio_monitor._extract_tunein_station_id(playing_file)
+                tunein_id = _tunein_extract_station_id(playing_file)
                 if tunein_id:
                     self.radio_monitor.tunein_station_id = tunein_id
                     xbmc.log(f"[{ADDON_NAME}] TuneIn Station-ID aus Plugin-URL: '{tunein_id}'", xbmc.LOGINFO)
@@ -433,62 +446,47 @@ class RadioMonitor(xbmc.Monitor):
         return f"name:{name}"
 
     def _is_song_pair(self, pair):
-        return bool(pair and pair[0] and pair[1])
+        return _is_song_pair(pair)
 
     def _is_generic_metadata_text(self, text, station_name=''):
-        text_l = str(text or '').strip().lower()
-        if not text_l:
-            return False
-        station_l = (station_name or '').strip().lower()
-        if station_l and station_l in text_l:
-            return True
-        station_keywords = self._get_station_generic_keywords(station_name)
-        return any(token in text_l for token in station_keywords)
+        kw = self._get_station_generic_keywords(station_name)
+        return _is_generic_metadata_text(text, station_name, kw)
 
     def _is_generic_song_pair(self, pair, station_name=''):
-        if not self._is_song_pair(pair):
-            return False
-        a_l = str(pair[0] or '').strip().lower()
-        t_l = str(pair[1] or '').strip().lower()
-        return (
-            self._is_generic_metadata_text(a_l, station_name)
-            or self._is_generic_metadata_text(t_l, station_name)
-            or self._is_generic_metadata_text(f"{a_l} - {t_l}", station_name)
-        )
+        kw = self._get_station_generic_keywords(station_name)
+        return _is_generic_song_pair(pair, station_name, kw)
 
     def _has_non_generic_song_pair(self, pair, station_name=''):
-        return self._is_song_pair(pair) and not self._is_generic_song_pair(pair, station_name)
+        kw = self._get_station_generic_keywords(station_name)
+        return _has_non_generic_song_pair(pair, station_name, kw)
 
     def _is_generic_stream_title(self, stream_title, station_name=''):
-        return self._is_generic_metadata_text(stream_title, station_name)
+        kw = self._get_station_generic_keywords(station_name)
+        return _is_generic_metadata_text(stream_title, station_name, kw)
 
     def _filter_non_generic_song_pairs(self, pairs, station_name=''):
-        return [p for p in (pairs or []) if self._has_non_generic_song_pair(p, station_name)]
+        kw = self._get_station_generic_keywords(station_name)
+        return _filter_non_generic_song_pairs(pairs, station_name, kw)
 
     def _sanitize_musicplayer_pair(self, pair, station_name=''):
-        if self._is_generic_song_pair(pair, station_name):
+        kw = self._get_station_generic_keywords(station_name)
+        if _is_generic_song_pair(pair, station_name, kw):
             return ('', '')
         return pair
 
     def _sanitize_stream_source_pair(self, pair, station_name=''):
-        if not self._is_song_pair(pair):
+        if not _is_song_pair(pair):
             return ('', '')
-        if self._is_generic_song_pair(pair, station_name):
+        kw = self._get_station_generic_keywords(station_name)
+        if _is_generic_song_pair(pair, station_name, kw):
             return ('', '')
         return pair
 
     def _append_non_generic_candidate(self, candidates, source, artist, title, station_name=''):
-        pair = (str(artist or '').strip(), str(title or '').strip())
-        if not self._is_song_pair(pair):
-            return False
-        if self._is_generic_song_pair(pair, station_name):
-            log_debug(
-                f"Kandidat verworfen (generisch): source='{source}', "
-                f"pair='{pair[0]} - {pair[1]}'"
-            )
-            return False
-        candidates.append({'source': source, 'artist': pair[0], 'title': pair[1]})
-        return True
+        kw = self._get_station_generic_keywords(station_name)
+        return _append_non_generic_candidate(
+            candidates, source, artist, title, station_name, kw, log_fn=log_debug
+        )
 
     def _update_mp_generic_hold_state(self, last_winner_source, current_mp_pair, station_name=''):
         """
@@ -1341,7 +1339,7 @@ class RadioMonitor(xbmc.Monitor):
 
             if self._can_use_tunein_api():
                 self.use_api_fallback = True
-                tunein_id = self._extract_tunein_station_id(url)
+                tunein_id = _tunein_extract_station_id(url)
                 if tunein_id:
                     self.tunein_station_id = tunein_id
                     log_debug(f"TuneIn Stream erkannt, Station-ID aus URL: '{tunein_id}'")
@@ -1351,169 +1349,14 @@ class RadioMonitor(xbmc.Monitor):
             log_debug(f"Fehler bei URL-Analyse fuer API-Fallback: {str(e)}")
         return None
 
-    def _extract_tunein_station_id(self, text):
-        """
-        Extrahiert eine TuneIn-ID (z.B. s24878, t109814382) aus Plugin- oder Stream-URLs.
-        Unterstützt auch verschachtelt URL-encodete fparams.
-        """
-        if not text:
-            return None
-
-        try:
-            decoded = str(text)
-            for _ in range(3):
-                new_decoded = unquote(decoded)
-                if new_decoded == decoded:
-                    break
-                decoded = new_decoded
-
-            patterns = [
-                r'[?&](?:sid|preset_id|id|stationId)=([sptufl]\d+(?:-\d+)?)',
-                r'["\'](?:sid|preset_id|id|stationId)["\']\s*:\s*["\']([sptufl]\d+(?:-\d+)?)["\']',
-                r'/([sptufl]\d+(?:-\d+)?)(?:[/?&]|$)',
-            ]
-
-            for pattern in patterns:
-                match = re.search(pattern, decoded, re.IGNORECASE)
-                if not match:
-                    continue
-                candidate = (match.group(1) or '').strip()
-                if '-' in candidate:
-                    candidate = candidate.split('-', 1)[0]
-                if re.match(r'^[sptufl]\d+$', candidate, re.IGNORECASE):
-                    return candidate
-        except Exception:
-            pass
-        return None
-
-    def _parse_tunein_nowplaying_candidate(self, value, station_name=None):
-        """Parst einen potenziellen TuneIn Now-Playing-String zu (artist, title)."""
-        if value is None:
-            return None, None
-
-        candidate = str(value).strip()
-        if not candidate:
-            return None, None
-        if candidate.lower().startswith('http'):
-            return None, None
-
-        invalid = INVALID_METADATA_VALUES + ['']
-        if station_name:
-            invalid.append(station_name)
-            invalid.append(station_name.lower())
-
-        if candidate in invalid or candidate.lower() in invalid:
-            return None, None
-
-        # "Song: Artist - Title" -> Prefix entfernen
-        candidate = re.sub(r'^\s*Song:\s*', '', candidate, flags=re.IGNORECASE).strip()
-        if not candidate:
-            return None, None
-
-        # Numerische IDs konsequent ignorieren
-        if _NUMERIC_ID_RE.match(candidate):
-            return None, None
-
-        if ' - ' in candidate:
-            artist, title = self.parse_stream_title_simple(candidate)
-            if title and _NUMERIC_ID_RE.match(title):
-                return None, None
-            if artist and re.match(r'^\d+$', artist):
-                artist = None
-            if title:
-                return artist, title
-
-        # Fallback: ungetrennter Kandidat als Title
-        if not _NUMERIC_ID_RE.match(candidate):
-            return None, candidate
-        return None, None
-
-    def _extract_tunein_from_json(self, payload, station_name=None):
-        """Durchsucht JSON rekursiv nach Now-Playing-Kandidaten."""
-        candidates = []
-        preferred_keys = {
-            'playing', 'song', 'subtitle', 'subtext', 'now_playing', 'nowplaying',
-            'current_song', 'currentsong', 'current_track', 'title', 'text'
-        }
-
-        def walk(node):
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    k = str(key).lower()
-                    if k in preferred_keys and isinstance(value, (str, int, float)):
-                        candidates.append(str(value))
-                    walk(value)
-            elif isinstance(node, list):
-                for item in node:
-                    walk(item)
-
-        walk(payload)
-
-        for candidate in candidates:
-            artist, title = self._parse_tunein_nowplaying_candidate(candidate, station_name)
-            if artist or title:
-                return artist, title
-        return None, None
-
-    def _extract_tunein_from_text(self, text, station_name=None):
-        """Fallback-Parser für XML/Plain-Text Antworten aus TuneIn OPML APIs."""
-        if not text:
-            return None, None
-
-        patterns = [
-            r'playing="([^"]+)"',
-            r'subtext="([^"]+)"',
-            r'"playing"\s*:\s*"([^"]+)"',
-            r'"subtitle"\s*:\s*"([^"]+)"',
-            r'"subtext"\s*:\s*"([^"]+)"',
-        ]
-
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                candidate = match.group(1).strip()
-                artist, title = self._parse_tunein_nowplaying_candidate(candidate, station_name)
-                if artist or title:
-                    return artist, title
-        return None, None
-
     def get_tunein_api_nowplaying(self, station_name=None):
-        """Holt aktuelle Song-Info für TuneIn-Streams über OPML-Endpunkte."""
-        station_id = self.tunein_station_id
-        if not station_id:
-            return None, None
-
-        endpoints = [
-            (TUNEIN_DESCRIBE_API_URL, {'id': station_id, 'render': 'json'}),
-            (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json'}),
-            (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json', 'formats': 'mp3,aac,ogg,hls'}),
-        ]
-
-        for endpoint, params in endpoints:
-            try:
-                response = self.api_client.get(endpoint, params=params, timeout=5)
-                if response.status_code != 200:
-                    log_debug(f"TuneIn API Status {response.status_code} fuer {endpoint}")
-                    continue
-
-                try:
-                    payload = response.json()
-                except Exception:
-                    payload = None
-
-                if payload is not None:
-                    self._debug_log_api_raw('tunein.json', payload)
-                    artist, title = self._extract_tunein_from_json(payload, station_name)
-                    if artist or title:
-                        log_info(f"OK TuneIn API: {artist} - {title}")
-                        return artist, title
-
-                self._debug_log_api_raw('tunein.text', response.text)
-                artist, title = self._extract_tunein_from_text(response.text, station_name)
-                if artist or title:
-                    xbmc.log(f"[{ADDON_NAME}] OK TuneIn API (Text): {artist} - {title}", xbmc.LOGINFO)
-                    return artist, title
-            except Exception as e:
-                log_debug(f"Fehler bei TuneIn API Abfrage ({endpoint}): {e}")
+        """Delegiert an tunein-Modul."""
+        return _tunein_get_nowplaying(
+            self.api_client,
+            self.tunein_station_id,
+            station_name,
+            debug_log=self._debug_log_api_raw
+        )
 
         return None, None
     def _refresh_api_nowplaying_property(self, station_name=None, force=False):
@@ -2040,10 +1883,23 @@ class RadioMonitor(xbmc.Monitor):
         artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
         title_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
         combined = float(score) * ((artist_sim + title_sim) / 2.0)
+        # MB-Bereinigung: korrigierten Label nur uebernehmen wenn MB eindeutig
+        # denselben Song bestaetigt (hohe Aehnlichkeit zu den Eingabewerten).
+        # Verhindert, dass ein komplett anderer MB-Treffer die Labels ueberschreibt.
+        if (mb_artist and mb_title
+                and artist_sim >= _MB_LABEL_CORRECTION_MIN_SIM
+                and title_sim >= _MB_LABEL_CORRECTION_MIN_SIM):
+            corrected_artist = mb_artist
+            corrected_title = mb_title
+        else:
+            corrected_artist = artist
+            corrected_title = title
         return {
             'source': source,
             'input_artist': artist,
             'input_title': title,
+            'corrected_artist': corrected_artist,
+            'corrected_title': corrected_title,
             'score': int(score),
             'artist_sim': float(artist_sim),
             'title_sim': float(title_sim),
@@ -2153,173 +2009,24 @@ class RadioMonitor(xbmc.Monitor):
         return winner, evaluations
     
     def get_radiode_api_nowplaying(self, station_name):
-        """Holt aktuelle Song-Info direkt von der radio.de API"""
-        try:
-            # Slug-Quelle: Plugin-URL hat Priorität, Logo-URL als Fallback
-            slug = self.plugin_slug
-            if not slug and self.station_logo:
-                logo_match = re.search(r'radio-assets\.com/\d+/([^./?]+)', self.station_logo)
-                if logo_match:
-                    slug = logo_match.group(1)
-
-            if slug:
-                log_debug(f"Station-Slug: '{slug}' (plugin={bool(self.plugin_slug)})")
-                try:
-                    det_response = self.api_client.get(RADIODE_DETAILS_API_URL, params={'stationIds': slug}, timeout=5)
-                    if det_response.status_code == 200:
-                        det_data = det_response.json()
-                        if isinstance(det_data, list) and len(det_data) > 0:
-                            proper_name = det_data[0].get('name', '')
-                            if proper_name:
-                                self.set_property_safe(_P.STATION, proper_name)
-                            det_logo = det_data[0].get('logo300x300', '')
-                            if det_logo and not self.station_logo:
-                                self.station_logo = det_logo
-                                self.set_logo_safe()
-                except Exception as e:
-                    log_debug(f"Fehler bei Details-API: {e}")
-
-                try:
-                    np_response = self.api_client.get(RADIODE_NOWPLAYING_API_URL, params={'stationIds': slug}, timeout=5)
-                    if np_response.status_code == 200:
-                        np_data = np_response.json()
-                        self._debug_log_api_raw('radiode.now_playing.slug', np_data)
-                        if isinstance(np_data, list) and len(np_data) > 0:
-                            full_title = np_data[0].get('title', '')
-                            if full_title:
-                                artist, title = _parse_radiode_api_title(full_title, station_name)
-                                if artist or title:
-                                    xbmc.log(f"[{ADDON_NAME}] OK now-playing via Slug: {artist} - {title}", xbmc.LOGINFO)
-                                    return artist, title
-                        log_debug("Slug-Abfrage ohne Ergebnis - weiter mit Suche")
-                except Exception as e:
-                    log_debug(f"Fehler bei now-playing via Slug: {e}")
-
-            # Bereinige den Sendernamen FÜR DIE SUCHE
-            search_name = station_name
-            
-            # Entferne technische Suffixe
-            search_name = re.sub(r'\s*(inter\d+|mp3|aac|low|high|128|64|256).*$', '', search_name, flags=re.IGNORECASE)
-            search_name = re.sub(r'\s*-\s*[A-Z]{2,3}\s*$', '', search_name)  # z.B. " - RK"
-            
-            # Entferne spezielle Zusätze die die Suche stören
-            search_name = re.sub(r'\s*-\s*100%.*$', '', search_name, flags=re.IGNORECASE)  # "- 100% Deutsch"
-            search_name = re.sub(r'\s*91\.4.*$', '', search_name, flags=re.IGNORECASE)  # "91.4"
-            search_name = re.sub(r'\s*-\s*\d+\.\d+.*$', '', search_name)  # Frequenzen wie "- 91.4"
-            
-            search_name = search_name.strip()
-            
-            log_debug(f"Suche radio.de API mit: '{search_name}' (Original: '{station_name}')")
-            
-            params = {'query': search_name, 'count': 20}
-            response = self.api_client.get(RADIODE_SEARCH_API_URL, params=params, timeout=5)
-            if response.status_code != 200:
-                xbmc.log(f"[{ADDON_NAME}] radio.de API: ungültige Antwort (Status {response.status_code})", xbmc.LOGWARNING)
-                return None, None
-            data = response.json()
-            
-            log_debug(f"Search API: {data.get('totalCount', 0)} Treffer")
-            
-            # Schritt 1: Stationsname bereinigen und radio.de API durchsuchen
-            if 'playables' in data and len(data['playables']) > 0:
-                # Suche die beste Übereinstimmung
-                best_match = None
-                best_match_score = 0
-                
-                # Normalisiere beide Namen für Vergleich
-                search_normalized = search_name.lower().replace('-', ' ').replace('_', ' ').strip()
-                
-                for station in data['playables'][:20]:  # Prüfe die ersten 20 Treffer
-                    station_found = station.get('name', '')
-                    station_normalized = station_found.lower().replace('-', ' ').replace('_', ' ').strip()
-                    
-                    # Exakter Match (Priorität)
-                    if station_normalized == search_normalized:
-                        best_match = station
-                        best_match_score = 1000  # Höchste Priorität
-                        log_debug(f"EXAKTER MATCH gefunden: '{station_found}'")
-                        break
-                    
-                    # Substring-Match (Station enthält Suchbegriff)
-                    if search_normalized in station_normalized:
-                        score = 100 + len(search_normalized)  # Je länger der Match, desto besser
-                        if score > best_match_score:
-                            best_match = station
-                            best_match_score = score
-                            log_debug(f"Substring-Match: '{station_found}' - Score: {score}")
-                    
-                    # Wort-basierter Match
-                    elif search_normalized:
-                        search_words = set(search_normalized.split())
-                        station_words = set(station_normalized.split())
-                        matching_words = search_words.intersection(station_words)
-                        score = len(matching_words) * 10
-                        
-                        if score > best_match_score:
-                            best_match = station
-                            best_match_score = score
-                            log_debug(f"Wort-Match: '{station_found}' - Score: {score} (Woerter: {matching_words})")
-                
-                if best_match and best_match_score > 0:
-                    station_found = best_match.get('name', '')
-                    station_id = best_match.get('id', '')
-                    station_logo = best_match.get('logo300x300', '')  # Logo aus API
-
-                    # Speichere Logo für spätere Verwendung
-                    if station_logo:
-                        self.station_logo = station_logo
-                        self.set_logo_safe()
-                        xbmc.log(f"[{ADDON_NAME}] Station-Logo aus API: {station_logo}", xbmc.LOGINFO)
-
-                    log_debug(f"Beste Uebereinstimmung: '{station_found}' (Score: {best_match_score}, ID: {station_id})")
-                    
-                    # Schritt 2: Station-ID für now-playing API verwenden
-                    if station_id:
-                        log_debug(f"Hole Now-Playing von: {RADIODE_NOWPLAYING_API_URL}?stationIds={station_id}")
-                        
-                        try:
-                            params = {'stationIds': station_id}
-                            np_response = self.api_client.get(RADIODE_NOWPLAYING_API_URL, params=params, timeout=5)
-                            if np_response.status_code == 200:
-                                np_data = np_response.json()
-                                self._debug_log_api_raw('radiode.now_playing.search', np_data)
-                                
-                                # Response ist ein Array: [{"title":"ARTIST - TITLE","stationId":"..."}]
-                                if isinstance(np_data, list) and len(np_data) > 0:
-                                    track_info = np_data[0]
-                                    full_title = track_info.get('title', '')
-                                    
-                                    log_debug(f"Empfangener Titel: '{full_title}'")
-                                    
-                                    if full_title:
-                                        artist, title = _parse_radiode_api_title(full_title, station_name)
-                                        if artist is not None or title is not None:
-                                            if artist and title:
-                                                xbmc.log(f"[{ADDON_NAME}] OK now-playing API erfolgreich: {artist} - {title}", xbmc.LOGINFO)
-                                                return artist, title
-                                            if title:
-                                                xbmc.log(f"[{ADDON_NAME}] OK now-playing API erfolgreich (nur Title): {title}", xbmc.LOGINFO)
-                                                return None, title
-                                    else:
-                                        log_debug(f"Titel-Format unbekannt: '{full_title}'")
-                                else:
-                                    log_debug("Leere now-playing Response")
-                            else:
-                                log_debug(f"now-playing API Fehler: {np_response.status_code}")
-                        except Exception as e:
-                            xbmc.log(f"[{ADDON_NAME}] Fehler bei now-playing API: {str(e)}", xbmc.LOGWARNING)
-
-                    else:
-                        log_debug("Keine Station-ID gefunden")
-                else:
-                    log_debug("Kein Match gefunden (Score zu niedrig)")
-            else:
-                log_debug(f"Keine Treffer fuer '{search_name}'")
-                        
-        except Exception as e:
-            xbmc.log(f"[{ADDON_NAME}] Fehler bei radio.de API Abfrage: {str(e)}", xbmc.LOGWARNING)
-        
-        return None, None
+        """Delegiert an radiode-Modul; verarbeitet Seiteneffekte (Logo, Sendername)."""
+        artist, title, resolved_name, det_logo, search_logo = _radiode_get_nowplaying(
+            self.api_client,
+            self.plugin_slug,
+            station_name,
+            existing_logo=self.station_logo,
+            debug_log=self._debug_log_api_raw
+        )
+        if resolved_name:
+            self.set_property_safe(_P.STATION, resolved_name)
+        # Suche-Logo hat Vorrang (immer ueberschreiben), Details-Logo nur wenn noch keins vorhanden
+        if search_logo:
+            self.station_logo = search_logo
+            self.set_logo_safe()
+        elif det_logo and not self.station_logo:
+            self.station_logo = det_logo
+            self.set_logo_safe()
+        return artist, title
     
     def api_metadata_worker(self, generation):
         """Fallback: Pollt verschiedene APIs wenn keine ICY-Metadaten verfügbar"""
@@ -2363,6 +2070,8 @@ class RadioMonitor(xbmc.Monitor):
                         # Setze Logo (nur wenn echtes Logo, sonst Kodi-Fallback)
                         self.set_logo_safe()
                         album, album_date, mbid, first_release, duration_ms = '', '', '', '', 0
+                        display_artist = artist
+                        display_title = title
                         if artist and title:
                             mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
                             if uncertain:
@@ -2372,23 +2081,32 @@ class RadioMonitor(xbmc.Monitor):
                                 album = mb_album
                                 album_date = mb_album_date
                                 first_release = mb_first_release
-                                if mb_artist and mb_title and (
-                                    _mb_similarity(mb_artist, artist) < 0.8 or _mb_similarity(mb_title, title) < 0.8
-                                ):
-                                    # Nur MBID/Album nutzen, wenn MB den API-Titel plausibel bestätigt.
+                                a_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
+                                t_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
+                                if mb_artist and mb_title and a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
+                                    # MB bestaetigt denselben Song: korrigierte Schreibweise fuer Labels verwenden
+                                    display_artist = mb_artist
+                                    display_title = mb_title
+                                    if display_artist != artist or display_title != title:
+                                        log_info(
+                                            f"MB-Bereinigung (API): '{artist} - {title}'"
+                                            f" -> '{display_artist} - {display_title}'"
+                                        )
+                                elif mb_artist and mb_title and (a_sim < 0.8 or t_sim < 0.8):
+                                    # MB hat anderen Song gefunden: MBID/Album verwerfen
                                     mbid = ''
                                     album = ''
                                     album_date = ''
                                     first_release = ''
                                     duration_ms = 0
-                        
-                        if artist:
+
+                        if display_artist:
                             # Reihenfolge: MBID und Title vor Artist setzen.
                             # AS lauscht auf RadioMonitor.Artist als Trigger und liest
                             # danach sofort RadioMonitor.MBID – daher muss MBID bereits
                             # gesetzt sein wenn Artist den Trigger auslöst.
-                            self.set_property_safe(_P.TITLE, title)
-                            self.set_property_safe(_P.STREAM_TTL, f"{artist} - {title}")
+                            self.set_property_safe(_P.TITLE, display_title)
+                            self.set_property_safe(_P.STREAM_TTL, f"{display_artist} - {display_title}")
                             if album:
                                 self.set_property_safe(_P.ALBUM, album)
                             else:
@@ -2406,9 +2124,9 @@ class RadioMonitor(xbmc.Monitor):
                             else:
                                 WINDOW.clearProperty(_P.FIRST_REL)
                             # Artist-Trigger zuerst setzen, dann Artist-Info nachziehen.
-                            self.set_property_safe(_P.ARTIST, artist)
-                            xbmc.log(f"[{ADDON_NAME}] API Update: {artist} - {title}", xbmc.LOGINFO)
-                            if mbid and artist:
+                            self.set_property_safe(_P.ARTIST, display_artist)
+                            xbmc.log(f"[{ADDON_NAME}] API Update: {display_artist} - {display_title}", xbmc.LOGINFO)
+                            if mbid and display_artist:
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
                                 band_formed, band_members, mb_genre = _musicbrainz_query_artist_info(mbid)
                                 if band_formed:
@@ -2530,9 +2248,21 @@ class RadioMonitor(xbmc.Monitor):
                     _, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, duration_ms = \
                         _musicbrainz_query_recording(mp_title, mp_artist)
 
-                    # MB darf Artist/Title nie ueberschreiben.
+                    # MB-Bereinigung: korrigierten Label nur verwenden wenn MB eindeutig
+                    # denselben Song bestaetigt. Original fuer Aenderungs-Detektion behalten.
                     artist = mp_artist
                     title = mp_title
+                    if mb_artist and mb_title:
+                        a_sim = _mb_similarity(mp_artist, mb_artist)
+                        t_sim = _mb_similarity(mp_title, mb_title)
+                        if a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
+                            if mb_artist != mp_artist or mb_title != mp_title:
+                                log_info(
+                                    f"MB-Bereinigung (MP): '{mp_artist} - {mp_title}'"
+                                    f" -> '{mb_artist} - {mb_title}'"
+                                )
+                            artist = mb_artist
+                            title = mb_title
 
                     if generation != self.metadata_generation:
                         return
@@ -2834,8 +2564,8 @@ class RadioMonitor(xbmc.Monitor):
                     mp_pairs
                 )
             return (
-                winner['input_artist'],
-                winner['input_title'],
+                winner['corrected_artist'],
+                winner['corrected_title'],
                 winner['mb_album'],
                 winner['mb_album_date'],
                 winner['mbid'],
@@ -2864,8 +2594,8 @@ class RadioMonitor(xbmc.Monitor):
                         mp_pairs
                     )
                 return (
-                    fb_winner['input_artist'],
-                    fb_winner['input_title'],
+                    fb_winner['corrected_artist'],
+                    fb_winner['corrected_title'],
                     fb_winner['mb_album'],
                     fb_winner['mb_album_date'],
                     fb_winner['mbid'],
@@ -2967,7 +2697,7 @@ class RadioMonitor(xbmc.Monitor):
         if uncertain:
             # Unsicherer MB-Treffer: nur Zusatzdaten verwerfen.
             mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
-            
+
         if source_artist in invalid:
             source_artist = None
         if source_title in invalid:
@@ -2976,11 +2706,27 @@ class RadioMonitor(xbmc.Monitor):
             self._set_last_song_decision('', None, None)
             return None, None, '', '', '', '', 0
 
+        # MB-Bereinigung: korrigierten Label nur verwenden wenn MB eindeutig denselben Song
+        # bestaetigt. source_artist/title bleiben fuer internes Tracking unveraendert.
+        display_artist = source_artist
+        display_title = source_title
+        if mb_artist and mb_title and not uncertain:
+            a_sim = _mb_similarity(source_artist or '', mb_artist)
+            t_sim = _mb_similarity(source_title or '', mb_title)
+            if a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
+                display_artist = mb_artist
+                display_title = mb_title
+                if display_artist != source_artist or display_title != source_title:
+                    log_info(
+                        f"MB-Bereinigung (ICY): '{source_artist} - {source_title}'"
+                        f" -> '{display_artist} - {display_title}'"
+                    )
+
         self._set_last_song_decision('icy', source_artist, source_title)
         if self.mp_decision_enabled:
             self._log_musicplayer_comparison('icy', (source_artist, source_title), mp_pairs)
             self._update_musicplayer_trust_after_decision('icy', (source_artist, source_title), mp_pairs)
-        return source_artist, source_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
+        return display_artist, display_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
         
     def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
@@ -3677,7 +3423,7 @@ class RadioMonitor(xbmc.Monitor):
                         self._capture_jsonrpc_player_raw()
                         self._ensure_api_source_from_context(playing_file, 'check_playing_new_url')
                         if self._can_use_tunein_api() and not self.tunein_station_id:
-                            tunein_id = self._extract_tunein_station_id(playing_file)
+                            tunein_id = _tunein_extract_station_id(playing_file)
                             if tunein_id:
                                 self.tunein_station_id = tunein_id
                                 log_debug(f"TuneIn Station-ID aus Stream-URL: '{tunein_id}'")
