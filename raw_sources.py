@@ -45,27 +45,18 @@ class RawSourceLabels:
     ALL_KEYS = (
         _P.RAW_STREAM_URL,
         _P.RAW_PLUGIN_URL,
-        _P.RAW_STREAM_HOST,
-        _P.RAW_STREAM_QUERY,
         _P.RAW_STREAM_HEADERS,
         _P.RAW_ICY_METADATA,
         _P.RAW_ICY_STREAMTITLE,
         _P.RAW_ICY_PARSED,
         _P.RAW_PLAYING_ITEM,
         _P.RAW_JSONRPC_PLAYER,
-        _P.RAW_LISTITEM,
-        _P.RAW_PLAYER_ART,
-        _P.RAW_RADIODE_WINDOW,
-        _P.RAW_API_RADIODE_DETAILS,
         _P.RAW_API_RADIODE_NOWPLAYING,
         _P.RAW_API_TUNEIN_JSON,
         _P.RAW_API_TUNEIN_TEXT,
-        _P.RAW_API_LAST_CONTEXT,
-        _P.RAW_API_LAST_PAYLOAD,
     )
 
     API_CONTEXT_MAP = {
-        "radiode.details": _P.RAW_API_RADIODE_DETAILS,
         "radiode.now_playing.slug": _P.RAW_API_RADIODE_NOWPLAYING,
         "radiode.now_playing.search": _P.RAW_API_RADIODE_NOWPLAYING,
         "tunein.json": _P.RAW_API_TUNEIN_JSON,
@@ -104,11 +95,6 @@ class RawSourceLabels:
 
     def set_api_payload(self, context, payload):
         ctx = str(context or "").strip()
-        self.set_text(_P.RAW_API_LAST_CONTEXT, ctx, max_len=256)
-        self.set_json(_P.RAW_API_LAST_PAYLOAD, payload, max_len=12000)
-
         target = self.API_CONTEXT_MAP.get(ctx)
         if target:
             self.set_json(target, payload, max_len=12000)
-        elif self.log_debug:
-            self.log_debug(f"RAW API context ohne Mapping: {ctx}")

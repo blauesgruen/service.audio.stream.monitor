@@ -966,17 +966,6 @@ class RadioMonitor(xbmc.Monitor):
     def _capture_stream_url_raw(self, stream_url):
         value = (stream_url or '').strip()
         self.raw_sources.set_text(_P.RAW_STREAM_URL, value, max_len=2000)
-        if not value:
-            self.raw_sources.set_text(_P.RAW_STREAM_HOST, '')
-            self.raw_sources.set_text(_P.RAW_STREAM_QUERY, '')
-            return
-        try:
-            parsed = urlparse(value)
-            self.raw_sources.set_text(_P.RAW_STREAM_HOST, parsed.netloc or '')
-            self.raw_sources.set_text(_P.RAW_STREAM_QUERY, parsed.query or '', max_len=4000)
-        except Exception:
-            self.raw_sources.set_text(_P.RAW_STREAM_HOST, '')
-            self.raw_sources.set_text(_P.RAW_STREAM_QUERY, '')
 
     def _capture_plugin_playback_raw(self, playback_url):
         self.raw_sources.set_text(_P.RAW_PLUGIN_URL, (playback_url or '').strip(), max_len=2000)
@@ -1029,28 +1018,6 @@ class RadioMonitor(xbmc.Monitor):
         except Exception as e:
             log_debug(f"Fehler beim Erfassen JSON-RPC-Rohdaten: {e}")
 
-    def _capture_logo_raw_sources(self, listitem_icon='', player_art=None):
-        player_art = player_art or {}
-        self.raw_sources.set_json(
-            _P.RAW_LISTITEM,
-            {
-                'icon': listitem_icon or '',
-                'label': xbmc.getInfoLabel('ListItem.Label') or '',
-                'title': xbmc.getInfoLabel('ListItem.Title') or '',
-                'path': xbmc.getInfoLabel('ListItem.Path') or ''
-            },
-            max_len=12000
-        )
-        self.raw_sources.set_json(_P.RAW_PLAYER_ART, player_art, max_len=12000)
-        self.raw_sources.set_json(
-            _P.RAW_RADIODE_WINDOW,
-            {
-                'logo': WINDOW.getProperty(_P.RADIODE_LOGO) or '',
-                'name': WINDOW.getProperty(_P.RADIODE_NAME) or ''
-            },
-            max_len=8000
-        )
-
     def _emit_analysis_event(
         self,
         station_name='',
@@ -1095,7 +1062,6 @@ class RadioMonitor(xbmc.Monitor):
                     'stream_url': WINDOW.getProperty(_P.RAW_STREAM_URL) or '',
                     'plugin_url': WINDOW.getProperty(_P.RAW_PLUGIN_URL) or '',
                     'icy_raw': WINDOW.getProperty(_P.RAW_ICY_METADATA) or '',
-                    'api_context': WINDOW.getProperty(_P.RAW_API_LAST_CONTEXT) or '',
                 },
                 'note': note or '',
             }
@@ -2023,20 +1989,16 @@ class RadioMonitor(xbmc.Monitor):
                 log_debug(f"Station-Slug: '{slug}' (plugin={bool(self.plugin_slug)})")
                 try:
                     det_response = self.api_client.get(RADIODE_DETAILS_API_URL, params={'stationIds': slug}, timeout=5)
-                    log_debug(f"Details-API Status: {det_response.status_code}, URL: {det_response.url}")
                     if det_response.status_code == 200:
                         det_data = det_response.json()
-                        self._debug_log_api_raw('radiode.details', det_data)
                         if isinstance(det_data, list) and len(det_data) > 0:
                             proper_name = det_data[0].get('name', '')
                             if proper_name:
                                 self.set_property_safe(_P.STATION, proper_name)
-                                xbmc.log(f"[{ADDON_NAME}] Station aus Details-API: '{proper_name}'", xbmc.LOGINFO)
                             det_logo = det_data[0].get('logo300x300', '')
                             if det_logo and not self.station_logo:
                                 self.station_logo = det_logo
                                 self.set_logo_safe()
-                                xbmc.log(f"[{ADDON_NAME}] Logo aus Details-API: '{det_logo}'", xbmc.LOGINFO)
                 except Exception as e:
                     log_debug(f"Fehler bei Details-API: {e}")
 
@@ -3451,7 +3413,6 @@ class RadioMonitor(xbmc.Monitor):
                                 logo = listitem_icon
                                 self.station_logo = logo
                                 self._ensure_api_source_from_context(logo, 'check_playing_listitem_logo')
-                                xbmc.log(f"[{ADDON_NAME}] Logo vom ListItem.Icon: {logo}", xbmc.LOGINFO)
                             
                             # 2. Fallback: Window-Property vom radio.de Addon
                             if not logo:
@@ -3460,7 +3421,6 @@ class RadioMonitor(xbmc.Monitor):
                                     logo = radiode_logo
                                     self.station_logo = logo
                                     self._ensure_api_source_from_context(logo, 'check_playing_radiode_logo')
-                                    xbmc.log(f"[{ADDON_NAME}] Logo vom radio.de Addon (Window-Property): {logo}", xbmc.LOGINFO)
                             
                             # 3. Fallback: Player Art
                             if not logo:
@@ -3469,13 +3429,7 @@ class RadioMonitor(xbmc.Monitor):
                                         logo = player_logo
                                         self.station_logo = logo
                                         self._ensure_api_source_from_context(logo, f'check_playing_{source}')
-                                        xbmc.log(f"[{ADDON_NAME}] Logo von {source}: {logo}", xbmc.LOGINFO)
                                         break
-
-                            self._capture_logo_raw_sources(
-                                listitem_icon=xbmc.getInfoLabel('ListItem.Icon'),
-                                player_art=player_art_candidates
-                            )
 
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
                                 log_debug("Kein Player-Logo, wird spaeter von API geholt")
