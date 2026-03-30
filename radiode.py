@@ -110,9 +110,16 @@ def get_nowplaying(api_client, plugin_slug, station_name, existing_logo=None, de
                             if artist or title:
                                 log_info(f"OK now-playing via Slug: {artist} - {title}")
                                 return artist, title, resolved_name, det_logo, search_logo
-                    log_debug("Slug-Abfrage ohne Ergebnis - weiter mit Suche")
+                    # Slug bekannt, aber API hat keinen Song geliefert (Programm/Moderation).
+                    # Keine Stationssuche starten: eine Suche koennte faelschlicherweise
+                    # einen anderen Sender mit aehnlichem Namen finden und dessen Daten
+                    # (Logo, Name, Now-Playing) uebernehmen.
+                    log_debug("Slug bekannt, aber kein aktiver Song via Slug-API (Programm/Moderation)")
+                    return None, None, resolved_name, det_logo, search_logo
             except Exception as e:
                 log_debug(f"Fehler bei now-playing via Slug: {e}")
+            # Bei Netzwerkfehler ebenfalls kein Suchfallback (Sender ist bekannt)
+            return None, None, resolved_name, det_logo, search_logo
 
         # Sendernamen fuer die Suche bereinigen
         search_name = station_name or ''
