@@ -5,6 +5,7 @@ Keywords are treated as hints only. A song end is triggered only when
 multiple guards are satisfied (age, hold, no fresh song, optional extra signal).
 """
 import re
+from constants import GENERIC_STRING_MIN_LEN, GENERIC_STRING_MAX_DIGIT_SEQ
 
 
 class SongEndDetector:
@@ -95,31 +96,25 @@ class SongEndDetector:
         return False
 
     @staticmethod
-    def _extract_candidate_keywords(texts, station_name, configured_keywords):
-        station_tokens = set(
-            token for token in re.split(r"\W+", str(station_name or "").strip().lower()) if len(token) >= 3
-        )
+    def extract_candidate_keywords(texts, station_name, configured_keywords):
+        station_l = str(station_name or "").strip().lower()
         configured = set(SongEndDetector._normalize_keywords(configured_keywords))
+        digit_seq_pattern = re.compile(r"\d{" + str(int(GENERIC_STRING_MAX_DIGIT_SEQ) + 1) + r",}")
         seen = []
         for value in texts:
-            lowered = str(value or "").lower()
-            if not lowered:
+            normalized = re.sub(r"\s+", " ", str(value or "").strip().lower())
+            if not normalized:
                 continue
-            tokens = re.split(r"\W+", lowered)
-            for token in tokens:
-                token = token.strip("-_ ")
-                if len(token) < 4:
-                    continue
-                if token.isdigit():
-                    continue
-                if token in station_tokens:
-                    continue
-                if token in configured:
-                    continue
-                if token not in seen:
-                    seen.append(token)
-                if len(seen) >= 20:
-                    return seen
+            if len(normalized) < GENERIC_STRING_MIN_LEN:
+                continue
+            if digit_seq_pattern.search(normalized):
+                continue
+            if station_l and station_l in normalized:
+                continue
+            if normalized in configured:
+                continue
+            if normalized not in seen:
+                seen.append(normalized)
         return seen
 
     @staticmethod
@@ -181,7 +176,6 @@ class SongEndDetector:
 
         keywords = cfg["generic_keywords"]
         matched_keywords = self._keyword_matches(texts, keywords)
-        candidate_keywords = self._extract_candidate_keywords(texts, station_name, keywords)
 
         states = {}
         fresh_song_count = 0
@@ -212,6 +206,14 @@ class SongEndDetector:
             if source_name == "api" and state == "same_song":
                 api_same_song = True
             states[source_name] = state
+
+        # Nur Texte aus Quellen ohne Song-Inhalt als Kandidaten extrahieren
+        non_song_texts = [
+            str((source_texts or {}).get(name, "") or "")
+            for name, state in states.items()
+            if state in ("generic", "empty")
+        ]
+        candidate_keywords = self.extract_candidate_keywords(non_song_texts, station_name, keywords)
 
         if api_same_song:
             if self._api_stale_since_ts <= 0.0:

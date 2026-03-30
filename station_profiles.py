@@ -20,14 +20,15 @@ from constants import (
     STATION_PROFILE_CONFIDENCE_LOW,
     STATION_PROFILE_DIRNAME,
     STATION_PROFILE_FILENAME,
+    SONG_DB_FILENAME,
     STATION_PROFILE_ICY_STRUCTURAL_GENERIC_THRESHOLD,
     STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX,
     STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN,
     STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX,
-    STATION_PROFILE_KEYWORD_STATS_MAX,
     STATION_PROFILE_MIN_SESSION_S,
     STATION_PROFILE_MIN_STABLE_SESSIONS,
 )
+from song_db import SongDatabase
 
 
 FAMILIES = ('musicplayer', 'api', 'icy')
@@ -272,6 +273,8 @@ class StationProfileStore:
         self._profiles = {}
         self._dirty_keys = set()
         self._last_flush_ts = 0.0
+        db_path = os.path.join(os.path.dirname(self.profile_dir), SONG_DB_FILENAME)
+        self._song_db = SongDatabase(db_path)
         self._prepare_storage_dir()
         self._migrate_legacy_aggregate()
 
@@ -351,8 +354,6 @@ class StationProfileStore:
             'mp_reliable': False,
             'mp_song_rate': 0.0,
             'mp_flip_rate': 0.0,
-            'generic_keywords': [],
-            'keyword_stats': {},
             'song_end_policy': _default_song_end_policy(),
             'icy_structural_generic': False,
             'mp_absent': False,
@@ -416,8 +417,6 @@ class StationProfileStore:
             if field not in profile:
                 profile[field] = value
         profile['song_end_policy'] = self._normalize_song_end_policy(profile.get('song_end_policy'))
-        if not isinstance(profile.get('keyword_stats'), dict):
-            profile['keyword_stats'] = {}
         self._profiles[str(station_key)] = profile
         return profile
 
@@ -441,6 +440,7 @@ class StationProfileStore:
             profile['sessions_above_threshold'] = int(profile.get('sessions_above_threshold', 0)) + 1
             self._merge_ema(profile, metrics)
             self._derive_profile_fields(profile)
+            self._song_db.promote_strings(str(session.station_key))
             changed = self._track_profile_changes(profile, today)
             self._update_confidence(profile, metrics, changed, above_threshold=True)
         else:
@@ -613,9 +613,6 @@ class StationProfileStore:
                 profile[field] = value
                 self._dirty_keys.add(key)
         profile['song_end_policy'] = self._normalize_song_end_policy(profile.get('song_end_policy'))
-        if not isinstance(profile.get('keyword_stats'), dict):
-            profile['keyword_stats'] = {}
-            self._dirty_keys.add(key)
         self._profiles[key] = profile
         return profile
 
@@ -624,55 +621,6 @@ class StationProfileStore:
         if not isinstance(profile, dict):
             return _default_song_end_policy()
         return self._normalize_song_end_policy(profile.get('song_end_policy'))
-
-    def record_keyword_candidates(self, station_key, candidates, matched_keywords=None):
-        if not station_key:
-            return
-        profile = self._ensure_profile(station_key)
-        stats = profile.get('keyword_stats')
-        if not isinstance(stats, dict):
-            stats = {}
-
-        matched = set(
-            str(item or '').strip().lower()
-            for item in list(matched_keywords or [])
-            if str(item or '').strip()
-        )
-        today = _today_iso()
-        changed = False
-        for keyword in list(candidates or []):
-            token = str(keyword or '').strip().lower()
-            if not token:
-                continue
-            entry = stats.get(token)
-            if not isinstance(entry, dict):
-                entry = {'seen': 0, 'matched': 0, 'last_seen': ''}
-            entry['seen'] = int(entry.get('seen', 0)) + 1
-            if token in matched:
-                entry['matched'] = int(entry.get('matched', 0)) + 1
-            entry['last_seen'] = today
-            stats[token] = entry
-            changed = True
-
-        if not changed:
-            return
-
-        max_entries = int(STATION_PROFILE_KEYWORD_STATS_MAX)
-        if len(stats) > max_entries:
-            ranked = sorted(
-                stats.items(),
-                key=lambda kv: (
-                    int((kv[1] or {}).get('seen', 0)),
-                    int((kv[1] or {}).get('matched', 0)),
-                    str((kv[1] or {}).get('last_seen', '') or ''),
-                ),
-                reverse=True,
-            )
-            stats = dict(ranked[:max_entries])
-
-        profile['keyword_stats'] = stats
-        self._profiles[str(station_key)] = profile
-        self._dirty_keys.add(str(station_key))
 
     def _build_weights(self, profile):
         confidence = float(profile.get('confidence', 0.0))
@@ -753,6 +701,18 @@ class StationProfileStore:
             'mp_noise': bool(role_flags.get('mp_noise')),
         }
 
+    def get_generic_keywords(self, station_key):
+        return self._song_db.get_generic_strings(station_key)
+
+    def record_keyword_candidates(self, station_key, candidates, is_song_context=False):
+        self._song_db.record_string_candidates(station_key, candidates, is_song_context)
+
+    def record_confirmed_song(self, station_key, artist, title):
+        self._song_db.record_song(station_key, artist, title)
+
+    def get_known_songs(self, station_key):
+        return self._song_db.get_known_songs(station_key)
+
     def flush_if_due(self, min_interval_s=30.0):
         now_ts = time.time()
         if (now_ts - self._last_flush_ts) < float(min_interval_s):
@@ -771,10 +731,11 @@ class StationProfileStore:
                 file_path = self._station_file_path(station_key)
                 if not file_path:
                     continue
+                clean = {k: v for k, v in profile.items() if k not in ('keyword_stats', 'generic_keywords', 'song_cache')}
                 payload = {
                     'version': 2,
                     'station_key': station_key,
-                    'profile': profile,
+                    'profile': clean,
                 }
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(payload, f, ensure_ascii=False, indent=2)
