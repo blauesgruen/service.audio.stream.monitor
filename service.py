@@ -611,30 +611,16 @@ class RadioMonitor(xbmc.Monitor):
         }
 
     def _get_station_generic_keywords(self, station_name=''):
-        """
-        Liest optionale Generic-Keywords aus der stationsspezifischen Profil-JSON.
-        Erwartetes Feld: generic_keywords = ["keyword1", "keyword2", ...]
-        """
+        """Liest generic_keywords des Senders aus dem StationProfileStore."""
         if self._profile_store is None:
             return ()
         station_key = self._build_station_profile_key(station_name)
         if not station_key:
             return ()
         try:
-            profile = self._profile_store.get_profile(station_key)
+            return self._profile_store.get_generic_keywords(station_key)
         except Exception:
-            profile = None
-        if not isinstance(profile, dict):
             return ()
-        raw_keywords = profile.get('generic_keywords')
-        if not isinstance(raw_keywords, (list, tuple, set)):
-            return ()
-        normalized = []
-        for entry in raw_keywords:
-            keyword = str(entry or '').strip().lower()
-            if keyword and keyword not in normalized:
-                normalized.append(keyword)
-        return tuple(normalized)
 
     def _default_song_end_policy(self, station_name=''):
         return {
@@ -671,7 +657,7 @@ class RadioMonitor(xbmc.Monitor):
         policy['generic_keywords'] = list(self._get_station_generic_keywords(station_name))
         return policy
 
-    def _record_station_keyword_stats(self, station_name, candidates, matched_keywords):
+    def _record_station_keyword_stats(self, station_name, candidates, is_song_context=False):
         if self._profile_store is None:
             return
         station_key = self._build_station_profile_key(station_name)
@@ -684,11 +670,20 @@ class RadioMonitor(xbmc.Monitor):
             self._profile_store.record_keyword_candidates(
                 station_key,
                 candidate_list,
-                matched_keywords=matched_keywords or []
+                is_song_context=is_song_context,
             )
             self._profile_store.flush_if_due(min_interval_s=STATION_PROFILE_SAVE_INTERVAL_S)
         except Exception as e:
             log_debug(f"Keyword-Statistik konnte nicht aktualisiert werden: {e}")
+
+    def _collect_keyword_observations(self, station_name, texts, is_song_context):
+        """Extrahiert Token-Kandidaten aus Quelltexten und speichert sie mit Kontext-Flag."""
+        if not station_name:
+            return
+        configured = self._get_station_generic_keywords(station_name)
+        tokens = SongEndDetector.extract_candidate_keywords(texts, station_name, configured)
+        if tokens:
+            self._record_station_keyword_stats(station_name, tokens, is_song_context=is_song_context)
 
     @staticmethod
     def _label_from_pair(pair):
@@ -747,6 +742,8 @@ class RadioMonitor(xbmc.Monitor):
         if enable_policy and not key_changed and not self._station_profile_policy_enabled:
             policy_profile = self._profile_store.get_policy_profile(key)
             self.source_policy.apply_station_profile(policy_profile)
+            self.source_policy.set_generic_keywords(self._profile_store.get_generic_keywords(key))
+            self.source_policy.set_known_songs(self._profile_store.get_known_songs(key))
             self._station_profile_policy_enabled = True
             self._active_policy_profile = dict(policy_profile or {})
             log_info(
@@ -2811,6 +2808,7 @@ class RadioMonitor(xbmc.Monitor):
                             stream_title = last_title
 
                         station_name = stream_info.get('station', '')
+                        station_for_policy = station_name
                         invalid_values = INVALID_METADATA_VALUES + ["", station_name]
                         current_mp_pair = ('', '')
                         if self.mp_decision_enabled:
@@ -3239,6 +3237,10 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
                             if title:
                                 last_song_key = current_song_key
+                                if artist and self._profile_store:
+                                    station_key = self._build_station_profile_key(station_for_policy)
+                                    if station_key:
+                                        self._profile_store.record_confirmed_song(station_key, artist, title)
                             if decision_source:
                                 last_winner_source = decision_source
                                 initial_source_pending = False
@@ -3277,10 +3279,22 @@ class RadioMonitor(xbmc.Monitor):
                             )
 
                     # Song-Timeout Anzeige aktualisieren und ggf. Properties loeschen.
-                    station_for_policy = stream_info.get('station', '')
                     if startup_stable_confirmed or last_winner_source:
                         self._refresh_api_nowplaying_property(station_for_policy)
                     self._update_station_profile(station_for_policy)
+
+                    # Keyword-Beobachtungen erfassen: ICY/API-Texte mit Kontext-Flag
+                    if station_for_policy:
+                        kw_texts = [
+                            stream_title or self._label_from_pair(current_icy_pair) or '',
+                            self._label_from_pair(current_api_pair) or '',
+                        ]
+                        if last_winner_pair and last_winner_pair[0] and last_winner_pair[1]:
+                            # Bestätigter Song läuft → Tokens als Song-Kontext schützen
+                            self._collect_keyword_observations(station_for_policy, kw_texts, is_song_context=True)
+                        elif not (last_song_key and last_song_key[0]):
+                            # Noch kein Song in dieser Sitzung → Texte sind sendergeneric
+                            self._collect_keyword_observations(station_for_policy, kw_texts, is_song_context=False)
 
                     if (
                         self.song_end_detector_enabled
@@ -3314,14 +3328,14 @@ class RadioMonitor(xbmc.Monitor):
                             source_texts=source_texts,
                             policy=end_policy,
                         )
-                        matched_keywords = detector_result.get('matched_keywords') or []
                         candidate_keywords = detector_result.get('candidate_keywords') or []
-                        if matched_keywords or candidate_keywords:
-                            keyword_candidates = list(dict.fromkeys(list(candidate_keywords) + list(matched_keywords)))
+                        matched_keywords = detector_result.get('matched_keywords') or []
+                        keyword_candidates = list(dict.fromkeys(list(candidate_keywords) + list(matched_keywords)))
+                        if keyword_candidates:
                             self._record_station_keyword_stats(
                                 station_for_policy,
                                 candidates=keyword_candidates,
-                                matched_keywords=matched_keywords
+                                is_song_context=False,
                             )
                         if detector_result.get('should_clear'):
                             detector_reason = detector_result.get('reason') or 'mehrere Evidenzen'
