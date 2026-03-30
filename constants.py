@@ -92,6 +92,7 @@ ANALYSIS_FLUSH_INTERVAL_S = 5.0
 # Station profile learning
 STATION_PROFILE_DIRNAME = 'station_profiles'
 STATION_PROFILE_FILENAME = 'station_profiles.json'  # legacy aggregate filename (migration)
+SONG_DB_FILENAME = 'song_data.db'
 STATION_PROFILE_ALPHA = 0.30
 STATION_PROFILE_MIN_SESSION_S = 15 * 60
 STATION_PROFILE_MIN_STABLE_SESSIONS = 2
@@ -103,7 +104,7 @@ STATION_PROFILE_ICY_STRUCTURAL_GENERIC_THRESHOLD = 0.90
 STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX = 0.05
 STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN = 0.30
 STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX = 0.25
-STATION_PROFILE_KEYWORD_STATS_MAX = 200
+STATION_PROFILE_KEYWORD_STATS_MAX = 40
 # Source policy defaults
 SOURCE_POLICY_WINDOW = 40
 SOURCE_POLICY_SWITCH_MARGIN = 0.12
@@ -169,6 +170,22 @@ class PropertyNames:
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames
+
+# --- Keyword-Lernen ---
+
+# Mindestlänge eines Strings, um als Generic-String-Kandidat zu gelten
+GENERIC_STRING_MIN_LEN = 8
+# Maximale Anzahl aufeinanderfolgender Ziffern in einem Kandidaten-String
+# Strings mit mehr Ziffern am Stück (Telefonnummern, Frequenzen) werden verworfen
+GENERIC_STRING_MAX_DIGIT_SEQ = 3
+# Mindestanzahl Beobachtungen in generischem Kontext, bevor ein Token befördert wird
+KEYWORD_PROMOTE_MIN_SEEN = 5
+# Mindestanteil generischer Beobachtungen (seen_generic / seen) für Beförderung
+KEYWORD_PROMOTE_MIN_GENERIC_RATE = 0.80
+# Wenn ein bereits geförderter Token unter diese Rate fällt, wird er wieder entfernt
+KEYWORD_DEMOTE_MAX_GENERIC_RATE = 0.25
+# Maximale Anzahl bestätigter Songs im LRU-Cache pro Sender
+SONG_CACHE_MAX_PER_STATION = 200
 
 # --- Regex Patterns ---
 
