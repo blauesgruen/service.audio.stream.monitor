@@ -36,6 +36,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Debug-Properties für Timeout-Validierung: MB-Songdauer und Live-Countdown als Window-Properties sichtbar
 - ✅ Sofortiges Löschen der Labels bei Stop/Ende (Player-Callbacks)
 - ✅ Streamwechsel wird abgefangen: Labels werden vor Neubefuellung zuerst geloescht
+- ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
+- ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
 
@@ -138,7 +140,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierten Score (`MB score * artist similarity`) und akzeptiert Kandidaten erst oberhalb der Schwellen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`).
 - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
-- Spezieller No-Song-Fall: Wenn alle MB-Kandidaten `score=0` haben, bleibt bei aktivem Source-Lock die gelockte Quelle massgeblich; ohne Lock greifen die bestehenden Fallback-Regeln.
+- Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
@@ -163,6 +165,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
 | `song_db.py` | SQLite-Datenbank: bestätigte Songs als LRU-Cache und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) |
+| `skin_colors.py` | Liest Farbdefinitionen des aktiven Skins und aktualisiert das Farb-Dropdown in `resources/settings.xml` (in-place) |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
 | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
 | `api_client.py` | HTTP-Client mit Retry und Exponential-Backoff |

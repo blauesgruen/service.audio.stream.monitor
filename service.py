@@ -660,7 +660,7 @@ class RadioMonitor(xbmc.Monitor):
         return policy
 
     def _record_station_keyword_stats(self, station_name, candidates):
-        if self._profile_store is None:
+        if not self._persist_data or self._profile_store is None:
             return
         station_key = self._build_station_profile_key(station_name)
         if not station_key:
@@ -819,7 +819,7 @@ class RadioMonitor(xbmc.Monitor):
             self.source_policy.clear_station_profile()
 
     def _flush_station_profiles(self):
-        if self._profile_store is None:
+        if not self._persist_data or self._profile_store is None:
             return
         self._close_station_profile_session()
         self._active_station_profile_key = ''
@@ -1049,12 +1049,15 @@ class RadioMonitor(xbmc.Monitor):
     }
 
     def _load_bullet_settings(self):
-        """Liest Bullet-Einstellungen aus den Addon-Settings und aktualisiert den Prefix."""
+        """Liest Addon-Settings und aktualisiert Bullet-Prefix und Persistenz-Flag."""
         import xbmcaddon as _xbmcaddon
         addon   = _xbmcaddon.Addon(ADDON_ID)
         enabled = addon.getSetting('bullet_enabled').lower() == 'true'
         color   = addon.getSetting('bullet_color') or 'green'
         self._bullet_prefix = f'[COLOR {color}]•[/COLOR] ' if enabled else ''
+        self._persist_data  = addon.getSetting('persist_data').lower() != 'false'
+        if not self._persist_data:
+            log_info("Datenpersistenz deaktiviert – DB und JSON werden nicht geschrieben")
 
     def onSettingsChanged(self):
         self._load_bullet_settings()
@@ -3276,7 +3279,7 @@ class RadioMonitor(xbmc.Monitor):
                             xbmc.log(f"[{ADDON_NAME}] Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})", xbmc.LOGINFO)
                             if title:
                                 last_song_key = current_song_key
-                                if artist and self._profile_store:
+                                if self._persist_data and artist and self._profile_store:
                                     station_key = self._build_station_profile_key(station_for_policy)
                                     if station_key:
                                         self._profile_store.record_confirmed_song(station_key, artist, title)

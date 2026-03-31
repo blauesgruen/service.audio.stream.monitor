@@ -40,6 +40,8 @@ Wichtig:
   - persistente Senderprofile je Station (EMA-Lernen, Confidence, Policy-Profilableitung)
 - `song_db.py`
   - SQLite-Datenbank (`song_data.db`): Songs-LRU-Cache (max. 200 pro Sender) und Generic-Keywords (Jingles/Stationsinfos) je Sender
+- `skin_colors.py`
+  - liest `colors/Defaults.xml` des aktiven Skins, aktualisiert das `values`-Attribut von `bullet_color` in `resources/settings.xml` (in-place, Struktur bleibt erhalten; Datei muss vor Kodi-Start existieren)
 - `constants.py`
   - Endpunkte, Header, Timeouts, Property-Namen, Regex-Konstanten
 - `logger.py`
@@ -56,7 +58,9 @@ Event-/Polling-Quellen:
   - `onPlayBackStopped()` / `onPlayBackEnded()`: loeschen Labels sofort (ohne Polling-Verzoegerung)
   - `onAVStarted()`: behandelt Video/Lokaldateien als harte Stop-Szenarien und liest frueh Logo aus `ListItem.Icon`
 - `RadioMonitor.run()`:
+  - Aufruf `skin_colors.update_settings_colors()` beim Start (aktualisiert Farbdropdown in settings.xml)
   - Polling alle 2 Sekunden (`check_playing()`)
+  - `onSettingsChanged()`: laedt `bullet_enabled`, `bullet_color`, `persist_data` sofort neu
 
 Worker:
 - `metadata_worker(url, generation)` fuer ICY-Streams
@@ -152,6 +156,7 @@ Im Loop:
 - wenn MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
 - wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
 - wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs): API wird ebenfalls uebernommen
+- **ICY-Rohdaten-Fallback**: kein API, kein Lock, aber valides ICY-Direktpaar vorhanden -> Artist/Title direkt aus ICY-Split (ohne MB-Anreicherung, kein MBID, Timeout=Fallback); typisch fuer DJ-Sets und Radiosendungen, die MB nicht kennt
 - sonst: keine belastbaren Songdaten -> Rueckgabe `Artist=None`, `Title=None`
 
 4. ICY-Analyse/Fallback
@@ -338,6 +343,8 @@ Nicht verletzen ohne expliziten Grund:
 - API-only Startup-Bypass nur unter den vorgesehenen Heuristik-/Profilbedingungen aktivieren
 - MB-Bereinigung nur wenn beide Aehnlichkeitsschwellen erfuellt (`MB_LABEL_CORRECTION_MIN_SIM`); MB darf Labels niemals komplett ersetzen wenn der Treffer ein anderer Song ist
 - Quellentracking (`_set_last_song_decision`) immer mit Originalwerten aus der Quelle – nie mit MB-korrigierten Werten
+- `resources/settings.xml` muss vor dem Kodi-Start existieren und darf niemals komplett ueberschrieben werden; `skin_colors.update_settings_colors()` aendert ausschliesslich das `values`-Attribut von `bullet_color`
+- alle DB- und JSON-Schreibzugriffe pruefen `self._persist_data` (Setting `persist_data`); Lesezugriffe sind davon unabhaengig
 
 ## 11) Debugging-Playbook
 
@@ -348,6 +355,7 @@ Nicht verletzen ohne expliziten Grund:
    - `ICY METADATA (ROH)`
    - `Neuer StreamTitle erkannt`
    - `MB-Cache invalidiert wegen Titelwechsel`
+   - `MB score=0, kein API – ICY-Rohdaten-Fallback: 'Artist - Title'`
    - `MB score=0 fuer alle Kandidaten, keine belastbaren Songdaten -> nutze nur Station/StreamTitle`
    - `MusicBrainz Entscheidung`
    - `Song-Timeout abgelaufen`

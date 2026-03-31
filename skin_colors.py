@@ -1,9 +1,10 @@
 """
 Liest Farbdefinitionen aus colors/Defaults.xml des aktiven Kodi-Skins
-und schreibt resources/settings.xml mit dynamischer Farbauswahl.
+und aktualisiert das values-Attribut des bullet_color-Settings in der
+bestehenden resources/settings.xml (in-place, Struktur bleibt erhalten).
 
-Das Dropdown in den Addon-Settings wird beim Service-Start mit den
-tatsächlichen Farbnamen des gerade aktiven Skins befüllt.
+Die settings.xml muss bereits vor dem Kodi-Start existieren und darf
+niemals komplett neu geschrieben werden.
 """
 import os
 import xml.etree.ElementTree as ET
@@ -70,76 +71,28 @@ def get_skin_colors():
     return colors
 
 
-def _build_settings_xml(color_names, default_color):
-    """Erzeugt den Inhalt der resources/settings.xml mit den gegebenen Farboptionen."""
-    options_lines = '\n'.join(
-        f'            <option label="{name}">{name}</option>'
-        for name in color_names
-    )
-    return (
-        '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n'
-        '<settings version="1.1">\n'
-        '  <category id="display" label="32000">\n'
-        '    <group id="1" label="32010">\n'
-        '      <setting id="bullet_enabled" type="bool" label="32001">\n'
-        '        <level>0</level>\n'
-        '        <default>true</default>\n'
-        '      </setting>\n'
-        '      <setting id="bullet_color" type="select" label="32002">\n'
-        '        <level>0</level>\n'
-        f'        <default>{default_color}</default>\n'
-        '        <constraints>\n'
-        '          <options>\n'
-        f'{options_lines}\n'
-        '          </options>\n'
-        '        </constraints>\n'
-        '        <dependencies>\n'
-        '          <enable operator="eq" setting="bullet_enabled">true</enable>\n'
-        '        </dependencies>\n'
-        '      </setting>\n'
-        '    </group>\n'
-        '  </category>\n'
-        '</settings>\n'
-    )
-
-
 def update_settings_colors():
     """
-    Liest die Farben des aktiven Skins und ersetzt das values-Attribut
-    im <setting id="bullet_color">-Element in settings.xml (labelenum/values-Variante).
-    Setzt das Label von bullet_preview dynamisch auf 'Aktuelle Farbe: <name>'.
-    Im Dropdown steht '● green', als Wert wird aber nur 'green' gespeichert.
+    Liest die Farben des aktiven Skins und aktualisiert das values-Attribut
+    des <setting id="bullet_color">-Elements in der bestehenden settings.xml.
+    Die Dateistruktur (alle anderen Settings) bleibt vollständig erhalten.
+    Gibt die Liste der Farbnamen zurück.
     """
-    colors = get_skin_colors()
+    colors      = get_skin_colors()
     color_names = list(colors) if colors else list(_FALLBACK_COLORS)
-    default_color = 'green' if 'green' in color_names else color_names[0]
-
-    # Für Anzeige: Bullet + Name, für Wert: nur Name
-    bullet_labels = [f'\u25CF {name}' for name in color_names]
-    values = '|'.join(color_names)
-    default_bullet = default_color
+    values      = '|'.join(color_names)
 
     try:
         tree = ET.parse(_SETTINGS_XML)
         root = tree.getroot()
-        current_color = default_color
-        # Finde das <setting id="bullet_color"> und <setting id="bullet_preview">
         for setting in root.iter('setting'):
             if setting.get('id') == 'bullet_color':
-                # Setze Werte und Labels
                 setting.set('values', values)
-                setting.set('default', default_bullet)
-                # Kodi zeigt im Dropdown nur den Wert, aber wir können das Label dynamisch setzen
-                # (leider nicht pro Option, daher bleibt nur die Vorschauzeile)
-                sel = setting.get('default', default_bullet)
-                current_color = sel.strip()
-            if setting.get('id') == 'bullet_preview':
-                # Setze das Label auf Vorschau mit Punkt und aktuellem Farbnamen
-                setting.set('label', f'\u25CF Aktuelle Farbe: {current_color}')
+                break
         tree.write(_SETTINGS_XML, encoding='utf-8', xml_declaration=True)
         if _KODI:
             xbmc.log(
-                f'[AudioStreamMonitor] skin_colors: {len(color_names)} Farben aus Skin geladen – Standard: "{current_color}"',
+                f'[AudioStreamMonitor] skin_colors: {len(color_names)} Skinfarben in settings.xml eingetragen',
                 xbmc.LOGINFO,
             )
     except Exception as exc:

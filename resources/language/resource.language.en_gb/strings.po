@@ -22,3 +22,11 @@ msgstr ""
 msgctxt "#32002"
 msgid "Color"
 msgstr ""
+
+msgctxt "#32020"
+msgid "Data"
+msgstr ""
+
+msgctxt "#32021"
+msgid "Save songs and keywords to database and JSON"
+msgstr ""
