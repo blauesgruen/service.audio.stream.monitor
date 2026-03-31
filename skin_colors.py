@@ -108,13 +108,16 @@ def update_settings_colors():
     Liest die Farben des aktiven Skins und ersetzt das values-Attribut
     im <setting id="bullet_color">-Element in settings.xml (labelenum/values-Variante).
     Setzt das Label von bullet_preview dynamisch auf 'Aktuelle Farbe: <name>'.
+    Im Dropdown steht '● green', als Wert wird aber nur 'green' gespeichert.
     """
     colors = get_skin_colors()
     color_names = list(colors) if colors else list(_FALLBACK_COLORS)
     default_color = 'green' if 'green' in color_names else color_names[0]
 
-    bullet_values = [f' {name}' for name in color_names]
-    default_bullet = f' {default_color}'
+    # Für Anzeige: Bullet + Name, für Wert: nur Name
+    bullet_labels = [f'\u25CF {name}' for name in color_names]
+    values = '|'.join(color_names)
+    default_bullet = default_color
 
     try:
         tree = ET.parse(_SETTINGS_XML)
@@ -123,17 +126,16 @@ def update_settings_colors():
         # Finde das <setting id="bullet_color"> und <setting id="bullet_preview">
         for setting in root.iter('setting'):
             if setting.get('id') == 'bullet_color':
-                setting.set('values', '|'.join(bullet_values))
-                # Ermittle aktuelle Auswahl (ohne Bullet)
+                # Setze Werte und Labels
+                setting.set('values', values)
+                setting.set('default', default_bullet)
+                # Kodi zeigt im Dropdown nur den Wert, aber wir können das Label dynamisch setzen
+                # (leider nicht pro Option, daher bleibt nur die Vorschauzeile)
                 sel = setting.get('default', default_bullet)
-                if sel.startswith(' '):
-                    current_color = sel[2:].strip()
-                else:
-                    current_color = sel.strip()
-                setting.set('default', f' {current_color}')
+                current_color = sel.strip()
             if setting.get('id') == 'bullet_preview':
                 # Setze das Label auf Vorschau mit Punkt und aktuellem Farbnamen
-                setting.set('label', f' Aktuelle Farbe: {current_color}')
+                setting.set('label', f'\u25CF Aktuelle Farbe: {current_color}')
         tree.write(_SETTINGS_XML, encoding='utf-8', xml_declaration=True)
         if _KODI:
             xbmc.log(
