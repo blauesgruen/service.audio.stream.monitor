@@ -178,9 +178,6 @@ def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
                 payload = None
 
             if payload is not None:
-                if debug_log:
-                    debug_log('tunein.json', payload)
-
                 # Describe-Endpunkt (i==0): has_song=False bedeutet keine Song-Daten vorhanden.
                 # Tune-Endpunkte liefern nur Stream-URLs, nie Song-Metadaten – fruehzeitig abbrechen.
                 if i == 0:
@@ -188,6 +185,9 @@ def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
                     station = body[0] if (isinstance(body, list) and body and isinstance(body[0], dict)) else {}
                     if station.get('element') == 'station' and station.get('has_song') is False:
                         return None, None
+
+                if debug_log:
+                    debug_log('tunein.json', payload)
 
                 artist, title = extract_from_json(payload, station_name)
                 if artist or title:

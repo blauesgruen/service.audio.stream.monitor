@@ -545,10 +545,11 @@ def _musicbrainz_query_recording(title_part, artist_part):
                 frd       = rec.get("first-release-date") or ""
                 artist_sim = mb_similarity(mb_artist, artist_part)
                 combined   = score * artist_sim
-                log_debug(
-                    f"MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
-                    f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}"
-                )
+                if score >= 90:
+                    log_debug(
+                        f"MB Kandidat: Artist='{mb_artist}', Title='{mb_title}', "
+                        f"Score={score}, artist_sim={artist_sim:.2f}, combined={combined:.1f}"
+                    )
                 candidate_year = _frd_year(frd)
                 is_better = (
                     combined > best_combined

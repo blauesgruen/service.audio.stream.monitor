@@ -1679,10 +1679,12 @@ class RadioMonitor(xbmc.Monitor):
         if not self.mp_decision_enabled and isinstance(scores, dict):
             scores = {k: v for k, v in scores.items() if k != 'musicplayer'}
         self._policy_preferred_source = preferred or ''
-        log_debug(
-            f"Source-Policy: scores={scores}, preferred='{preferred or 'none'}', "
-            f"trigger='{reason if changed else 'none'}'"
-        )
+        if changed or preferred != getattr(self, '_last_logged_preferred', None):
+            self._last_logged_preferred = preferred
+            log_debug(
+                f"Source-Policy: scores={scores}, preferred='{preferred or 'none'}', "
+                f"trigger='{reason if changed else 'none'}'"
+            )
         return changed, reason
 
     def _resolve_stream_title_for_trigger(self, trigger_reason, stream_title, current_mp_pair):
