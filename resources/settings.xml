@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<settings>
+    <category label="32000">
+        <setting id="bullet_enabled" type="bool" label="32001" default="true" />
+        <setting id="bullet_color" type="labelenum" label="32002" values=" black| white| red| reddiffuse| darkgold| blue| green| green2| orange| background| grey| grey1| grey2| grey3| blackdiffuse| fanartdiffuse| menudiffuse| dustdiffuse| selected| selectedcolor| description| selectedhome| focused" default=" ●  ● green" />
+        <setting id="bullet_preview" type="lsep" label=" Aktuelle Farbe: ●  ● green" />
+    </category>
+</settings>

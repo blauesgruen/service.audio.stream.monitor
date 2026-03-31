@@ -50,6 +50,7 @@ from musicplayer_trust import MusicPlayerTrust
 from song_end_detector import SongEndDetector
 from raw_sources import RawSourceLabels, snapshot_getters
 from analysis_events import AnalysisEventStore, new_trace_id
+import skin_colors as _skin_colors
 from musicbrainz import (
     identify_artist_title_via_musicbrainz as _identify_artist_title_via_musicbrainz,
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
@@ -276,7 +277,8 @@ class RadioMonitor(xbmc.Monitor):
         
         # Event-Handler für Player-Events
         self.player_monitor = PlayerMonitor(self)
-        
+        self._load_bullet_settings()
+
         xbmc.log(f"[{ADDON_NAME}] Service gestartet", xbmc.LOGINFO)
 
     def _reset_api_context(self):
@@ -1041,10 +1043,28 @@ class RadioMonitor(xbmc.Monitor):
         if reason:
             log_debug(f"Wiedergabe beendet: Labels sofort geleert ({reason})")
 
+    _BULLET_KEYS = {
+        'RadioMonitor.Station', 'RadioMonitor.Title', 'RadioMonitor.Artist',
+        'RadioMonitor.Album', 'RadioMonitor.Genre',
+    }
+
+    def _load_bullet_settings(self):
+        """Liest Bullet-Einstellungen aus den Addon-Settings und aktualisiert den Prefix."""
+        import xbmcaddon as _xbmcaddon
+        addon   = _xbmcaddon.Addon(ADDON_ID)
+        enabled = addon.getSetting('bullet_enabled').lower() == 'true'
+        color   = addon.getSetting('bullet_color') or 'green'
+        self._bullet_prefix = f'[COLOR {color}]•[/COLOR] ' if enabled else ''
+
+    def onSettingsChanged(self):
+        self._load_bullet_settings()
+        log_debug("Einstellungen neu geladen (Bullet-Prefix aktualisiert)")
+
     def set_property_safe(self, key, value):
         """Setzt eine Window-Property nur wenn der Wert nicht leer ist."""
         if value:
-            WINDOW.setProperty(key, str(value))
+            text = f"{self._bullet_prefix}{value}" if key in self._BULLET_KEYS else str(value)
+            WINDOW.setProperty(key, text)
     
     def is_real_logo(self, url):
         """Prüft ob es ein echtes Logo ist (keine Kodi-Fallbacks)"""
@@ -3551,6 +3571,8 @@ class RadioMonitor(xbmc.Monitor):
                 
     def run(self):
         """Haupt-Loop des Services"""
+        # Skinfarben lesen und settings.xml mit aktuellem Farbdropdown aktualisieren
+        _skin_colors.update_settings_colors()
         # Initial properties löschen
         self.clear_properties()
         

@@ -1,0 +1,24 @@
+# Kodi Media Center language file
+# Addon Name: Audio Stream Monitor
+# Addon id: service.audio.stream.monitor
+# Addon Provider: blauesgruen
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgctxt "#32000"
+msgid "Anzeigeoptionen"
+msgstr ""
+
+msgctxt "#32010"
+msgid "Bullet-Punkt"
+msgstr ""
+
+msgctxt "#32001"
+msgid "Bullet-Punkt anzeigen"
+msgstr ""
+
+msgctxt "#32002"
+msgid "Farbe"
+msgstr ""
