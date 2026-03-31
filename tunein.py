@@ -165,7 +165,7 @@ def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
         (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json', 'formats': 'mp3,aac,ogg,hls'}),
     ]
 
-    for endpoint, params in endpoints:
+    for i, (endpoint, params) in enumerate(endpoints):
         try:
             response = api_client.get(endpoint, params=params, timeout=5)
             if response.status_code != 200:
@@ -180,6 +180,15 @@ def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
             if payload is not None:
                 if debug_log:
                     debug_log('tunein.json', payload)
+
+                # Describe-Endpunkt (i==0): has_song=False bedeutet keine Song-Daten vorhanden.
+                # Tune-Endpunkte liefern nur Stream-URLs, nie Song-Metadaten – fruehzeitig abbrechen.
+                if i == 0:
+                    body = payload.get('body', []) if isinstance(payload, dict) else []
+                    station = body[0] if (isinstance(body, list) and body and isinstance(body[0], dict)) else {}
+                    if station.get('element') == 'station' and station.get('has_song') is False:
+                        return None, None
+
                 artist, title = extract_from_json(payload, station_name)
                 if artist or title:
                     log_info(f"OK TuneIn API: {artist} - {title}")
