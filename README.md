@@ -52,7 +52,6 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
-| `RadioMonitor.ApiNowPlaying` | Letzter valider API-Titel (radio.de/TuneIn) | "Artist - Title" |
 | `RadioMonitor.Source` | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
 | `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
