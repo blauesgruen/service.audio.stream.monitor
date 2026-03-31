@@ -43,25 +43,25 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 
 Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werden können:
 
-| Property | Beschreibung | Beispiel |
-|----------|--------------|----------|
-| `RadioMonitor.Playing` | "true" wenn Radio läuft | true |
-| `RadioMonitor.Station` | Name des Radiosenders | "Bayern 3" |
-| `RadioMonitor.Title` | Aktueller Song-Titel | "Bohemian Rhapsody" |
-| `RadioMonitor.Artist` | Aktueller Interpret | "Queen" |
-| `RadioMonitor.ArtistMBID` | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
-| `RadioMonitor.Album` | Album (via MusicBrainz) | "A Night at the Opera" |
-| `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
-| `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
-| `RadioMonitor.StreamTitle` | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
-| `RadioMonitor.Source` | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
-| `RadioMonitor.Genre` | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
-| `RadioMonitor.Logo` | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
-| `RadioMonitor.BandFormed` | Gründungsjahr (nur bei Bands) | "1995" |
-| `RadioMonitor.BandMembers` | Aktuelle Mitglieder (nur bei Bands) | "Chad Kroeger, Mike Kroeger, Ryan Peake, Daniel Adair" |
-| `RadioMonitor.MBDurationMs` | Von MusicBrainz ermittelte Songdauer in Millisekunden | "175000" |
-| `RadioMonitor.MBDurationS` | Von MusicBrainz ermittelte Songdauer in Sekunden | "175" |
-| `RadioMonitor.TimeoutTotal` | Aktueller gesetzter Timeout in Sekunden | "160" |
+| Property                        | Beschreibung | Beispiel |
+|---------------------------------|--------------|----------|
+| `RadioMonitor.Playing`          | "true" wenn Radio läuft | true |
+| `RadioMonitor.Station`          | Name des Radiosenders | "Bayern 3" |
+| `RadioMonitor.Title`            | Aktueller Song-Titel | "Bohemian Rhapsody" |
+| `RadioMonitor.ArtistDisplay`    | Aktueller Interpret | "Queen" |
+| `RadioMonitor.ArtistMBID`       | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
+| `RadioMonitor.Album`            | Album (via MusicBrainz) | "A Night at the Opera" |
+| `RadioMonitor.AlbumDate`        | Erscheinungsjahr des Albums | "1975" |
+| `RadioMonitor.FirstRelease`     | Jahr der Erstveröffentlichung des Songs | "1975" |
+| `RadioMonitor.StreamTitle`      | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
+| `RadioMonitor.Source`           | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
+| `RadioMonitor.Genre`            | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
+| `RadioMonitor.Logo`             | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
+| `RadioMonitor.BandFormed`       | Gründungsjahr (nur bei Bands) | "1995" |
+| `RadioMonitor.BandMembers`      | Aktuelle Mitglieder (nur bei Bands) | "Chad Kroeger, Mike Kroeger, Ryan Peake, Daniel Adair" |
+| `RadioMonitor.MBDurationMs`     | Von MusicBrainz ermittelte Songdauer in Millisekunden | "175000" |
+| `RadioMonitor.MBDurationS`      | Von MusicBrainz ermittelte Songdauer in Sekunden | "175" |
+| `RadioMonitor.TimeoutTotal`     | Aktueller gesetzter Timeout in Sekunden | "160" |
 | `RadioMonitor.TimeoutRemaining` | Verbleibende Zeit bis zum Label-Clear in Sekunden | "142" |
 
 ## Verwendung in Skins
