@@ -115,11 +115,14 @@ def extract_from_json(payload, station_name=None):
 
     walk(payload)
 
+    best_artist, best_title = None, None
     for candidate in candidates:
         artist, title = parse_nowplaying_candidate(candidate, station_name)
-        if artist or title:
-            return artist, title
-    return None, None
+        if artist and title:
+            return artist, title  # vollstaendiges Paar gefunden
+        if (artist or title) and not best_title:
+            best_artist, best_title = artist, title  # erstes Teilresultat merken
+    return best_artist, best_title
 
 
 def extract_from_text(text, station_name=None):
@@ -135,13 +138,16 @@ def extract_from_text(text, station_name=None):
         r'"subtext"\s*:\s*"([^"]+)"',
     ]
 
+    best_artist, best_title = None, None
     for pattern in patterns:
         for match in re.finditer(pattern, text, re.IGNORECASE):
             candidate = match.group(1).strip()
             artist, title = parse_nowplaying_candidate(candidate, station_name)
-            if artist or title:
-                return artist, title
-    return None, None
+            if artist and title:
+                return artist, title  # vollstaendiges Paar gefunden
+            if (artist or title) and not best_title:
+                best_artist, best_title = artist, title
+    return best_artist, best_title
 
 
 def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
