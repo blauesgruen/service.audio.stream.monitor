@@ -6,6 +6,7 @@ multiple guards are satisfied (age, hold, no fresh song, optional extra signal).
 """
 import re
 from constants import GENERIC_STRING_MIN_LEN, GENERIC_STRING_MAX_DIGIT_SEQ
+from metadata import is_song_pair as _is_song_pair
 
 
 class SongEndDetector:
@@ -33,10 +34,6 @@ class SongEndDetector:
         self._api_stale_since_ts = 0.0
         self._keyword_hits = 0
         self._last_signature = ""
-
-    @staticmethod
-    def _valid_pair(pair):
-        return bool(pair and pair[0] and pair[1])
 
     @staticmethod
     def _normalize_pair(pair):
@@ -153,7 +150,7 @@ class SongEndDetector:
             return {"should_clear": False}
 
         song_key = self._normalize_pair(last_song_key)
-        if not self._valid_pair(song_key):
+        if not _is_song_pair(song_key):
             self.reset()
             return {"should_clear": False}
 
@@ -187,7 +184,7 @@ class SongEndDetector:
             pair = pairs.get(source_name, ("", ""))
             text_value = str((source_texts or {}).get(source_name, "") or "")
             state = "empty"
-            if self._valid_pair(pair):
+            if _is_song_pair(pair):
                 if pair == song_key:
                     state = "same_song"
                 elif self._is_generic_text(f"{pair[0]} - {pair[1]}", station_name, keywords):

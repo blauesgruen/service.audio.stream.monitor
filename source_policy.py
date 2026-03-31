@@ -1,4 +1,6 @@
 from collections import deque
+from constants import SOURCE_FAMILIES as _SOURCE_FAMILIES
+from metadata import is_song_pair as _is_song_pair
 
 
 class SourceHealth:
@@ -34,7 +36,7 @@ class SourceHealth:
 
 
 class SourcePolicy:
-    FAMILIES = ('musicplayer', 'api', 'icy')
+    FAMILIES = _SOURCE_FAMILIES
 
     def __init__(self, window=40, switch_margin=0.12, single_confirm_polls=2):
         self.window = int(window)
@@ -63,12 +65,8 @@ class SourcePolicy:
         self._known_songs = frozenset()
 
     @staticmethod
-    def _valid_pair(pair):
-        return bool(pair and pair[0] and pair[1])
-
-    @staticmethod
     def _contains_station(pair, station_name):
-        if not SourcePolicy._valid_pair(pair):
+        if not _is_song_pair(pair):
             return False
         station_l = (station_name or '').strip().lower()
         if not station_l:
@@ -95,13 +93,13 @@ class SourcePolicy:
 
     def _is_known_song(self, pair):
         """Prüft ob ein Pair im bestätigten Song-Cache des Senders liegt."""
-        if not self._known_songs or not self._valid_pair(pair):
+        if not self._known_songs or not _is_song_pair(pair):
             return False
         return (str(pair[0]).strip().lower(), str(pair[1]).strip().lower()) in self._known_songs
 
     def _is_keyword_generic(self, pair):
         """Prüft, ob ein Pair einen bekannten generischen Sender-String enthält."""
-        if not self._generic_keywords or not self._valid_pair(pair):
+        if not self._generic_keywords or not _is_song_pair(pair):
             return False
         text = f"{pair[0]} {pair[1]}".lower()
         return any(kw in text for kw in self._generic_keywords)
@@ -126,7 +124,7 @@ class SourcePolicy:
         st = self._state.get(family)
         if st is None:
             return
-        is_valid = self._valid_pair(pair)
+        is_valid = _is_song_pair(pair)
         is_generic = self._is_generic_pair(pair, station_name)
         has_changed = bool(is_valid and st.last_pair[0] and st.last_pair[1] and pair != st.last_pair)
         st.valid.append(1 if is_valid else 0)
@@ -243,12 +241,12 @@ class SourcePolicy:
         mp_reliable_comparator = not self._mp_unusable()
         icy_reliable_comparator = not self._icy_structural_generic
 
-        if mp_reliable_comparator and self._valid_pair(mp_pair):
+        if mp_reliable_comparator and _is_song_pair(mp_pair):
             comparator_count += 1
             if mp_pair != api_pair:
                 conflict_count += 1
 
-        if icy_reliable_comparator and self._valid_pair(icy_pair):
+        if icy_reliable_comparator and _is_song_pair(icy_pair):
             comparator_count += 1
             if icy_pair != api_pair:
                 conflict_count += 1
@@ -263,7 +261,7 @@ class SourcePolicy:
         # Ausnahme: Senderprofil markiert MP als strukturell unbrauchbar (absent/noise).
         if (
             'musicplayer' in valid_pairs
-            and self._valid_pair(valid_pairs.get('musicplayer'))
+            and _is_song_pair(valid_pairs.get('musicplayer'))
             and not self._mp_unusable()
         ):
             return 'musicplayer'
@@ -317,7 +315,7 @@ class SourcePolicy:
         return ''
 
     def _classify_source_state(self, pair, station_name):
-        if not self._valid_pair(pair):
+        if not _is_song_pair(pair):
             return 'empty'
         if self._is_generic_pair(pair, station_name):
             return 'generic'
@@ -367,14 +365,14 @@ class SourcePolicy:
     ):
         winner_family = self._source_family(last_winner_source)
         pairs = {
-            'musicplayer': current_mp_pair if self._valid_pair(current_mp_pair) else ('', ''),
-            'api': current_api_pair if self._valid_pair(current_api_pair) else ('', ''),
-            'icy': current_icy_pair if self._valid_pair(current_icy_pair) else ('', ''),
+            'musicplayer': current_mp_pair if _is_song_pair(current_mp_pair) else ('', ''),
+            'api': current_api_pair if _is_song_pair(current_api_pair) else ('', ''),
+            'icy': current_icy_pair if _is_song_pair(current_icy_pair) else ('', ''),
         }
         for family, pair in pairs.items():
             self._observe_pair(family, pair, station_name, last_winner_pair)
 
-        valid_pairs = {family: pair for family, pair in pairs.items() if self._valid_pair(pair)}
+        valid_pairs = {family: pair for family, pair in pairs.items() if _is_song_pair(pair)}
         preferred = self._preferred_family(valid_pairs, winner_family)
         default_reason = reasons.get(winner_family, reasons['title'])
         confirm_polls = self._active_confirm_polls()
@@ -401,15 +399,15 @@ class SourcePolicy:
         icy_pair = pairs.get('icy', ('', ''))
         mp_pair = pairs.get('musicplayer', ('', ''))
         external_support_last = (
-            (self._valid_pair(api_pair) and api_pair == last_winner_pair)
-            or (self._valid_pair(icy_pair) and icy_pair == last_winner_pair)
+            (_is_song_pair(api_pair) and api_pair == last_winner_pair)
+            or (_is_song_pair(icy_pair) and icy_pair == last_winner_pair)
         )
 
         # MP-Prioritaet: wenn MP einen neuen, validen Song meldet, wird dieser
         # bevorzugt uebernommen (sofern MP nicht generisch ist).
         if (
             winner_family != 'musicplayer'
-            and self._valid_pair(mp_pair)
+            and _is_song_pair(mp_pair)
             and mp_pair != last_winner_pair
             and not self._is_generic_pair(mp_pair, station_name)
         ):
@@ -419,7 +417,7 @@ class SourcePolicy:
             return _finish(False, reasons['musicplayer'])
 
         # Active source reports a real track change.
-        if self._valid_pair(active_pair) and active_pair != last_winner_pair:
+        if _is_song_pair(active_pair) and active_pair != last_winner_pair:
             if winner_family == 'api':
                 comparator_count, conflict_count = self._api_reliable_comparator_conflicts(
                     active_pair,
@@ -455,14 +453,14 @@ class SourcePolicy:
         if (
             winner_family == 'api'
             and stream_title_changed
-            and self._valid_pair(pairs['icy'])
+            and _is_song_pair(pairs['icy'])
             and pairs['icy'] != last_winner_pair
             and not self._is_generic_pair(pairs['icy'], station_name)
         ):
-            api_is_stale = self._valid_pair(api_pair) and api_pair == last_winner_pair
+            api_is_stale = _is_song_pair(api_pair) and api_pair == last_winner_pair
             if (
                 preferred == 'icy'
-                or (preferred == '' and not self._valid_pair(api_pair))
+                or (preferred == '' and not _is_song_pair(api_pair))
                 or api_is_stale
             ):
                 if self._confirm('icy', pairs['icy'], 1):
@@ -473,7 +471,7 @@ class SourcePolicy:
             and last_winner_pair
             and last_winner_pair[0]
             and last_winner_pair[1]
-            and not self._valid_pair(active_pair)
+            and not _is_song_pair(active_pair)
         ):
             if external_support_last:
                 self._reset_confirm()
@@ -484,9 +482,9 @@ class SourcePolicy:
             return _finish(False, reasons['musicplayer'])
 
         # Active source has no data: move to preferred valid source.
-        if not self._valid_pair(active_pair) and preferred:
+        if not _is_song_pair(active_pair) and preferred:
             target_pair = valid_pairs.get(preferred, ('', ''))
-            if self._valid_pair(target_pair) and target_pair != last_winner_pair:
+            if _is_song_pair(target_pair) and target_pair != last_winner_pair:
                 required = confirm_polls if len(valid_pairs) == 1 else 1
                 if self._confirm(preferred, target_pair, required):
                     return _finish(True, reasons.get(preferred, reasons['title']))

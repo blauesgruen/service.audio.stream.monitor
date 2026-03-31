@@ -15,6 +15,7 @@ ADDON_VERSION = ADDON.getAddonInfo('version')
 # --- API Endpunkte ---
 
 MUSICBRAINZ_API_URL = "https://musicbrainz.org/ws/2/recording/"
+MUSICBRAINZ_ARTIST_URL = "https://musicbrainz.org/ws/2/artist/"
 RADIODE_SEARCH_API_URL = "https://prod.radio-api.net/stations/search"
 RADIODE_NOWPLAYING_API_URL = "https://api.radio.de/stations/now-playing"
 RADIODE_DETAILS_API_URL = "https://prod.radio-api.net/stations/details"
@@ -43,7 +44,17 @@ MB_WINNER_MIN_COMBINED = 55.0
 # Unter diesem Schwellwert wird der Originalwert aus der Quelle behalten.
 MB_LABEL_CORRECTION_MIN_SIM = 0.85
 MP_TRUST_MAX_MISMATCHES = 2
+# Feature-Flag: MusicPlayer als eigenstaendige Songquelle (parallel zu API/ICY).
+# Bewusst deaktiviert – MusicPlayer-Daten werden bereits als Vergleichsquelle
+# in der Source-Policy beruecksichtigt. Eine separate Entscheidungsschicht
+# wuerde die Logik unnoetig verdoppeln. Auf True setzen um den Pfad zu reaktivieren.
 MP_DECISION_ENABLED = False
+
+# --- Quellen-Familien ---
+
+SOURCE_FAMILIES = ('musicplayer', 'api', 'icy')
+STREAM_SOURCE_FAMILIES = ('api', 'icy')  # Subset: externe Stream-Quellen ohne MusicPlayer
+ICY_FORMAT_KEYS = ('artist_title', 'title_artist', 'unknown')
 
 # Trigger-Bezeichner fuer Quellenwechsel
 TRIGGER_TITLE_CHANGE = 'Titelwechsel'
@@ -80,8 +91,6 @@ SONG_END_MIN_NON_SONG_SOURCES = 2
 SONG_END_REQUIRE_ADDITIONAL_SIGNAL = True
 SONG_END_STALE_API_MIN_S = 12.0
 SONG_END_NEAR_TIMEOUT_S = 30.0
-# Rueckwaertskompatibilitaet (legacy name)
-API_DATA_REFRESH_INTERVAL_S = API_NOW_REFRESH_INTERVAL_S
 API_METADATA_POLL_INTERVAL_S = 10
 MUSICPLAYER_FALLBACK_POLL_INTERVAL_S = 5
 # Analysis event persistence

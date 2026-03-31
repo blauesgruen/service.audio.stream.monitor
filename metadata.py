@@ -109,14 +109,14 @@ def clean_title_part(part: str) -> str:
     if not part:
         return ""
     
-    # Bekannte Metadaten-Keywords (kleingeschrieben)
+    # Bekannte Metadaten-Keywords (kleingeschrieben) und Jahreszahlen-Pattern
     tags = [
-        'radio edit', 'remaster', 'remix', 'mix', 'feat', 'ft.', 'version', 
-        'original', 'extended', 'single', 'album', 'live', 'recorded',
-        'digitally', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024'
+        'radio edit', 'remaster', 'remix', 'mix', 'feat', 'ft.', 'version',
+        'original', 'extended', 'single', 'album', 'live', 'recorded', 'digitally',
     ]
-    
-    # Wir suchen nach Klammern ( ... ), die eines dieser Keywords enthalten
+    _year_in_parens = re.compile(r'\b(?:19|20)\d{2}\b')
+
+    # Wir suchen nach Klammern ( ... ), die eines dieser Keywords oder ein Jahr enthalten
     # Wir machen das iterativ, um mehrere Klammern zu behandeln
     result = part
     changed = True
@@ -125,7 +125,7 @@ def clean_title_part(part: str) -> str:
         matches = re.finditer(r'\(([^)]+)\)', result)
         for m in matches:
             content = m.group(1).lower()
-            if any(t in content for t in tags):
+            if any(t in content for t in tags) or _year_in_parens.search(content):
                 # Diese Klammer entfernen
                 span = m.span()
                 result = result[:span[0]] + result[span[1]:]

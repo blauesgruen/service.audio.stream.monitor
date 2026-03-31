@@ -56,6 +56,7 @@ class MusicBrainzCache:
     def set(self, title: str, artist: str, result: Tuple):
         """
         Speichert Ergebnis im Cache.
+        Loest nach jeweils 50 Eintraegen eine Bereinigung abgelaufener Eintraege aus.
 
         Args:
             title: Song-Titel
@@ -66,22 +67,25 @@ class MusicBrainzCache:
 
         with self._lock:
             self._cache[cache_key] = (result, time.time())
+            if len(self._cache) % 50 == 0:
+                self._cleanup_expired_unlocked()
+
+    def _cleanup_expired_unlocked(self):
+        """Entfernt abgelaufene Cache-Eintraege (muss unter _lock aufgerufen werden)."""
+        now = time.time()
+        expired_keys = [
+            key for key, (_, timestamp) in self._cache.items()
+            if now - timestamp >= self._ttl
+        ]
+        for key in expired_keys:
+            del self._cache[key]
+        if expired_keys:
+            log_debug(f"Cache Cleanup: {len(expired_keys)} abgelaufene Eintraege entfernt")
 
     def cleanup_expired(self):
-        """Entfernt abgelaufene Cache-Einträge."""
-        now = time.time()
-
+        """Entfernt abgelaufene Cache-Einträge (öffentliche API)."""
         with self._lock:
-            expired_keys = [
-                key for key, (_, timestamp) in self._cache.items()
-                if now - timestamp >= self._ttl
-            ]
-
-            for key in expired_keys:
-                del self._cache[key]
-
-            if expired_keys:
-                log_debug(f"Cache Cleanup: {len(expired_keys)} abgelaufene Einträge entfernt")
+            self._cleanup_expired_unlocked()
 
     def clear(self):
         """Leert den gesamten Cache."""

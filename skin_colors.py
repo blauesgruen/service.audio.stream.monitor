@@ -12,9 +12,12 @@ import xml.etree.ElementTree as ET
 try:
     import xbmc
     import xbmcvfs
+    from logger import log_info, log_warning
     _KODI = True
 except ImportError:
     _KODI = False
+    def log_info(msg): pass
+    def log_warning(msg): pass
 
 # Fallback-Farben wenn kein Skin oder keine colors/Defaults.xml vorhanden
 _FALLBACK_COLORS = [
@@ -57,17 +60,9 @@ def get_skin_colors():
     except FileNotFoundError:
         pass
     except ET.ParseError as exc:
-        if _KODI:
-            xbmc.log(
-                f'[AudioStreamMonitor] skin_colors: XML-Fehler in {colors_file}: {exc}',
-                xbmc.LOGWARNING,
-            )
+        log_warning(f'skin_colors: XML-Fehler in {colors_file}: {exc}')
     except Exception as exc:
-        if _KODI:
-            xbmc.log(
-                f'[AudioStreamMonitor] skin_colors: Fehler beim Lesen der Skinfarben: {exc}',
-                xbmc.LOGWARNING,
-            )
+        log_warning(f'skin_colors: Fehler beim Lesen der Skinfarben: {exc}')
     return colors
 
 
@@ -90,15 +85,7 @@ def update_settings_colors():
                 setting.set('values', values)
                 break
         tree.write(_SETTINGS_XML, encoding='utf-8', xml_declaration=True)
-        if _KODI:
-            xbmc.log(
-                f'[AudioStreamMonitor] skin_colors: {len(color_names)} Skinfarben in settings.xml eingetragen',
-                xbmc.LOGINFO,
-            )
+        log_info(f'skin_colors: {len(color_names)} Skinfarben in settings.xml eingetragen')
     except Exception as exc:
-        if _KODI:
-            xbmc.log(
-                f'[AudioStreamMonitor] skin_colors: settings.xml konnte nicht aktualisiert werden: {exc}',
-                xbmc.LOGWARNING,
-            )
+        log_warning(f'skin_colors: settings.xml konnte nicht aktualisiert werden: {exc}')
     return color_names

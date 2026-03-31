@@ -71,39 +71,6 @@ class APIClient:
 
         raise last_exc
 
-    def head(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 5) -> requests.Response:
-        """
-        Führt HEAD-Request mit automatischen Retries durch.
-
-        Args:
-            url: Ziel-URL
-            params: Query-Parameter
-            timeout: Timeout in Sekunden
-
-        Returns:
-            Response-Objekt
-
-        Raises:
-            Exception: Bei dauerhaftem Fehler nach allen Retries
-        """
-        last_exc = Exception("HEAD: kein Versuch")
-
-        for attempt in range(self.retry_count):
-            try:
-                response = self.session.head(url, params=params, timeout=timeout)
-                response.raise_for_status()
-                return response
-
-            except Exception as e:
-                last_exc = e
-
-                if attempt < self.retry_count - 1:
-                    wait = 2 ** attempt + random.uniform(0, 1)
-                    log_warning(f"API-HEAD Retry {attempt+1}/{self.retry_count} in {wait:.1f}s: {e}")
-                    time.sleep(wait)
-
-        raise last_exc
-
     def close(self):
         """Schließt die Session und gibt Ressourcen frei."""
         self.session.close()

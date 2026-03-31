@@ -8,7 +8,7 @@ import time
 from difflib import SequenceMatcher
 
 from constants import (
-    MUSICBRAINZ_API_URL, MUSICBRAINZ_HEADERS,
+    MUSICBRAINZ_API_URL, MUSICBRAINZ_ARTIST_URL, MUSICBRAINZ_HEADERS,
     MB_SONG_CACHE_TTL, INVALID_METADATA_VALUES,
     MB_WORK_CONTEXT_ENABLED, MB_WORK_CONTEXT_MAX_SECONDS,
     MB_WORK_CONTEXT_MAX_PAGES, MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS,
@@ -25,7 +25,17 @@ from metadata import clean_title_part as _clean_title_part, get_artist_variants 
 
 _mb_client = APIClient(headers=MUSICBRAINZ_HEADERS, retry_count=3)
 _mb_cache = MusicBrainzCache(ttl=MB_SONG_CACHE_TTL)
-_artist_info_cache = {}  # Artist-Info Cache (in-memory, kein TTL)
+_artist_info_cache = {}       # Artist-Info Cache (in-memory, kein TTL)
+_ARTIST_INFO_CACHE_MAX = 200  # maximale Eintraege; aelteste werden bei Ueberschreitung entfernt
+
+
+def _artist_cache_set(mbid, value):
+    """Schreibt in den Artist-Info-Cache und entfernt aelteste Eintraege wenn Limit erreicht."""
+    if len(_artist_info_cache) >= _ARTIST_INFO_CACHE_MAX:
+        # Ersten (aeltesten) Eintrag entfernen
+        oldest = next(iter(_artist_info_cache))
+        del _artist_info_cache[oldest]
+    _artist_info_cache[mbid] = value
 
 
 # ── Private Hilfsfunktionen ──────────────────────────────────────────────────
@@ -871,7 +881,7 @@ def musicbrainz_query_artist_info(mbid):
         log_debug(f"Artist-Info Cache-Treffer für MBID={mbid}")
         return _artist_info_cache[mbid]
 
-    url = f"https://musicbrainz.org/ws/2/artist/{mbid}"
+    url = f"{MUSICBRAINZ_ARTIST_URL}{mbid}"
     params = {"inc": "artist-rels+genres", "fmt": "json"}
 
     try:
@@ -888,7 +898,7 @@ def musicbrainz_query_artist_info(mbid):
         # Gründungsjahr und Mitglieder nur für Bands (Groups)
         if data.get("type") != "Group":
             result = ('', '', genre)
-            _artist_info_cache[mbid] = result
+            _artist_cache_set(mbid, result)
             return result
 
         # Gründungsjahr
@@ -918,13 +928,13 @@ def musicbrainz_query_artist_info(mbid):
         )
 
         result = (band_formed, band_members, genre)
-        _artist_info_cache[mbid] = result
+        _artist_cache_set(mbid, result)
         return result
 
     except Exception as e:
         log_warning(f"Fehler beim Artist-Info Lookup (MBID={mbid}): {e}")
         # Negativen Cache-Eintrag setzen um Wiederholungs-Requests zu vermeiden
-        _artist_info_cache[mbid] = ('', '', '')
+        _artist_cache_set(mbid, ('', '', ''))
         return '', '', ''
 
 

@@ -5,6 +5,8 @@ import hashlib
 from datetime import datetime
 
 from constants import (
+    SOURCE_FAMILIES,
+    ICY_FORMAT_KEYS,
     SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
     SONG_END_DETECTOR_ENABLED,
     SONG_END_HOLD_S,
@@ -29,10 +31,10 @@ from constants import (
     STATION_PROFILE_MIN_STABLE_SESSIONS,
 )
 from song_db import SongDatabase
+from metadata import is_song_pair as _valid_pair
 
 
-FAMILIES = ('musicplayer', 'api', 'icy')
-ICY_FORMAT_KEYS = ('artist_title', 'title_artist', 'unknown')
+FAMILIES = SOURCE_FAMILIES
 
 
 def _clamp(value, low, high):
@@ -67,10 +69,6 @@ def _default_song_end_policy():
         'stale_api_min_s': float(SONG_END_STALE_API_MIN_S),
         'near_timeout_s': float(SONG_END_NEAR_TIMEOUT_S),
     }
-
-
-def _valid_pair(pair):
-    return bool(pair and pair[0] and pair[1])
 
 
 class StationProfileSession:
