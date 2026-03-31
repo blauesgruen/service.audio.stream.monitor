@@ -3533,6 +3533,11 @@ class RadioMonitor(xbmc.Monitor):
                                 logo = listitem_icon
                                 self.station_logo = logo
                                 self._ensure_api_source_from_context(logo, 'check_playing_listitem_logo')
+                                if self._can_use_tunein_api() and not self.tunein_station_id:
+                                    tunein_id = _tunein_extract_station_id(logo)
+                                    if tunein_id:
+                                        self.tunein_station_id = tunein_id
+                                        log_info(f"TuneIn Station-ID aus Logo-URL: '{tunein_id}'")
                             
                             # 2. Fallback: Window-Property vom radio.de Addon
                             if not logo:
