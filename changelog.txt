@@ -1,3 +1,13 @@
+v1.1.0 (2026-03-31)
+- Neu: Addon-Settings – Bullet-Punkt (an/aus) und Farbe aus der Farbpalette des aktiven Skins wählbar.
+- Neu: skin_colors.py liest colors/Defaults.xml des aktiven Skins und befüllt das Farb-Dropdown in den Settings dynamisch beim Start.
+- Neu: RadioMonitor.ArtistDisplay – eigene Property für die Skin-Anzeige mit konfiguriertem Bullet-Präfix; RadioMonitor.Artist bleibt unverändert für Artist Slideshow.
+- Neu: Einstellung „Songs und Keywords in Datenbank und JSON speichern" – Persistenz von song_data.db und Senderprofil-JSONs kann deaktiviert werden.
+- Neu: ICY-Rohdaten-Fallback bei MB-Score=0 – wenn kein API vorhanden, werden Artist/Title direkt aus dem ICY-Split übernommen (z. B. für DJ-Sets und Radiosendungen, die nicht in MusicBrainz eingetragen sind).
+- Anpassung: RadioMonitor.MBID in RadioMonitor.ArtistMBID umbenannt (klarere Unterscheidung Artist- vs. Recording-MBID).
+- Anpassung: generic_strings-Tabelle vereinfacht – Spalten seen_generic/seen_song entfernt, Befüllung nur noch außerhalb aktiver Song-Sessions; rate-basierte Promotionslogik entfernt.
+- Doku: README und TECHNISCHE_DOKUMENTATION auf alle Änderungen dieser Version aktualisiert.
+
 v1.0.11 (2026-03-27)
 - Anpassung: Bei klar fehlenden Songdaten (alle MB-Kandidaten `score=0` und kein API-Wechsel-Sonderfall) werden `RadioMonitor.Artist` und `RadioMonitor.Title` nicht mehr mit unzuverlaessigen Restdaten befuellt.
 - Anpassung: In diesem Fall bleiben `RadioMonitor.Station` und `RadioMonitor.StreamTitle` gesetzt; song-bezogene Felder werden geloescht.
