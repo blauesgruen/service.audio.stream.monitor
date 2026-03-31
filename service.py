@@ -2692,16 +2692,37 @@ class RadioMonitor(xbmc.Monitor):
                     None
                 )
                 if icy_direct and icy_direct[0] and icy_direct[1]:
-                    xbmc.log(
-                        f"[{ADDON_NAME}] MB score=0, kein API – ICY-Rohdaten-Fallback: "
-                        f"'{icy_direct[0]} - {icy_direct[1]}'",
-                        xbmc.LOGINFO
-                    )
-                    self._set_last_song_decision('icy', icy_direct[0], icy_direct[1])
-                    if self.mp_decision_enabled:
-                        self._log_musicplayer_comparison('icy', icy_direct, mp_pairs)
-                        self._update_musicplayer_trust_after_decision('icy', icy_direct, mp_pairs)
-                    return icy_direct[0], icy_direct[1], '', '', '', '', 0
+                    _a, _t = icy_direct
+                    # Defensiv: einzelne Zahl als Artist oder Title ist eine numerische Stream-ID,
+                    # kein echter Song (z.B. "284684 - Real Title" oder "Artist - 399409").
+                    _pure_num = re.compile(r'^\d+$')
+                    if _pure_num.match(_a) or _pure_num.match(_t):
+                        if api_candidate[0] and api_candidate[1]:
+                            xbmc.log(
+                                f"[{ADDON_NAME}] MB score=0, ICY-Teil ist numerische ID "
+                                f"('{_a} - {_t}') – Fallback auf API: "
+                                f"'{api_candidate[0]} - {api_candidate[1]}'",
+                                xbmc.LOGINFO
+                            )
+                            self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
+                            if self.mp_decision_enabled:
+                                self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
+                                self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
+                            return api_candidate[0], api_candidate[1], '', '', '', '', 0
+                        log_debug(
+                            f"MB score=0, ICY-Teil ist numerische ID ('{_a} - {_t}'), kein API – kein Song"
+                        )
+                    else:
+                        xbmc.log(
+                            f"[{ADDON_NAME}] MB score=0, kein API – ICY-Rohdaten-Fallback: "
+                            f"'{_a} - {_t}'",
+                            xbmc.LOGINFO
+                        )
+                        self._set_last_song_decision('icy', _a, _t)
+                        if self.mp_decision_enabled:
+                            self._log_musicplayer_comparison('icy', icy_direct, mp_pairs)
+                            self._update_musicplayer_trust_after_decision('icy', icy_direct, mp_pairs)
+                        return _a, _t, '', '', '', '', 0
             xbmc.log(
                 f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, keine belastbaren Songdaten -> "
                 f"nutze nur Station/StreamTitle")
