@@ -126,10 +126,11 @@ class PropertyNames:
     Window-Property-Namen als Konstanten.
     Verhindert Tippfehler und vereinfacht Umbenennung.
     """
-    STATION    = 'RadioMonitor.Station'
-    TITLE      = 'RadioMonitor.Title'
-    ARTIST     = 'RadioMonitor.Artist'
-    ALBUM      = 'RadioMonitor.Album'
+    STATION        = 'RadioMonitor.Station'
+    TITLE          = 'RadioMonitor.Title'
+    ARTIST         = 'RadioMonitor.Artist'
+    ARTIST_DISPLAY = 'RadioMonitor.ArtistDisplay'
+    ALBUM          = 'RadioMonitor.Album'
     ALBUM_DATE = 'RadioMonitor.AlbumDate'
     GENRE      = 'RadioMonitor.Genre'
     MBID       = 'RadioMonitor.ArtistMBID'

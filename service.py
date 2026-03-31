@@ -920,6 +920,7 @@ class RadioMonitor(xbmc.Monitor):
             )
 
         WINDOW.clearProperty(_P.ARTIST)
+        WINDOW.clearProperty(_P.ARTIST_DISPLAY)
         WINDOW.clearProperty(_P.TITLE)
         WINDOW.clearProperty(_P.ALBUM)
         WINDOW.clearProperty(_P.ALBUM_DATE)
@@ -996,6 +997,7 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.STATION)
         WINDOW.clearProperty(_P.TITLE)
         WINDOW.clearProperty(_P.ARTIST)
+        WINDOW.clearProperty(_P.ARTIST_DISPLAY)
         WINDOW.clearProperty(_P.ALBUM)
         WINDOW.clearProperty(_P.ALBUM_DATE)
         WINDOW.clearProperty(_P.GENRE)
@@ -1044,7 +1046,7 @@ class RadioMonitor(xbmc.Monitor):
             log_debug(f"Wiedergabe beendet: Labels sofort geleert ({reason})")
 
     _BULLET_KEYS = {
-        'RadioMonitor.Station', 'RadioMonitor.Title', 'RadioMonitor.Artist',
+        'RadioMonitor.Station', 'RadioMonitor.Title', 'RadioMonitor.ArtistDisplay',
         'RadioMonitor.Album', 'RadioMonitor.Genre',
     }
 
@@ -2141,6 +2143,7 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.FIRST_REL)
                             # Artist-Trigger zuerst setzen, dann Artist-Info nachziehen.
                             self.set_property_safe(_P.ARTIST, display_artist)
+                            self.set_property_safe(_P.ARTIST_DISPLAY, display_artist)
                             xbmc.log(f"[{ADDON_NAME}] API Update: {display_artist} - {display_title}", xbmc.LOGINFO)
                             if mbid and display_artist:
                                 time.sleep(1)  # MusicBrainz Rate-Limit einhalten
@@ -2306,9 +2309,11 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.FIRST_REL)
                     if artist:
                         self.set_property_safe(_P.ARTIST, artist)
+                        self.set_property_safe(_P.ARTIST_DISPLAY, artist)
                         xbmc.log(f"[{ADDON_NAME}] MusicPlayer-Fallback gesetzt: Artist='{artist}', Title='{title}', MBID='{mbid}'", xbmc.LOGINFO)
                     else:
                         WINDOW.clearProperty(_P.ARTIST)
+                        WINDOW.clearProperty(_P.ARTIST_DISPLAY)
                         WINDOW.clearProperty(_P.PLAYING)
                         log_debug("MusicPlayer-Fallback: kein Artist ermittelbar - deaktiviere RadioMonitor")
                         return
@@ -3112,6 +3117,7 @@ class RadioMonitor(xbmc.Monitor):
                                     WINDOW.clearProperty(_P.STREAM_TTL)
                                     WINDOW.clearProperty(_P.ICY_NOW)
                                 WINDOW.clearProperty(_P.ARTIST)
+                                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
                                 WINDOW.clearProperty(_P.TITLE)
                                 WINDOW.clearProperty(_P.ALBUM)
                                 WINDOW.clearProperty(_P.ALBUM_DATE)
@@ -3177,9 +3183,11 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.FIRST_REL)
                             if artist:
                                 self.set_property_safe(_P.ARTIST, artist)
+                                self.set_property_safe(_P.ARTIST_DISPLAY, artist)
                                 log_debug(f"Artist: {artist}")
                             else:
                                 WINDOW.clearProperty(_P.ARTIST)
+                                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
                                 artist = ''
 
                             # Logo sofort nach Artist setzen – vor dem optionalen Artist-Info-Call,
