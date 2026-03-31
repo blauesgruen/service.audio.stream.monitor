@@ -3554,6 +3554,11 @@ class RadioMonitor(xbmc.Monitor):
                                         logo = player_logo
                                         self.station_logo = logo
                                         self._ensure_api_source_from_context(logo, f'check_playing_{source}')
+                                        if self._can_use_tunein_api() and not self.tunein_station_id:
+                                            tunein_id = _tunein_extract_station_id(logo)
+                                            if tunein_id:
+                                                self.tunein_station_id = tunein_id
+                                                log_info(f"TuneIn Station-ID aus Logo-URL: '{tunein_id}'")
                                         break
 
                             if not self.station_logo or not self.is_real_logo(self.station_logo):
