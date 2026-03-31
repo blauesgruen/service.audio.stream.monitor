@@ -2671,6 +2671,29 @@ class RadioMonitor(xbmc.Monitor):
                     self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
                     self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
                 return api_candidate[0], api_candidate[1], '', '', '', '', 0
+            # ICY-Rohdaten-Fallback: kein API, kein Lock, aber valider ICY-Split vorhanden.
+            # MB kennt den Song nicht (z.B. DJ-Sets, Radiosendungen), der ICY-String ist
+            # aber korrekt formatiert. Direkt-Paar (nicht swapped) nehmen.
+            if has_icy_candidate:
+                icy_direct = next(
+                    (
+                        (ev.get('input_artist'), ev.get('input_title'))
+                        for ev in evaluations
+                        if ev.get('source') == 'icy'
+                    ),
+                    None
+                )
+                if icy_direct and icy_direct[0] and icy_direct[1]:
+                    xbmc.log(
+                        f"[{ADDON_NAME}] MB score=0, kein API – ICY-Rohdaten-Fallback: "
+                        f"'{icy_direct[0]} - {icy_direct[1]}'",
+                        xbmc.LOGINFO
+                    )
+                    self._set_last_song_decision('icy', icy_direct[0], icy_direct[1])
+                    if self.mp_decision_enabled:
+                        self._log_musicplayer_comparison('icy', icy_direct, mp_pairs)
+                        self._update_musicplayer_trust_after_decision('icy', icy_direct, mp_pairs)
+                    return icy_direct[0], icy_direct[1], '', '', '', '', 0
             xbmc.log(
                 f"[{ADDON_NAME}] MB score=0 für alle Kandidaten, keine belastbaren Songdaten -> "
                 f"nutze nur Station/StreamTitle")
