@@ -132,7 +132,7 @@ class PropertyNames:
     ALBUM      = 'RadioMonitor.Album'
     ALBUM_DATE = 'RadioMonitor.AlbumDate'
     GENRE      = 'RadioMonitor.Genre'
-    MBID       = 'RadioMonitor.MBID'
+    MBID       = 'RadioMonitor.ArtistMBID'
     FIRST_REL  = 'RadioMonitor.FirstRelease'
     STREAM_TTL = 'RadioMonitor.StreamTitle'
     API_NOW    = 'RadioMonitor.ApiNowPlaying'

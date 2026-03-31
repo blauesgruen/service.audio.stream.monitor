@@ -2096,7 +2096,7 @@ class RadioMonitor(xbmc.Monitor):
                         if display_artist:
                             # Reihenfolge: MBID und Title vor Artist setzen.
                             # AS lauscht auf RadioMonitor.Artist als Trigger und liest
-                            # danach sofort RadioMonitor.MBID – daher muss MBID bereits
+                            # danach sofort RadioMonitor.ArtistMBID – daher muss MBID bereits
                             # gesetzt sein wenn Artist den Trigger auslöst.
                             self.set_property_safe(_P.TITLE, display_title)
                             self.set_property_safe(_P.STREAM_TTL, f"{display_artist} - {display_title}")
@@ -3101,7 +3101,7 @@ class RadioMonitor(xbmc.Monitor):
                             
                             # Reihenfolge: Title und MBID vor Artist setzen.
                             # AS lauscht auf RadioMonitor.Artist als Trigger und liest
-                            # danach sofort RadioMonitor.MBID – daher muss MBID bereits
+                            # danach sofort RadioMonitor.ArtistMBID – daher muss MBID bereits
                             # gesetzt sein wenn Artist den Trigger auslöst.
                             if title:
                                 self.set_property_safe(_P.TITLE, title)
@@ -3183,7 +3183,7 @@ class RadioMonitor(xbmc.Monitor):
                             log_debug(f"RadioMonitor.Title = {WINDOW.getProperty(_P.TITLE)}")
                             log_debug(f"RadioMonitor.Album = {WINDOW.getProperty(_P.ALBUM)}")
                             log_debug(f"RadioMonitor.AlbumDate = {WINDOW.getProperty(_P.ALBUM_DATE)}")
-                            log_debug(f"RadioMonitor.MBID = {WINDOW.getProperty(_P.MBID)}")
+                            log_debug(f"RadioMonitor.ArtistMBID = {WINDOW.getProperty(_P.MBID)}")
                             log_debug(f"RadioMonitor.FirstRelease = {WINDOW.getProperty(_P.FIRST_REL)}")
                             log_debug(f"RadioMonitor.BandFormed = {WINDOW.getProperty(_P.BAND_FORM)}")
                             log_debug(f"RadioMonitor.BandMembers = {WINDOW.getProperty(_P.BAND_MEM)}")

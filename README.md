@@ -23,6 +23,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
+- ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender) und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
 - ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
 - ✅ Startup-Bypass fuer API-only-Sender: initialer Song-Block wird aufgehoben, wenn API stabil liefert und ICY/MusicPlayer keine belastbaren Songs liefern
 - ✅ `RadioMonitor.ApiNowPlaying` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel)
@@ -46,7 +47,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.Station` | Name des Radiosenders | "Bayern 3" |
 | `RadioMonitor.Title` | Aktueller Song-Titel | "Bohemian Rhapsody" |
 | `RadioMonitor.Artist` | Aktueller Interpret | "Queen" |
-| `RadioMonitor.MBID` | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
+| `RadioMonitor.ArtistMBID` | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
 | `RadioMonitor.Album` | Album (via MusicBrainz) | "A Night at the Opera" |
 | `RadioMonitor.AlbumDate` | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease` | Jahr der Erstveröffentlichung des Songs | "1975" |
@@ -162,6 +163,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
 | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
+| `song_db.py` | SQLite-Datenbank: bestätigte Songs als LRU-Cache und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
 | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
 | `api_client.py` | HTTP-Client mit Retry und Exponential-Backoff |

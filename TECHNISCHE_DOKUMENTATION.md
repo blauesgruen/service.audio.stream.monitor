@@ -38,6 +38,8 @@ Wichtig:
   - zustandsbasierte Trigger-Entscheidung ueber Quellenfamilien (`musicplayer`, `api`, `icy`)
 - `station_profiles.py`
   - persistente Senderprofile je Station (EMA-Lernen, Confidence, Policy-Profilableitung)
+- `song_db.py`
+  - SQLite-Datenbank (`song_data.db`): Songs-LRU-Cache (max. 200 pro Sender) und Generic-Keywords (Jingles/Stationsinfos) je Sender
 - `constants.py`
   - Endpunkte, Header, Timeouts, Property-Namen, Regex-Konstanten
 - `logger.py`
@@ -224,27 +226,48 @@ API-only Startup-Heuristik:
   - in der Session wurde noch kein valider ICY-Song gesehen
 - Alternativ kann ein bestehendes Stationsprofil den API-only-Fall direkt freigeben (`confidence >= 0.20` plus Rollen-Flags).
 
+### 6.6 SQLite-Datenbank (`song_data.db`)
+
+`SongDB` verwaltet zwei Tabellen:
+
+**`songs`** — bestaetigte Songs als LRU-Cache pro Sender:
+- Spalten: `station_key`, `artist`, `title`, `mb_data` (JSON), `last_seen`
+- Max. `SONG_CACHE_MAX_PER_STATION` (200) Eintraege je Sender; aelteste werden bei Ueberschreitung verdraengt
+- Wird beim Stationswechsel konsultiert, um zuvor erkannte Songs schneller zu verarbeiten
+- Schreibzugriff: UPSERT bei jedem neuen Song-Winner
+
+**`generic_strings`** — sender-spezifische Jingle-/Stationsinfo-Strings:
+- Spalten: `station_key`, `string`, `seen`, `last_seen`, `promoted`
+- Wird NUR befuellt, wenn kein Song aktiv ist und kein Song in der Session bestaetigt wurde
+- Kandidaten: ICY-StreamTitle und API-Titel (normalisiert, Mindestlaenge `GENERIC_STRING_MIN_LEN=8`)
+- Strings mit langen Ziffernfolgen (`> GENERIC_STRING_MAX_DIGIT_SEQ=3`) werden verworfen
+- Promotion: nach `KEYWORD_PROMOTE_MIN_SEEN=5` Beobachtungen wird `promoted=1` gesetzt
+- Promotete Strings werden als Filter-Keywords verwendet, um nicht-songartige ICY-Bloecke zu erkennen
+
+Migration:
+- `_migrate()` erkennt altes Schema (Spalten `seen_generic`/`seen_song`) und baut die Tabelle neu auf
+
 ## 7) Property-Contract (kritisch)
 
 Die Property-Reihenfolge ist absichtlich.
 
 Wichtig:
 - `RadioMonitor.Artist` wirkt als Trigger fuer Artist Slideshow
-- deshalb muss `RadioMonitor.MBID` vorher gesetzt sein
+- deshalb muss `RadioMonitor.ArtistMBID` vorher gesetzt sein
 - initial bei Streamstart wird Artist bewusst noch nicht gesetzt
 
 Typische Setz-Reihenfolge im Metadatenpfad:
 1. `Title`
 2. `Album`
 3. `AlbumDate`
-4. `MBID`
+4. `ArtistMBID`
 5. `FirstRelease`
 6. `Artist` (Trigger)
 7. `Logo`
 8. optional spaeter `BandFormed`, `BandMembers`, `Genre`
 
 Bei klar fehlenden Songdaten werden song-bezogene Felder geloescht:
-- `Artist`, `Title`, `Album`, `AlbumDate`, `MBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
+- `Artist`, `Title`, `Album`, `AlbumDate`, `ArtistMBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
 - `Station` und `StreamTitle` bleiben fuer die Anzeige erhalten
 - `ApiNowPlaying` wird separat aus der API-Refresh-Logik gepflegt
 
@@ -306,7 +329,7 @@ Timer-Debug-Properties:
 ## 10) Invarianten fuer Refactoring
 
 Nicht verletzen ohne expliziten Grund:
-- Property-Setzreihenfolge (insb. MBID vor Artist)
+- Property-Setzreihenfolge (insb. ArtistMBID vor Artist)
 - Source-Policy-Entscheidung nach Erstentscheidung (Quellenwechsel nur bei bestaetigten, plausiblen Signalen)
 - getrennte, aehnlich aussehende Property-Bloecke nicht blind zusammenfuehren
 - numerische ICY-Titel als "kein ICY" behandeln
@@ -343,6 +366,6 @@ Sichere Erweiterungen:
 - zusaetzliche MB-Heuristiken in `musicbrainz.py` hinter bestehende Schwellenwerte legen
 
 Vorher pruefen:
-- beeinflusst die Aenderung Artist/MBID Trigger-Reihenfolge?
+- beeinflusst die Aenderung Artist/ArtistMBID Trigger-Reihenfolge?
 - kann sie stale Properties bei Streamwechsel erzeugen?
 - bleibt Fallback-Kette (ICY -> API -> MusicPlayer) konsistent?
