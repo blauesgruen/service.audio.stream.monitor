@@ -657,7 +657,7 @@ class RadioMonitor(xbmc.Monitor):
         policy['generic_keywords'] = list(self._get_station_generic_keywords(station_name))
         return policy
 
-    def _record_station_keyword_stats(self, station_name, candidates, is_song_context=False):
+    def _record_station_keyword_stats(self, station_name, candidates):
         if self._profile_store is None:
             return
         station_key = self._build_station_profile_key(station_name)
@@ -667,23 +667,19 @@ class RadioMonitor(xbmc.Monitor):
         if not candidate_list:
             return
         try:
-            self._profile_store.record_keyword_candidates(
-                station_key,
-                candidate_list,
-                is_song_context=is_song_context,
-            )
+            self._profile_store.record_keyword_candidates(station_key, candidate_list)
             self._profile_store.flush_if_due(min_interval_s=STATION_PROFILE_SAVE_INTERVAL_S)
         except Exception as e:
             log_debug(f"Keyword-Statistik konnte nicht aktualisiert werden: {e}")
 
-    def _collect_keyword_observations(self, station_name, texts, is_song_context):
-        """Extrahiert Token-Kandidaten aus Quelltexten und speichert sie mit Kontext-Flag."""
+    def _collect_keyword_observations(self, station_name, texts):
+        """Extrahiert Generic-Kandidaten aus Quelltexten (nur außerhalb bestätigter Songs)."""
         if not station_name:
             return
         configured = self._get_station_generic_keywords(station_name)
         tokens = SongEndDetector.extract_candidate_keywords(texts, station_name, configured)
         if tokens:
-            self._record_station_keyword_stats(station_name, tokens, is_song_context=is_song_context)
+            self._record_station_keyword_stats(station_name, tokens)
 
     @staticmethod
     def _label_from_pair(pair):
@@ -3283,18 +3279,15 @@ class RadioMonitor(xbmc.Monitor):
                         self._refresh_api_nowplaying_property(station_for_policy)
                     self._update_station_profile(station_for_policy)
 
-                    # Keyword-Beobachtungen erfassen: ICY/API-Texte mit Kontext-Flag
+                    # Generic-Keywords erfassen: nur wenn kein Song aktiv/bestätigt
                     if station_for_policy:
-                        kw_texts = [
-                            stream_title or self._label_from_pair(current_icy_pair) or '',
-                            self._label_from_pair(current_api_pair) or '',
-                        ]
-                        if last_winner_pair and last_winner_pair[0] and last_winner_pair[1]:
-                            # Bestätigter Song läuft → Tokens als Song-Kontext schützen
-                            self._collect_keyword_observations(station_for_policy, kw_texts, is_song_context=True)
-                        elif not (last_song_key and last_song_key[0]):
-                            # Noch kein Song in dieser Sitzung → Texte sind sendergeneric
-                            self._collect_keyword_observations(station_for_policy, kw_texts, is_song_context=False)
+                        if not (last_winner_pair and last_winner_pair[0] and last_winner_pair[1]) \
+                                and not (last_song_key and last_song_key[0]):
+                            kw_texts = [
+                                stream_title or self._label_from_pair(current_icy_pair) or '',
+                                self._label_from_pair(current_api_pair) or '',
+                            ]
+                            self._collect_keyword_observations(station_for_policy, kw_texts)
 
                     if (
                         self.song_end_detector_enabled
@@ -3332,11 +3325,7 @@ class RadioMonitor(xbmc.Monitor):
                         matched_keywords = detector_result.get('matched_keywords') or []
                         keyword_candidates = list(dict.fromkeys(list(candidate_keywords) + list(matched_keywords)))
                         if keyword_candidates:
-                            self._record_station_keyword_stats(
-                                station_for_policy,
-                                candidates=keyword_candidates,
-                                is_song_context=False,
-                            )
+                            self._record_station_keyword_stats(station_for_policy, keyword_candidates)
                         if detector_result.get('should_clear'):
                             detector_reason = detector_result.get('reason') or 'mehrere Evidenzen'
                             log_info(

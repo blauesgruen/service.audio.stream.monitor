@@ -178,12 +178,8 @@ GENERIC_STRING_MIN_LEN = 8
 # Maximale Anzahl aufeinanderfolgender Ziffern in einem Kandidaten-String
 # Strings mit mehr Ziffern am Stück (Telefonnummern, Frequenzen) werden verworfen
 GENERIC_STRING_MAX_DIGIT_SEQ = 3
-# Mindestanzahl Beobachtungen in generischem Kontext, bevor ein Token befördert wird
+# Mindestanzahl Beobachtungen, bevor ein Generic-String als Keyword promoted wird
 KEYWORD_PROMOTE_MIN_SEEN = 5
-# Mindestanteil generischer Beobachtungen (seen_generic / seen) für Beförderung
-KEYWORD_PROMOTE_MIN_GENERIC_RATE = 0.80
-# Wenn ein bereits geförderter Token unter diese Rate fällt, wird er wieder entfernt
-KEYWORD_DEMOTE_MAX_GENERIC_RATE = 0.25
 # Maximale Anzahl bestätigter Songs im LRU-Cache pro Sender
 SONG_CACHE_MAX_PER_STATION = 200
 

@@ -704,8 +704,8 @@ class StationProfileStore:
     def get_generic_keywords(self, station_key):
         return self._song_db.get_generic_strings(station_key)
 
-    def record_keyword_candidates(self, station_key, candidates, is_song_context=False):
-        self._song_db.record_string_candidates(station_key, candidates, is_song_context)
+    def record_keyword_candidates(self, station_key, candidates):
+        self._song_db.record_string_candidates(station_key, candidates)
 
     def record_confirmed_song(self, station_key, artist, title):
         self._song_db.record_song(station_key, artist, title)

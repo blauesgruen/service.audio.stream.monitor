@@ -10,8 +10,6 @@ import sqlite3
 from datetime import datetime
 
 from constants import (
-    KEYWORD_DEMOTE_MAX_GENERIC_RATE,
-    KEYWORD_PROMOTE_MIN_GENERIC_RATE,
     KEYWORD_PROMOTE_MIN_SEEN,
     SONG_CACHE_MAX_PER_STATION,
     STATION_PROFILE_KEYWORD_STATS_MAX,
@@ -30,8 +28,6 @@ CREATE TABLE IF NOT EXISTS generic_strings (
     station_key  TEXT NOT NULL,
     string       TEXT NOT NULL,
     seen         INTEGER NOT NULL DEFAULT 0,
-    seen_generic INTEGER NOT NULL DEFAULT 0,
-    seen_song    INTEGER NOT NULL DEFAULT 0,
     last_seen    TEXT NOT NULL,
     promoted     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (station_key, string)
@@ -62,8 +58,29 @@ class SongDatabase:
             self._conn.execute('PRAGMA journal_mode=WAL')
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
+            self._migrate()
         except Exception:
             self._conn = None
+
+    def _migrate(self):
+        """Baut generic_strings neu auf wenn veraltetes Schema erkannt wird."""
+        cursor = self._exec("PRAGMA table_info(generic_strings)")
+        if cursor is None:
+            return
+        cols = {row['name'] for row in cursor.fetchall()}
+        if 'seen_generic' in cols or 'seen_song' in cols:
+            self._exec("DROP TABLE IF EXISTS generic_strings")
+            self._exec("""
+                CREATE TABLE IF NOT EXISTS generic_strings (
+                    station_key  TEXT NOT NULL,
+                    string       TEXT NOT NULL,
+                    seen         INTEGER NOT NULL DEFAULT 0,
+                    last_seen    TEXT NOT NULL,
+                    promoted     INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (station_key, string)
+                )
+            """)
+            self._commit()
 
     def _exec(self, sql, params=()):
         if self._conn is None:
@@ -125,7 +142,7 @@ class SongDatabase:
 
     # --- Generic Strings ---
 
-    def record_string_candidates(self, station_key, candidates, is_song_context=False):
+    def record_string_candidates(self, station_key, candidates):
         if not station_key or not candidates:
             return
         today = _today()
@@ -133,22 +150,12 @@ class SongDatabase:
             token = str(candidate or '').strip().lower()
             if not token:
                 continue
-            if is_song_context:
-                self._exec("""
-                    INSERT INTO generic_strings
-                        (station_key, string, seen, seen_generic, seen_song, last_seen)
-                    VALUES (?, ?, 1, 0, 1, ?)
-                    ON CONFLICT(station_key, string)
-                    DO UPDATE SET seen=seen+1, seen_song=seen_song+1, last_seen=excluded.last_seen
-                """, (station_key, token, today))
-            else:
-                self._exec("""
-                    INSERT INTO generic_strings
-                        (station_key, string, seen, seen_generic, seen_song, last_seen)
-                    VALUES (?, ?, 1, 1, 0, ?)
-                    ON CONFLICT(station_key, string)
-                    DO UPDATE SET seen=seen+1, seen_generic=seen_generic+1, last_seen=excluded.last_seen
-                """, (station_key, token, today))
+            self._exec("""
+                INSERT INTO generic_strings (station_key, string, seen, last_seen)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(station_key, string)
+                DO UPDATE SET seen=seen+1, last_seen=excluded.last_seen
+            """, (station_key, token, today))
         self._commit()
         self._evict_strings(station_key)
 
@@ -180,21 +187,11 @@ class SongDatabase:
         if not station_key:
             return
         min_seen = int(KEYWORD_PROMOTE_MIN_SEEN)
-        min_rate = float(KEYWORD_PROMOTE_MIN_GENERIC_RATE)
-        demote_rate = float(KEYWORD_DEMOTE_MAX_GENERIC_RATE)
         self._exec("""
             UPDATE generic_strings
             SET promoted = 1
-            WHERE station_key = ? AND seen > 0
-              AND seen_generic >= ?
-              AND CAST(seen_generic AS REAL) / seen >= ?
-        """, (station_key, min_seen, min_rate))
-        self._exec("""
-            UPDATE generic_strings
-            SET promoted = 0
-            WHERE station_key = ? AND promoted = 1 AND seen > 0
-              AND CAST(seen_generic AS REAL) / seen < ?
-        """, (station_key, demote_rate))
+            WHERE station_key = ? AND seen >= ?
+        """, (station_key, min_seen))
         self._commit()
 
     def get_generic_strings(self, station_key):
