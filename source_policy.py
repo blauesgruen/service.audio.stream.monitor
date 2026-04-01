@@ -444,7 +444,10 @@ class SourcePolicy:
                     return _finish(True, reasons[winner_family])
                 return _finish(False, reasons[winner_family])
 
-            required = confirm_polls if len(valid_pairs) == 1 else 1
+            # ICY sendet Metadaten nur einmal pro Songwechsel – der Haupt-Loop laeuft
+            # nur bei meta_length>0 (neue ICY-Daten). Multi-Poll-Confirm ist daher
+            # nicht moeglich; sofortiger Confirm (required=1) ist korrekt.
+            required = 1
             if self._confirm(winner_family, active_pair, required):
                 return _finish(True, reasons[winner_family])
             return _finish(False, reasons[winner_family])

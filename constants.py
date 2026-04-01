@@ -21,6 +21,7 @@ RADIODE_NOWPLAYING_API_URL = "https://api.radio.de/stations/now-playing"
 RADIODE_DETAILS_API_URL = "https://prod.radio-api.net/stations/details"
 TUNEIN_DESCRIBE_API_URL = "https://opml.radiotime.com/Describe.ashx"
 TUNEIN_TUNE_API_URL = "https://opml.radiotime.com/Tune.ashx"
+TUNEIN_PARTNER_ID = "HyzqumNX"  # Feste Partner-ID des Kodi TuneIn-Addons
 
 # --- HTTP Headers ---
 

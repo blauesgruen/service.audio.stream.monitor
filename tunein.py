@@ -10,6 +10,7 @@ from constants import (
     NUMERIC_ID_PATTERN as _NUMERIC_ID_RE,
     TUNEIN_DESCRIBE_API_URL,
     TUNEIN_TUNE_API_URL,
+    TUNEIN_PARTNER_ID,
 )
 from metadata import parse_stream_title_simple as _parse_stream_title_simple
 from logger import log_debug, log_info
@@ -159,49 +160,43 @@ def get_nowplaying(api_client, station_id, station_name=None, debug_log=None):
     if not station_id:
         return None, None
 
-    endpoints = [
-        (TUNEIN_DESCRIBE_API_URL, {'id': station_id, 'render': 'json'}),
-        (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json'}),
-        (TUNEIN_TUNE_API_URL, {'id': station_id, 'render': 'json', 'formats': 'mp3,aac,ogg,hls'}),
-    ]
+    # Nur Describe-Endpunkt: einzige Quelle fuer Now-Playing-Daten.
+    # Tune-Endpunkte liefern ausschliesslich Stream-URLs, nie Song-Metadaten.
+    params = {'id': station_id, 'render': 'json', 'partnerId': TUNEIN_PARTNER_ID}
+    try:
+        response = api_client.get(TUNEIN_DESCRIBE_API_URL, params=params, timeout=5)
+        if response.status_code != 200:
+            log_debug(f"TuneIn API Status {response.status_code}")
+            return None, None
 
-    for i, (endpoint, params) in enumerate(endpoints):
         try:
-            response = api_client.get(endpoint, params=params, timeout=5)
-            if response.status_code != 200:
-                log_debug(f"TuneIn API Status {response.status_code} fuer {endpoint}")
-                continue
+            payload = response.json()
+        except Exception:
+            payload = None
 
-            try:
-                payload = response.json()
-            except Exception:
-                payload = None
-
-            if payload is not None:
-                # Describe-Endpunkt (i==0): has_song=False bedeutet keine Song-Daten vorhanden.
-                # Tune-Endpunkte liefern nur Stream-URLs, nie Song-Metadaten – fruehzeitig abbrechen.
-                if i == 0:
-                    body = payload.get('body', []) if isinstance(payload, dict) else []
-                    station = body[0] if (isinstance(body, list) and body and isinstance(body[0], dict)) else {}
-                    if station.get('element') == 'station' and station.get('has_song') is False:
-                        return None, None
-
-                if debug_log:
-                    debug_log('tunein.json', payload)
-
-                artist, title = extract_from_json(payload, station_name)
-                if artist or title:
-                    log_info(f"OK TuneIn API: {artist} - {title}")
-                    return artist, title
-
+        if payload is not None:
             if debug_log:
-                debug_log('tunein.text', response.text)
-            artist, title = extract_from_text(response.text, station_name)
+                debug_log('tunein.json', payload)
+            # has_song=False: Sender hat keine Now-Playing-Daten – sofort abbrechen.
+            body = payload.get('body', []) if isinstance(payload, dict) else []
+            station = body[0] if (isinstance(body, list) and body and isinstance(body[0], dict)) else {}
+            if station.get('element') == 'station' and station.get('has_song') is False:
+                log_debug(f"TuneIn API: has_song=False fuer Station '{station.get('name', station_id)}'")
+                return None, None
+
+            artist, title = extract_from_json(payload, station_name)
             if artist or title:
-                log_info(f"OK TuneIn API (Text): {artist} - {title}")
+                log_info(f"OK TuneIn API: {artist} - {title}")
                 return artist, title
-        except Exception as e:
-            log_debug(f"Fehler bei TuneIn API Abfrage ({endpoint}): {e}")
+
+        if debug_log:
+            debug_log('tunein.text', response.text)
+        artist, title = extract_from_text(response.text, station_name)
+        if artist or title:
+            log_info(f"OK TuneIn API (Text): {artist} - {title}")
+            return artist, title
+    except Exception as e:
+        log_debug(f"Fehler bei TuneIn API Abfrage: {e}")
 
     return None, None
 
