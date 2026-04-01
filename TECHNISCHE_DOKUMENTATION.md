@@ -29,7 +29,10 @@ Wichtig:
 - `radiode.py`
   - Parsing des radio.de now-playing Titelformats, Now-Playing-Abfrage (Slug/Suche), Logo-Aufloesung
 - `tunein.py`
-  - Station-ID-Erkennung aus Plugin-URL, Parsing TuneIn-Titelformate (JSON/Text), Now-Playing-Abfrage
+  - Station-ID-Erkennung aus Plugin-URL, Stream-URL und Logo-URLs (4 Quellen, first-wins)
+  - Now-Playing-Abfrage ausschliesslich ueber `Describe.ashx` mit Partner-ID `HyzqumNX`
+  - `has_song=False`-Early-Exit: Station liefert keine Now-Playing-Daten (sofortiger Abbruch)
+  - Parsing TuneIn-Titelformate (JSON/Text)
 - `cache.py`
   - Thread-safe MB Song-Cache mit TTL
 - `api_client.py`
@@ -178,6 +181,7 @@ Im Loop:
   - Vergleich via MusicPlayer nur wenn nicht `mp_absent`/`mp_noise`
   - Vergleich via ICY nur wenn nicht `icy_structural_generic`
 - Bei gesetzter Gewinnerquelle bleiben Trigger konservativ; Quelle wechselt nur bei bestaetigten, plausiblen Signalen.
+- **ICY-Confirm (required=1):** Der Haupt-Loop laeuft bei ICY-Quellen nur wenn `meta_length>0` (neuer ICY-Block kommt). Multi-Poll-Confirm (required=2) wuerde strukturell nie feuern, weil der Loop bis zum naechsten ICY-Block nicht mehr ausgefuehrt wird. Deshalb gilt fuer ICY-Familie: `required=1` – ein einziger Poll reicht zur Bestaetigung.
 
 ### 6.3 API-Fallback-Worker
 
@@ -251,6 +255,24 @@ API-only Startup-Heuristik:
 
 Migration:
 - `_migrate()` erkennt altes Schema (Spalten `seen_generic`/`seen_song`) und baut die Tabelle neu auf
+
+### 6.7 TuneIn-Integration
+
+**Station-ID-Ermittlung (4 Quellen, first-wins):**
+1. Plugin-URL bei `onPlayBackStarted`: wenn `plugin.audio.tunein2017` in URL → `extract_station_id(playing_file)`
+2. Stream-URL bei `check_playing_new_url`: Fallback bei jeder neuen Stream-URL
+3. `ListItem.Icon` Logo-URL: `extract_station_id(listitem_icon)`
+4. Player-Art-Kandidaten (`Player.Icon`, `Player.Art(poster)` etc.)
+
+`extract_station_id` dekodiert die URL bis zu 3× URL-decode und sucht per Regex nach `[sptufl]\d+`
+in Query-Parametern (`sid`, `preset_id`, `id`, `stationId`) sowie in JSON-Fragmenten der URL.
+
+**API-Abfrage:**
+- Ausschliesslich `Describe.ashx` (Tune.ashx liefert nur Stream-URLs, keine Song-Metadaten)
+- Pflichtparameter: `partnerId=HyzqumNX` (Partner-ID des Kodi TuneIn-Addons)
+- `has_song=False` im Response-Body: Station liefert keine Now-Playing-Daten → sofortiger `return None, None`
+- `debug_log` (Window-Property `RAW_API_TUNEIN_JSON`) wird **vor** dem `has_song`-Check gesetzt,
+  damit der Raw-Wert im Skin auch bei `has_song=False` sichtbar bleibt
 
 ## 7) Property-Contract (kritisch)
 

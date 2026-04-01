@@ -18,8 +18,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Erweitertes Artist-Matching: CamelCase-Splitting ("DeBurgh" → "De Burgh"), Komma-Umkehr, Apostroph-Normalisierung und tokenbasierter Fallback
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
-- ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons
-- ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen
+- ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons; TuneIn-Abfrage ueber `Describe.ashx` mit Partner-ID (korrekte `has_song`/Now-Playing-Antworten)
+- ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen; ICY-Songwechsel werden sofort erkannt (kein Multi-Poll-Confirm, da ICY-Metadaten nur einmal pro Songwechsel ankommen)
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
@@ -197,6 +197,7 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 
 - Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift entweder die API (nur whitelisted Addons: radio.de/radio.de light/TuneIn) oder der MusicPlayer-Fallback
 - Manche Sender senden nur Sender-/Promo-Text statt Interpret/Titel. In solchen Faellen bleiben Artist/Title leer; Station und StreamTitle bleiben fuer die Anzeige erhalten.
+- Einige TuneIn-Sender aktivieren kein Now-Playing (`has_song=False`); fuer diese Sender liefert die TuneIn-API keinen Songtitel – das Addon faellt auf ICY-Metadaten oder MusicPlayer zurueck.
 - Bei verschlüsselten Streams (HTTPS) können manche Server keine ICY-Metadaten liefern
 - Künstler ohne Einträge in fanart.tv oder theaudiodb liefern keine Hintergrundbilder für Artist Slideshow
 
