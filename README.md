@@ -48,7 +48,6 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.Playing`          | "true" wenn Radio läuft | true |
 | `RadioMonitor.Station`          | Name des Radiosenders | "Bayern 3" |
 | `RadioMonitor.Title`            | Aktueller Song-Titel | "Bohemian Rhapsody" |
-| `RadioMonitor.Artist`           | Aktueller Interpret – clean, ohne Bullet (für Artist Slideshow) | "Queen" |
 | `RadioMonitor.ArtistDisplay`    | Aktueller Interpret – mit konfiguriertem Bullet-Präfix (für Skin-Anzeige) | "• Queen" |
 | `RadioMonitor.ArtistMBID`       | MusicBrainz Artist-ID | "0383dadf-2a4e-4d10-a46a-e9e041da8eb3" |
 | `RadioMonitor.Album`            | Album (via MusicBrainz) | "A Night at the Opera" |
