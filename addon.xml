@@ -22,6 +22,7 @@
   - Fix: Sender mit Nummern im Titel und Artist korrekt behandelt.
   - Fix: TuneIn-Station-ID aus Logo-URL extrahieren um TuneIn-Integration zu verbessern.
   - Fix: TuneIn API Endpunkte korrekt behandeln.
+  - Fix: Titelwechselerkennung unter TuneIn
   - Refactoring: Verbesserte Fehlerbehandlung und Performanceoptimierung.
 
 v1.1.0 (2026-03-31)
