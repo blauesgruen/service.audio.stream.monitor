@@ -1,9 +1,10 @@
-"""
-SQLite-basierte Datenbank für senderspezifische Lerndaten.
+﻿"""
+SQLite-based database for station-specific learning data.
 
-Tabellen:
-  songs           — bestätigte (artist, title)-Pairs pro Sender (LRU-Cache)
-  generic_strings — beobachtete Nicht-Song-Texte mit Statistiken und Promotion-Flag
+Tables:
+  songs             confirmed (artist, title) pairs per station (LRU cache)
+  song_daily_counts per-day play counter for (station, artist, title)
+  generic_strings   observed non-song texts with stats and promotion flag
 """
 import os
 import sqlite3
@@ -32,6 +33,14 @@ CREATE TABLE IF NOT EXISTS generic_strings (
     promoted     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (station_key, string)
 );
+CREATE TABLE IF NOT EXISTS song_daily_counts (
+    station_key  TEXT NOT NULL,
+    artist       TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    day          TEXT NOT NULL,
+    count        INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (station_key, artist, title, day)
+);
 """
 
 
@@ -40,6 +49,8 @@ def _today():
 
 
 class SongDatabase:
+
+    _SONG_SEPARATORS = (' - ', ' – ', ' — ', ' | ')
 
     def __init__(self, db_path):
         self._db_path = str(db_path or '')
@@ -62,20 +73,19 @@ class SongDatabase:
         except Exception:
             self._conn = None
 
-    _SONG_SEPARATORS = (' - ', ' – ', ' — ', ' | ')
-
     @staticmethod
     def _looks_like_song(text):
-        """True wenn der String wie 'Artist - Title' aussieht."""
-        for sep in SongDB._SONG_SEPARATORS:
-            if sep in text:
-                parts = text.split(sep, 1)
+        """True if the string looks like 'Artist - Title'."""
+        value = str(text or '')
+        for sep in SongDatabase._SONG_SEPARATORS:
+            if sep in value:
+                parts = value.split(sep, 1)
                 if len(parts[0].strip()) >= 2 and len(parts[1].strip()) >= 2:
                     return True
         return False
 
     def _migrate(self):
-        """Schema-Migrationen fuer generic_strings."""
+        """Schema migrations for generic_strings and cleanup."""
         cursor = self._exec("PRAGMA table_info(generic_strings)")
         if cursor is None:
             return
@@ -94,7 +104,8 @@ class SongDatabase:
             """)
             self._commit()
             return
-        # Fehlerhaft gespeicherte Song-Strings bereinigen (sehen aus wie "artist - title")
+
+        # Remove wrongly stored song-like strings from generic table.
         cursor = self._exec("SELECT rowid, string FROM generic_strings")
         if cursor is None:
             return
@@ -129,12 +140,20 @@ class SongDatabase:
         t = str(title).strip().lower()
         if not a or not t:
             return
+
+        today = _today()
         self._exec("""
             INSERT INTO songs (station_key, artist, title, last_seen, count)
             VALUES (?, ?, ?, ?, 1)
             ON CONFLICT(station_key, artist, title)
             DO UPDATE SET last_seen = excluded.last_seen, count = count + 1
-        """, (station_key, a, t, _today()))
+        """, (station_key, a, t, today))
+        self._exec("""
+            INSERT INTO song_daily_counts (station_key, artist, title, day, count)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(station_key, artist, title, day)
+            DO UPDATE SET count = count + 1
+        """, (station_key, a, t, today))
         self._commit()
         self._evict_songs(station_key)
 
@@ -163,6 +182,57 @@ class SongDatabase:
             return frozenset()
         return frozenset((row['artist'], row['title']) for row in cursor.fetchall())
 
+    def get_station_overview(self, day=None, limit=80):
+        """Aggregated station stats including per-day play count."""
+        target_day = str(day or _today())
+        max_rows = max(1, int(limit or 80))
+        cursor = self._exec("""
+            SELECT
+                s.station_key AS station_key,
+                COUNT(*) AS unique_songs,
+                COALESCE(SUM(s.count), 0) AS total_plays,
+                COALESCE((
+                    SELECT SUM(d.count)
+                    FROM song_daily_counts d
+                    WHERE d.station_key = s.station_key
+                      AND d.day = ?
+                ), 0) AS day_plays
+            FROM songs s
+            GROUP BY s.station_key
+            ORDER BY day_plays DESC, total_plays DESC, station_key ASC
+            LIMIT ?
+        """, (target_day, max_rows))
+        if cursor is None:
+            return ()
+        return tuple(dict(row) for row in cursor.fetchall())
+
+    def get_station_song_history(self, station_key, day=None, limit=250):
+        """Songs for one station with total and per-day counters."""
+        if not station_key:
+            return ()
+        target_day = str(day or _today())
+        max_rows = max(1, int(limit or 250))
+        cursor = self._exec("""
+            SELECT
+                s.artist AS artist,
+                s.title AS title,
+                s.count AS total_count,
+                s.last_seen AS last_seen,
+                COALESCE(d.count, 0) AS day_count
+            FROM songs s
+            LEFT JOIN song_daily_counts d
+              ON d.station_key = s.station_key
+             AND d.artist = s.artist
+             AND d.title = s.title
+             AND d.day = ?
+            WHERE s.station_key = ?
+            ORDER BY day_count DESC, total_count DESC, last_seen DESC, artist ASC, title ASC
+            LIMIT ?
+        """, (target_day, str(station_key), max_rows))
+        if cursor is None:
+            return ()
+        return tuple(dict(row) for row in cursor.fetchall())
+
     # --- Generic Strings ---
 
     def record_string_candidates(self, station_key, candidates):
@@ -184,7 +254,7 @@ class SongDatabase:
 
     def _evict_strings(self, station_key):
         limit = int(STATION_PROFILE_KEYWORD_STATS_MAX)
-        # Nur prüfen wenn nötig, um unnötige DELETEs zu vermeiden
+        # check only when needed to avoid unnecessary DELETEs
         cursor = self._exec(
             "SELECT COUNT(*) FROM generic_strings WHERE station_key = ? AND promoted = 0",
             (station_key,)

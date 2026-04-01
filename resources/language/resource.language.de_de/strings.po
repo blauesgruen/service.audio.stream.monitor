@@ -30,3 +30,51 @@ msgstr "Daten"
 msgctxt "#32021"
 msgid "Save songs and keywords to database and JSON"
 msgstr "Songs und Keywords in Datenbank und JSON speichern"
+
+msgctxt "#32031"
+msgid "Show song history by station"
+msgstr "Songverlauf pro Sender anzeigen"
+
+msgctxt "#32032"
+msgid "Song history"
+msgstr "Songverlauf"
+
+msgctxt "#32033"
+msgid "No song data available yet."
+msgstr "Noch keine Songdaten vorhanden."
+
+msgctxt "#32034"
+msgid "Select station"
+msgstr "Sender auswählen"
+
+msgctxt "#32035"
+msgid "No songs found for this station."
+msgstr "Für diesen Sender wurden keine Songs gefunden."
+
+msgctxt "#32036"
+msgid "Today"
+msgstr "Heute"
+
+msgctxt "#32037"
+msgid "Total"
+msgstr "Gesamt"
+
+msgctxt "#32038"
+msgid "Unique songs"
+msgstr "Unterschiedliche Songs"
+
+msgctxt "#32039"
+msgid "Station"
+msgstr "Sender"
+
+msgctxt "#32040"
+msgid "Date"
+msgstr "Datum"
+
+msgctxt "#32041"
+msgid "Last seen"
+msgstr "Zuletzt gesehen"
+
+msgctxt "#32042"
+msgid "Could not open song history."
+msgstr "Songverlauf konnte nicht geoeffnet werden."

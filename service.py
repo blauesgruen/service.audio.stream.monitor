@@ -456,6 +456,19 @@ class RadioMonitor(xbmc.Monitor):
         kw = self._get_station_generic_keywords(station_name)
         return _is_generic_metadata_text(text, station_name, kw)
 
+    @staticmethod
+    def _is_obvious_non_song_text(text):
+        value = str(text or '').strip().lower()
+        if not value:
+            return False
+        # Typische Service-/Programmtexte statt Songdaten.
+        if re.search(r"\b(anruf|hotline|verkehr|studio|nachrichten)\b", value):
+            return True
+        # Telefonnummern/Frequenzen in Blockform.
+        if re.search(r"\b(?:0\d{2,4}[\s\-]?\d{2,}[\s\-]?\d{1,})\b", value):
+            return True
+        return False
+
     def _is_generic_song_pair(self, pair, station_name=''):
         kw = self._get_station_generic_keywords(station_name)
         return _is_generic_song_pair(pair, station_name, kw)
@@ -2723,6 +2736,22 @@ class RadioMonitor(xbmc.Monitor):
                 icy_candidates
             )
             if locked_source_family and locked_source_pair[0] and locked_source_pair[1]:
+                if (
+                    str(locked_source_family).startswith('icy')
+                    and (
+                        self._is_generic_song_pair(locked_source_pair, station_name)
+                        or self._is_obvious_non_song_text(
+                            f"{locked_source_pair[0]} - {locked_source_pair[1]}"
+                        )
+                        or self._is_obvious_non_song_text(stream_title)
+                    )
+                ):
+                    log_info(
+                        "MB score=0, Source-Lock='icy' liefert generische/Nicht-Song-Daten -> "
+                        "kein Song, nutze nur Station/StreamTitle"
+                    )
+                    self._set_last_song_decision('', None, None)
+                    return None, None, '', '', '', '', 0
                 log_info(
                     f"MB score=0 fuer alle Kandidaten, Source-Lock='{locked_source_family}' "
                     f"-> nutze gelockte Quelle: '{locked_source_pair[0]} - {locked_source_pair[1]}'"
@@ -2784,6 +2813,17 @@ class RadioMonitor(xbmc.Monitor):
                 )
                 if icy_fallback_pair and icy_fallback_pair[0] and icy_fallback_pair[1]:
                     _a, _t = icy_fallback_pair
+                    if (
+                        self._is_generic_song_pair((_a, _t), station_name)
+                        or self._is_obvious_non_song_text(f"{_a} - {_t}")
+                        or self._is_obvious_non_song_text(stream_title)
+                    ):
+                        log_info(
+                            "MB score=0, ICY-Rohdaten sind generisch/Nicht-Song -> "
+                            "kein Song, nutze nur Station/StreamTitle"
+                        )
+                        self._set_last_song_decision('', None, None)
+                        return None, None, '', '', '', '', 0
                     # Defensiv: einzelne Zahl als Artist oder Title ist eine numerische Stream-ID,
                     # kein echter Song (z.B. "284684 - Real Title" oder "Artist - 399409").
                     _pure_num = re.compile(r'^\d+$')

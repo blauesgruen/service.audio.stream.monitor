@@ -7,7 +7,12 @@ import re
 import xbmcaddon
 
 # Addon-Informationen
-ADDON = xbmcaddon.Addon()
+try:
+    ADDON = xbmcaddon.Addon()
+except Exception:
+    # Fallback fuer Aufrufe per direktem RunScript(Dateipfad,...),
+    # bei denen Kodi keinen impliziten Addon-Kontext setzt.
+    ADDON = xbmcaddon.Addon(id='service.audio.stream.monitor')
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
 ADDON_VERSION = ADDON.getAddonInfo('version')
@@ -193,6 +198,10 @@ GENERIC_STRING_MAX_DIGIT_SEQ = 3
 KEYWORD_PROMOTE_MIN_SEEN = 5
 # Maximale Anzahl bestätigter Songs im LRU-Cache pro Sender
 SONG_CACHE_MAX_PER_STATION = 200
+
+# Song-Historie (Settings-Ansicht)
+SONG_HISTORY_STATION_LIMIT = 80
+SONG_HISTORY_SONG_LIMIT = 250
 
 # --- Regex Patterns ---
 

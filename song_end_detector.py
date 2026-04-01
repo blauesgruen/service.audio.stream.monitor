@@ -113,9 +113,14 @@ class SongEndDetector:
             normalized = re.sub(r"\s+", " ", str(value or "").strip().lower())
             if not normalized:
                 continue
-            if len(normalized) < GENERIC_STRING_MIN_LEN:
-                continue
+            # Lange Ziffernfolgen (Hotline/Frequenzen) entfernen, statt den
+            # kompletten Text zu verwerfen. So bleibt der generische Kontext erhalten.
             if digit_seq_pattern.search(normalized):
+                normalized = digit_seq_pattern.sub(" ", normalized)
+                normalized = re.sub(r"\s+", " ", normalized).strip(" -:;,.")
+                if not normalized:
+                    continue
+            if len(normalized) < GENERIC_STRING_MIN_LEN:
                 continue
             if station_l and station_l in normalized:
                 continue
