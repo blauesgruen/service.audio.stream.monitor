@@ -93,6 +93,17 @@ class SongEndDetector:
         return False
 
     @staticmethod
+    def _looks_like_song(text):
+        """True wenn der Text wie 'Artist - Title' aussieht (beide Teile nicht-trivial)."""
+        separators = [' - ', ' – ', ' — ', ' | ']
+        for sep in separators:
+            if sep in text:
+                parts = text.split(sep, 1)
+                if len(parts[0].strip()) >= 2 and len(parts[1].strip()) >= 2:
+                    return True
+        return False
+
+    @staticmethod
     def extract_candidate_keywords(texts, station_name, configured_keywords):
         station_l = str(station_name or "").strip().lower()
         configured = set(SongEndDetector._normalize_keywords(configured_keywords))
@@ -109,6 +120,9 @@ class SongEndDetector:
             if station_l and station_l in normalized:
                 continue
             if normalized in configured:
+                continue
+            # Song-Format (Artist - Title) nicht als Generic-Keyword speichern
+            if SongEndDetector._looks_like_song(normalized):
                 continue
             if normalized not in seen:
                 seen.append(normalized)

@@ -62,8 +62,20 @@ class SongDatabase:
         except Exception:
             self._conn = None
 
+    _SONG_SEPARATORS = (' - ', ' – ', ' — ', ' | ')
+
+    @staticmethod
+    def _looks_like_song(text):
+        """True wenn der String wie 'Artist - Title' aussieht."""
+        for sep in SongDB._SONG_SEPARATORS:
+            if sep in text:
+                parts = text.split(sep, 1)
+                if len(parts[0].strip()) >= 2 and len(parts[1].strip()) >= 2:
+                    return True
+        return False
+
     def _migrate(self):
-        """Baut generic_strings neu auf wenn veraltetes Schema erkannt wird."""
+        """Schema-Migrationen fuer generic_strings."""
         cursor = self._exec("PRAGMA table_info(generic_strings)")
         if cursor is None:
             return
@@ -80,6 +92,17 @@ class SongDatabase:
                     PRIMARY KEY (station_key, string)
                 )
             """)
+            self._commit()
+            return
+        # Fehlerhaft gespeicherte Song-Strings bereinigen (sehen aus wie "artist - title")
+        cursor = self._exec("SELECT rowid, string FROM generic_strings")
+        if cursor is None:
+            return
+        rows = cursor.fetchall()
+        song_rowids = [row['rowid'] for row in rows if self._looks_like_song(str(row['string'] or ''))]
+        if song_rowids:
+            placeholders = ','.join('?' for _ in song_rowids)
+            self._exec(f"DELETE FROM generic_strings WHERE rowid IN ({placeholders})", song_rowids)
             self._commit()
 
     def _exec(self, sql, params=()):
