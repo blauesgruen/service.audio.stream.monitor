@@ -581,6 +581,39 @@ class RadioMonitor(xbmc.Monitor):
         preferred = str((self._active_policy_profile or {}).get('preferred_family', '') or '')
         return preferred in ('musicplayer', 'api', 'icy')
 
+    def _is_mp_profile_reliable(self):
+        profile = self._active_policy_profile or {}
+        try:
+            confidence = float(profile.get('confidence', 0.0))
+        except Exception:
+            confidence = 0.0
+        if confidence < 0.20:
+            return False
+        if bool(profile.get('mp_noise', False)) or bool(profile.get('mp_absent', False)):
+            return False
+        return bool(profile.get('mp_reliable', False))
+
+    def _is_mp_decision_active(self):
+        return bool(self.mp_decision_enabled or self._is_mp_profile_reliable())
+
+    def _effective_icy_format_hint(self):
+        live_hint = str(self._last_icy_format_hint or '').strip().lower()
+        if live_hint in ('artist_title', 'title_artist'):
+            return live_hint
+
+        profile = self._active_policy_profile or {}
+        try:
+            confidence = float(profile.get('confidence', 0.0))
+        except Exception:
+            confidence = 0.0
+        if confidence < 0.20:
+            return 'unknown'
+
+        profile_hint = str(profile.get('icy_format', '') or '').strip().lower()
+        if profile_hint in ('artist_title', 'title_artist'):
+            return profile_hint
+        return 'unknown'
+
     def _should_prioritize_stream_candidates(self):
         if not self._has_station_analysis():
             return False
@@ -1444,7 +1477,7 @@ class RadioMonitor(xbmc.Monitor):
                 return artist, title
         # 3. Optionaler Fallback: Kodi Player InfoTags (nur mit MP-Entscheidung)
         WINDOW.clearProperty(_P.API_NOW)
-        if not self.mp_decision_enabled:
+        if not self._is_mp_decision_active():
             return None, None
         try:
             if self.player.isPlayingAudio():
@@ -1676,7 +1709,7 @@ class RadioMonitor(xbmc.Monitor):
             'trigger_reason': reason if changed else ''
         }
         scores = self.source_policy.debug_scores()
-        if not self.mp_decision_enabled and isinstance(scores, dict):
+        if not self._is_mp_decision_active() and isinstance(scores, dict):
             scores = {k: v for k, v in scores.items() if k != 'musicplayer'}
         self._policy_preferred_source = preferred or ''
         if changed or preferred != getattr(self, '_last_logged_preferred', None):
@@ -1793,7 +1826,7 @@ class RadioMonitor(xbmc.Monitor):
             return locked_candidates
         return candidates
 
-    def _resolve_mb_zero_with_source_lock(self, locked_source, mp_pairs, api_candidate, icy_pairs):
+    def _resolve_mb_zero_with_source_lock(self, locked_source, mp_pairs, api_candidate, icy_candidates):
         """
         MB=0 Fallback fuer source-locked Auswertungen:
         - Bei aktivem Lock darf keine andere Quelle den Lock uebersteuern.
@@ -1812,8 +1845,35 @@ class RadioMonitor(xbmc.Monitor):
             and api_candidate[1]
         ):
             return locked_source_name, self._pair_for_source(locked_source_name, api_candidate)
-        if locked_family == 'icy' and icy_pairs:
-            return locked_source_name, icy_pairs[0]
+        if locked_family == 'icy' and icy_candidates:
+            normalized = []
+            for item in list(icy_candidates or []):
+                if not isinstance(item, (list, tuple)) or len(item) != 2:
+                    continue
+                src_name = str(item[0] or '')
+                pair = item[1] if isinstance(item[1], (list, tuple)) else ('', '')
+                if pair and len(pair) == 2 and pair[0] and pair[1]:
+                    normalized.append((src_name, (pair[0], pair[1])))
+            if not normalized:
+                return '', ('', '')
+
+            prefer_swapped = (
+                self._effective_icy_format_hint() == 'title_artist'
+                and not locked_source_name.endswith('_swapped')
+            )
+            preferred_sources = []
+            if locked_source_name:
+                preferred_sources.append(locked_source_name)
+            if prefer_swapped:
+                preferred_sources.extend(['icy_swapped', 'icy'])
+            else:
+                preferred_sources.extend(['icy', 'icy_swapped'])
+
+            for preferred in preferred_sources:
+                for src_name, pair in normalized:
+                    if src_name == preferred:
+                        return preferred, pair
+            return normalized[0][0], normalized[0][1]
         return '', ('', '')
 
     def _apply_api_stale_override(self, candidates, trigger_reason, api_candidate, icy_pairs):
@@ -2444,7 +2504,7 @@ class RadioMonitor(xbmc.Monitor):
         mp_pairs = []
 
         # MusicPlayer-Kandidaten optional lesen (zentrale Abschaltung ueber MP_DECISION_ENABLED).
-        if self.mp_decision_enabled:
+        if self._is_mp_decision_active():
             mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
             mp_pairs = self._filter_non_generic_song_pairs(
                 self._valid_song_pairs(mp_direct, mp_swapped),
@@ -2515,7 +2575,7 @@ class RadioMonitor(xbmc.Monitor):
             if str(c.get('source', '')).startswith('icy')
         ]
         mp_candidates_allowed = False
-        if self.mp_decision_enabled:
+        if self._is_mp_decision_active():
             mp_candidates_allowed = self._should_use_musicplayer_candidates(
                 mp_pairs,
                 api_candidate,
@@ -2575,7 +2635,7 @@ class RadioMonitor(xbmc.Monitor):
                 winner.get('input_artist'),
                 winner.get('input_title')
             )
-            if self.mp_decision_enabled:
+            if self._is_mp_decision_active():
                 self._log_musicplayer_comparison(
                     winner.get('source'),
                     (winner.get('input_artist'), winner.get('input_title')),
@@ -2605,7 +2665,7 @@ class RadioMonitor(xbmc.Monitor):
                     fb_winner.get('input_artist'),
                     fb_winner.get('input_title')
                 )
-                if self.mp_decision_enabled:
+                if self._is_mp_decision_active():
                     self._log_musicplayer_comparison(
                         fb_winner.get('source'),
                         (fb_winner.get('input_artist'), fb_winner.get('input_title')),
@@ -2633,16 +2693,23 @@ class RadioMonitor(xbmc.Monitor):
         if stream_candidates and evaluations and all(ev.get('score', 0) == 0 for ev in evaluations):
             # MB=0 für die Stream-Quelle: API/ICY intern entscheiden.
             # MusicPlayer wird danach nur zum Abgleich/Trust genutzt.
-            icy_pairs = {
-                (ev.get('input_artist'), ev.get('input_title'))
+            icy_candidates = [
+                (
+                    str(ev.get('source', '') or ''),
+                    (ev.get('input_artist'), ev.get('input_title'))
+                )
                 for ev in evaluations
-                if str(ev.get('source', '')).startswith('icy')
-            }
+                if (
+                    str(ev.get('source', '')).startswith('icy')
+                    and ev.get('input_artist')
+                    and ev.get('input_title')
+                )
+            ]
             locked_source_family, locked_source_pair = self._resolve_mb_zero_with_source_lock(
                 locked_source,
                 mp_pairs,
                 api_candidate,
-                list(icy_pairs)
+                icy_candidates
             )
             if locked_source_family and locked_source_pair[0] and locked_source_pair[1]:
                 log_info(
@@ -2654,7 +2721,7 @@ class RadioMonitor(xbmc.Monitor):
                     locked_source_pair[0],
                     locked_source_pair[1]
                 )
-                if self.mp_decision_enabled:
+                if self._is_mp_decision_active():
                     self._log_musicplayer_comparison(
                         locked_source_family,
                         locked_source_pair,
@@ -2675,7 +2742,7 @@ class RadioMonitor(xbmc.Monitor):
                     f"'{api_candidate[0]} - {api_candidate[1]}'"
                 )
                 self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
-                if self.mp_decision_enabled:
+                if self._is_mp_decision_active():
                     self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
                     self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
                 return api_candidate[0], api_candidate[1], '', '', '', '', 0
@@ -2683,16 +2750,29 @@ class RadioMonitor(xbmc.Monitor):
             # MB kennt den Song nicht (z.B. DJ-Sets, Radiosendungen), der ICY-String ist
             # aber korrekt formatiert. Direkt-Paar (nicht swapped) nehmen.
             if has_icy_candidate:
-                icy_direct = next(
+                preferred_icy_source = (
+                    'icy_swapped'
+                    if self._effective_icy_format_hint() == 'title_artist'
+                    else 'icy'
+                )
+                icy_preferred = next(
                     (
                         (ev.get('input_artist'), ev.get('input_title'))
                         for ev in evaluations
-                        if ev.get('source') == 'icy'
+                        if ev.get('source') == preferred_icy_source
                     ),
                     None
                 )
-                if icy_direct and icy_direct[0] and icy_direct[1]:
-                    _a, _t = icy_direct
+                icy_fallback_pair = icy_preferred or next(
+                    (
+                        (ev.get('input_artist'), ev.get('input_title'))
+                        for ev in evaluations
+                        if str(ev.get('source', '')).startswith('icy')
+                    ),
+                    None
+                )
+                if icy_fallback_pair and icy_fallback_pair[0] and icy_fallback_pair[1]:
+                    _a, _t = icy_fallback_pair
                     # Defensiv: einzelne Zahl als Artist oder Title ist eine numerische Stream-ID,
                     # kein echter Song (z.B. "284684 - Real Title" oder "Artist - 399409").
                     _pure_num = re.compile(r'^\d+$')
@@ -2704,7 +2784,7 @@ class RadioMonitor(xbmc.Monitor):
                                 f"'{api_candidate[0]} - {api_candidate[1]}'"
                             )
                             self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
-                            if self.mp_decision_enabled:
+                            if self._is_mp_decision_active():
                                 self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
                                 self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
                             return api_candidate[0], api_candidate[1], '', '', '', '', 0
@@ -2717,9 +2797,9 @@ class RadioMonitor(xbmc.Monitor):
                             f"'{_a} - {_t}'"
                         )
                         self._set_last_song_decision('icy', _a, _t)
-                        if self.mp_decision_enabled:
-                            self._log_musicplayer_comparison('icy', icy_direct, mp_pairs)
-                            self._update_musicplayer_trust_after_decision('icy', icy_direct, mp_pairs)
+                        if self._is_mp_decision_active():
+                            self._log_musicplayer_comparison('icy', (_a, _t), mp_pairs)
+                            self._update_musicplayer_trust_after_decision('icy', (_a, _t), mp_pairs)
                         return _a, _t, '', '', '', '', 0
             log_info(
                 "MB score=0 für alle Kandidaten, keine belastbaren Songdaten -> "
@@ -2786,7 +2866,7 @@ class RadioMonitor(xbmc.Monitor):
                     )
 
         self._set_last_song_decision('icy', source_artist, source_title)
-        if self.mp_decision_enabled:
+        if self._is_mp_decision_active():
             self._log_musicplayer_comparison('icy', (source_artist, source_title), mp_pairs)
             self._update_musicplayer_trust_after_decision('icy', (source_artist, source_title), mp_pairs)
         return display_artist, display_title, mb_album, mb_album_date, mbid, mb_first_release, duration_ms
@@ -2812,7 +2892,7 @@ class RadioMonitor(xbmc.Monitor):
                 and generation == self.metadata_generation
             ):
                 self.api_metadata_worker(generation)
-            elif generation == self.metadata_generation and self.mp_decision_enabled:
+            elif generation == self.metadata_generation and self._is_mp_decision_active():
                 self._musicplayer_metadata_fallback(generation)
             elif generation == self.metadata_generation:
                 log_debug("Kein No-ICY-Fallback aktiv: MP-Entscheidung ist deaktiviert")
@@ -2877,7 +2957,7 @@ class RadioMonitor(xbmc.Monitor):
                         station_for_policy = station_name
                         invalid_values = INVALID_METADATA_VALUES + ["", station_name]
                         current_mp_pair = ('', '')
-                        if self.mp_decision_enabled:
+                        if self._is_mp_decision_active():
                             mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                             mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
                             current_mp_pair = self._select_musicplayer_pair_for_source(
@@ -2949,7 +3029,7 @@ class RadioMonitor(xbmc.Monitor):
                                 initial_source_pending = True
                                 # MP/API nach dem Wait neu lesen, damit die Quellenwahl
                                 # den tatsaechlich stabilen Startzustand verwendet.
-                                if self.mp_decision_enabled:
+                                if self._is_mp_decision_active():
                                     mp_direct_live, mp_swapped_live = self._read_musicplayer_candidates(invalid_values)
                                     mp_live_pairs = self._valid_song_pairs(mp_direct_live, mp_swapped_live)
                                     current_mp_pair = self._select_musicplayer_pair_for_source(
@@ -3013,7 +3093,7 @@ class RadioMonitor(xbmc.Monitor):
                         )
 
                         mp_generic_hold_active = False
-                        if self.mp_decision_enabled:
+                        if self._is_mp_decision_active():
                             mp_generic_hold_active = self._update_mp_generic_hold_state(
                                 last_winner_source,
                                 current_mp_pair,
@@ -3049,7 +3129,7 @@ class RadioMonitor(xbmc.Monitor):
                                 initial_program_block = False
                         if initial_program_block and source_changed_trigger:
                             block_detail = "ICY/MP noch generisch (Nachrichten/Programmphase)"
-                            if not self.mp_decision_enabled:
+                            if not self._is_mp_decision_active():
                                 block_detail = "ICY noch generisch (Nachrichten/Programmphase)"
                             log_info(
                                 f"Initialer Song-Trigger unterdrueckt: "
@@ -3078,7 +3158,7 @@ class RadioMonitor(xbmc.Monitor):
                                 log_debug(f"MB-Cache invalidiert wegen {trigger_reason}")
                             except Exception:
                                 pass
-                            if self.mp_decision_enabled and trigger_reason.startswith('MusicPlayer'):
+                            if self._is_mp_decision_active() and trigger_reason.startswith('MusicPlayer'):
                                 log_debug(
                                     f"MusicPlayer-Titelwechsel erkannt (trusted): "
                                     f"'{current_mp_pair[0]} - {current_mp_pair[1]}'"
@@ -3094,7 +3174,7 @@ class RadioMonitor(xbmc.Monitor):
 
                             # Artist und Title trennen – API wird intern in parse_stream_title aufgerufen
                             parse_locked_source = last_winner_source
-                            if self.mp_decision_enabled and trigger_reason == self.TRIGGER_MP_CHANGE:
+                            if self._is_mp_decision_active() and trigger_reason == self.TRIGGER_MP_CHANGE:
                                 parse_locked_source = 'musicplayer'
                             elif trigger_reason == self.TRIGGER_ICY_STALE:
                                 parse_locked_source = 'icy'
@@ -3114,7 +3194,7 @@ class RadioMonitor(xbmc.Monitor):
                                 self._parse_locked_source = ''
                             decision_source = self._last_decision_source
                             decision_pair = self._last_decision_pair
-                            if self.mp_decision_enabled:
+                            if self._is_mp_decision_active():
                                 decision_source, decision_pair = self._maybe_reclaim_musicplayer_source(
                                     decision_source,
                                     decision_pair,

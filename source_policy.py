@@ -53,6 +53,7 @@ class SourcePolicy:
         self._profile_preferred_family = ''
         self._profile_switch_margin = None
         self._profile_single_confirm_polls = None
+        self._mp_reliable = False
         self._icy_structural_generic = False
         self._mp_absent = False
         self._mp_noise = False
@@ -210,6 +211,7 @@ class SourcePolicy:
                 self._profile_single_confirm_polls = None
 
         self._icy_structural_generic = bool(data.get('icy_structural_generic', False))
+        self._mp_reliable = bool(data.get('mp_reliable', False))
         self._mp_absent = bool(data.get('mp_absent', False))
         self._mp_noise = bool(data.get('mp_noise', False))
 
@@ -220,6 +222,7 @@ class SourcePolicy:
         self._profile_preferred_family = ''
         self._profile_switch_margin = None
         self._profile_single_confirm_polls = None
+        self._mp_reliable = False
         self._icy_structural_generic = False
         self._mp_absent = False
         self._mp_noise = False
@@ -415,6 +418,27 @@ class SourcePolicy:
             if self._confirm('musicplayer_priority', mp_pair, required):
                 return _finish(True, reasons['musicplayer'])
             return _finish(False, reasons['musicplayer'])
+
+        # Sender mit verlaesslichem MP: MP-Generic/leer kann als Song-Ende-Signal dienen,
+        # wenn API/ICY keinen neuen, nicht-generischen Song liefern.
+        if (
+            self._mp_reliable
+            and last_winner_pair
+            and last_winner_pair[0]
+            and last_winner_pair[1]
+            and not _is_song_pair(mp_pair)
+        ):
+            has_alternative_song = any(
+                _is_song_pair(candidate)
+                and candidate != last_winner_pair
+                and not self._is_generic_pair(candidate, station_name)
+                for candidate in (api_pair, icy_pair)
+            )
+            if not has_alternative_song:
+                required = max(2, confirm_polls)
+                if self._confirm('musicplayer_end_signal', ('', ''), required):
+                    return _finish(True, reasons['mp_invalid'])
+                return _finish(False, reasons['musicplayer'])
 
         # Active source reports a real track change.
         if _is_song_pair(active_pair) and active_pair != last_winner_pair:
