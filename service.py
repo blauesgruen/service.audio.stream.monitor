@@ -614,6 +614,16 @@ class RadioMonitor(xbmc.Monitor):
             return profile_hint
         return 'unknown'
 
+    def _prefer_icy_swapped_from_history(self):
+        profile = self._active_policy_profile or {}
+        try:
+            confidence = float(profile.get('confidence', 0.0))
+        except Exception:
+            confidence = 0.0
+        if confidence < 0.20:
+            return False
+        return bool(profile.get('icy_prefer_swapped', False))
+
     def _should_prioritize_stream_candidates(self):
         if not self._has_station_analysis():
             return False
@@ -827,6 +837,7 @@ class RadioMonitor(xbmc.Monitor):
         context = dict(self._last_policy_context or {})
         context['station_name'] = station_name
         context['icy_format'] = self._last_icy_format_hint
+        context['winner_source_detail'] = str(self._last_decision_source or '')
         context['icy_is_song'] = bool(
             self._is_song_pair(context.get('current_icy_pair'))
             and not self._is_generic_song_pair(context.get('current_icy_pair'), station_name)
@@ -1858,7 +1869,7 @@ class RadioMonitor(xbmc.Monitor):
                 return '', ('', '')
 
             prefer_swapped = (
-                self._effective_icy_format_hint() == 'title_artist'
+                (self._prefer_icy_swapped_from_history() or self._effective_icy_format_hint() == 'title_artist')
                 and not locked_source_name.endswith('_swapped')
             )
             preferred_sources = []
@@ -2752,7 +2763,7 @@ class RadioMonitor(xbmc.Monitor):
             if has_icy_candidate:
                 preferred_icy_source = (
                     'icy_swapped'
-                    if self._effective_icy_format_hint() == 'title_artist'
+                    if (self._prefer_icy_swapped_from_history() or self._effective_icy_format_hint() == 'title_artist')
                     else 'icy'
                 )
                 icy_preferred = next(

@@ -105,6 +105,8 @@ class StationProfileSession:
         self._last_mp_state = ''
         self.mp_state_flips = 0
         self.mp_state_observations = 0
+        self.icy_winner_direct = 0
+        self.icy_winner_swapped = 0
 
         self.api_lag_sum = 0.0
         self.api_lag_count = 0
@@ -120,6 +122,11 @@ class StationProfileSession:
         winner = _normalize_family((observation or {}).get('winner_family'))
         if winner:
             self.winner_counts[winner] += 1
+        winner_source_detail = str((context or {}).get('winner_source_detail', '') or '').strip().lower()
+        if winner_source_detail.startswith('icy_swapped'):
+            self.icy_winner_swapped += 1
+        elif winner_source_detail.startswith('icy'):
+            self.icy_winner_direct += 1
 
         sources = (observation or {}).get('sources', {})
         api_has_data_now = False
@@ -223,6 +230,9 @@ class StationProfileSession:
         api_lag_cycles = None
         if self.api_lag_count > 0:
             api_lag_cycles = self.api_lag_sum / float(self.api_lag_count)
+        icy_winner_total = int(self.icy_winner_direct + self.icy_winner_swapped)
+        icy_swapped_winner_share = _safe_div(self.icy_winner_swapped, icy_winner_total)
+        icy_prefer_swapped = bool(icy_winner_total >= 3 and icy_swapped_winner_share >= 0.60)
 
         return {
             'duration_s': self.duration_seconds(),
@@ -235,6 +245,8 @@ class StationProfileSession:
             'mp_reliable': mp_reliable,
             'mp_song_rate': mp_song_rate,
             'mp_flip_rate': mp_flip_rate,
+            'icy_swapped_winner_share': icy_swapped_winner_share,
+            'icy_prefer_swapped': icy_prefer_swapped,
             'format_shares': format_shares,
             'icy_format': icy_format,
         }
@@ -370,6 +382,8 @@ class StationProfileStore:
             'mp_reliable_ema': 0.0,
             'mp_song_rate_ema': 0.0,
             'mp_flip_rate_ema': 0.0,
+            'icy_swapped_winner_share_ema': 0.0,
+            'icy_prefer_swapped': False,
             '_pending_dominant_source': '',
             '_pending_dominant_count': 0,
             '_pending_icy_format': '',
@@ -470,6 +484,10 @@ class StationProfileStore:
         profile['mp_reliable_ema'] = (1.0 - alpha) * float(profile.get('mp_reliable_ema', 0.0)) + alpha * (1.0 if metrics['mp_reliable'] else 0.0)
         profile['mp_song_rate_ema'] = (1.0 - alpha) * float(profile.get('mp_song_rate_ema', 0.0)) + alpha * float(metrics.get('mp_song_rate', 0.0))
         profile['mp_flip_rate_ema'] = (1.0 - alpha) * float(profile.get('mp_flip_rate_ema', 0.0)) + alpha * float(metrics.get('mp_flip_rate', 0.0))
+        profile['icy_swapped_winner_share_ema'] = (
+            (1.0 - alpha) * float(profile.get('icy_swapped_winner_share_ema', 0.0))
+            + alpha * float(metrics.get('icy_swapped_winner_share', 0.0))
+        )
 
         if metrics['api_lag_cycles'] is not None:
             profile['api_lag_cycles_ema'] = (1.0 - alpha) * float(profile.get('api_lag_cycles_ema', 0.0)) + alpha * float(metrics['api_lag_cycles'])
@@ -560,6 +578,7 @@ class StationProfileStore:
         profile['mp_reliable'] = bool(float(profile.get('mp_reliable_ema', 0.0)) >= 0.60)
         profile['mp_song_rate'] = round(float(profile.get('mp_song_rate_ema', 0.0)), 3)
         profile['mp_flip_rate'] = round(float(profile.get('mp_flip_rate_ema', 0.0)), 3)
+        profile['icy_prefer_swapped'] = bool(float(profile.get('icy_swapped_winner_share_ema', 0.0)) >= 0.60)
 
         api_lag = float(profile.get('api_lag_cycles_ema', 0.0))
         profile['api_lag_cycles'] = round(api_lag, 2) if api_lag > 0 else 0.0
@@ -656,6 +675,7 @@ class StationProfileStore:
                 'single_confirm_polls': None,
                 'mp_reliable': False,
                 'icy_format': 'unknown',
+                'icy_prefer_swapped': False,
                 'icy_structural_generic': False,
                 'mp_absent': False,
                 'mp_noise': False,
@@ -698,6 +718,7 @@ class StationProfileStore:
             'single_confirm_polls': single_confirm_polls,
             'mp_reliable': bool(profile.get('mp_reliable', False)),
             'icy_format': str(profile.get('icy_format', 'unknown') or 'unknown'),
+            'icy_prefer_swapped': bool(profile.get('icy_prefer_swapped', False)),
             'icy_structural_generic': bool(role_flags.get('icy_structural_generic')),
             'mp_absent': bool(role_flags.get('mp_absent')),
             'mp_noise': bool(role_flags.get('mp_noise')),

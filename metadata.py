@@ -1,7 +1,7 @@
-"""
+﻿"""
 Metadaten-Parsing & Normalisierung.
 
-Zentrale Logik für das Trennen, Bereinigen und Normalisieren von Artist- und Titel-Informationen
+Zentrale Logik fÃ¼r das Trennen, Bereinigen und Normalisieren von Artist- und Titel-Informationen
 aus ICY-Streams und APIs.
 """
 import re
@@ -18,7 +18,7 @@ def extract_stream_title(metadata_raw: str) -> Optional[str]:
     if not metadata_raw:
         return None
     try:
-        # Wichtig: Non-greedy .*? bis zum letzten ' vor ; um Apostrophe in Titeln zu unterstützen
+        # Wichtig: Non-greedy .*? bis zum letzten ' vor ; um Apostrophe in Titeln zu unterstÃ¼tzen
         match = re.search(r"StreamTitle='(.*?)';", metadata_raw)
         if match:
             return match.group(1)
@@ -28,21 +28,36 @@ def extract_stream_title(metadata_raw: str) -> Optional[str]:
 
 
 # --- Artist & Title Parsing ---
-
+def _looks_like_title_fragment(part: str) -> bool:
+    text = str(part or '').strip()
+    if not text:
+        return False
+    if re.match(r"^'?\d{1,4}$", text):
+        return True
+    if re.match(r"^\d{1,4}$", text):
+        return True
+    return False
 def parse_stream_title_simple(stream_title: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Einfaches Parsing eines "Artist - Title" Strings.
     """
     if not stream_title or ' - ' not in stream_title:
         return None, stream_title
-    parts = stream_title.split(' - ', 1)
+    if stream_title.count(' - ') > 1:
+        first_left = stream_title.split(' - ', 1)[0].strip()
+        if _looks_like_title_fragment(first_left):
+            parts = stream_title.rsplit(' - ', 1)
+        else:
+            parts = stream_title.split(' - ', 1)
+    else:
+        parts = stream_title.split(' - ', 1)
     return parts[0].strip(), parts[1].strip()
 
 
 def parse_stream_title_complex(stream_title: str, station_name: str = None) -> Tuple[Optional[str], Optional[str], bool, bool]:
     """
     Komplexe Trennung von Artist und Title aus dem ICY-StreamTitle.
-    Gibt (artist, title, is_von_format, has_multiple_separators) zurück.
+    Gibt (artist, title, is_von_format, has_multiple_separators) zurÃ¼ck.
     """
     invalid = INVALID_METADATA_VALUES + ["", station_name]
     
@@ -70,10 +85,17 @@ def parse_stream_title_complex(stream_title: str, station_name: str = None) -> T
             return artist, title, True, False
 
     # --- Trennzeichen-Erkennung ---
-    separators = [' - ', ' – ', ' — ', ' | ', ': ']
+    separators = [' - ', ' â€“ ', ' â€” ', ' | ', ': ']
     for sep in separators:
         if sep in stream_title:
-            parts = stream_title.split(sep, 1)
+            if sep == ' - ' and stream_title.count(' - ') > 1:
+                first_left = stream_title.split(' - ', 1)[0].strip()
+                if _looks_like_title_fragment(first_left):
+                    parts = stream_title.rsplit(' - ', 1)
+                else:
+                    parts = stream_title.split(sep, 1)
+            else:
+                parts = stream_title.split(sep, 1)
             if len(parts) == 2:
                 artist = parts[0].strip()
                 title = parts[1].strip()
@@ -137,7 +159,7 @@ def clean_title_part(part: str) -> str:
 
 def get_artist_variants(artist: str) -> List[str]:
     """
-    Erzeugt verschiedene Schreibweisen eines Künstlernamens für die Suche.
+    Erzeugt verschiedene Schreibweisen eines KÃ¼nstlernamens fÃ¼r die Suche.
     (CamelCase Splitting, Komma-Drehung, Apostroph-Normalisierung)
     """
     if not artist:
@@ -164,11 +186,11 @@ def get_artist_variants(artist: str) -> List[str]:
         add_v(camel)
 
     # 3. Apostroph-Normalisierung
-    apo_norm = artist.replace("'", "’")
+    apo_norm = artist.replace("'", "â€™")
     if apo_norm != artist:
         add_v(apo_norm)
     
-    apo_rem = artist.replace("'", "").replace("’", "")
+    apo_rem = artist.replace("'", "").replace("â€™", "")
     if apo_rem != artist:
         add_v(apo_rem)
 
@@ -181,7 +203,7 @@ def get_artist_variants(artist: str) -> List[str]:
 
     # 5. Semikolon-Splitting fuer Duette/Kollaborationen:
     # Manche Sender liefern "Artist1; Artist2" als kombinierten Artist-String.
-    # MusicBrainz kennt keinen Artist "Artist1; Artist2" – nur die Einzelkuenstler.
+    # MusicBrainz kennt keinen Artist "Artist1; Artist2" â€“ nur die Einzelkuenstler.
     # Varianten: erster Kuenstler allein, zweiter allein, beide mit " & " und " feat. ".
     if ';' in artist:
         parts = [p.strip() for p in artist.split(';') if p.strip()]
@@ -237,7 +259,7 @@ def has_non_generic_song_pair(pair, station_name: str = '', extra_keywords=()) -
 
 
 def filter_non_generic_song_pairs(pairs, station_name: str = '', extra_keywords=()):
-    """Filtert eine Liste von (artist, title)-Paaren – nur nicht-generische Paare bleiben."""
+    """Filtert eine Liste von (artist, title)-Paaren â€“ nur nicht-generische Paare bleiben."""
     return [p for p in (pairs or []) if has_non_generic_song_pair(p, station_name, extra_keywords)]
 
 
@@ -277,3 +299,4 @@ __all__ = [
     'filter_non_generic_song_pairs',
     'append_non_generic_candidate',
 ]
+
