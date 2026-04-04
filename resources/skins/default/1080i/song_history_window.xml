@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window>
+    <defaultcontrol always="true">111</defaultcontrol>
+    <controls>
+        <control type="group">
+            <width>60%</width>
+            <height>80%</height>
+            <centerleft>50%</centerleft>
+            <centertop>50%</centertop>
+            <control type="image">
+                <texture>white.png</texture>
+            </control>
+            <control type="image">
+                <left>2</left>
+                <right>2</right>
+                <top>2</top>
+                <bottom>2</bottom>
+                <texture colordiffuse="black">white.png</texture>
+            </control>
+            <control type="label">
+                <top>10</top>
+                <height>42</height>
+                <font>font16</font>
+                <align>center</align>
+                <textcolor>FFFFFFFF</textcolor>
+                <label>[B]$ADDON[service.audio.stream.monitor 32032][/B]</label>
+            </control>
+            <control type="group">
+                <left>32</left>
+                <right>32</right>
+                <top>60</top>
+                <bottom>32</bottom>
+                <!-- <control type="button" id="100">
+                    <right>24</right>
+                    <top>22</top>
+                    <width>56</width>
+                    <height>42</height>
+                    <label>X</label>
+                    <textcolor>FFFFFFFF</textcolor>
+                    <focusedcolor>FF101010</focusedcolor>
+                    <texturefocus colordiffuse="FFE5C15B">white.png</texturefocus>
+                    <texturenofocus colordiffuse="00000000">white.png</texturenofocus>
+                </control> -->
+
+                <control type="label">
+                    <width>250</width>
+                    <height>28</height>
+                    <font>font12</font>
+                    <textcolor>FFB8B8B8</textcolor>
+                    <label>$ADDON[service.audio.stream.monitor 32034]</label>
+                </control>
+
+                <control type="list" id="111">
+                    <top>60</top>
+                    <width>20%</width>
+                    <bottom>32</bottom>
+                    <onright>120</onright>
+                    <onleft>111</onleft>
+                    <onup>111</onup>
+                    <ondown>111</ondown>
+                    <pagecontrol>-</pagecontrol>
+                    <itemlayout height="34">
+                        <control type="label">
+                            <left>10</left>
+                            <right>10</right>
+                            <height>100%</height>
+                            <aligny>center</aligny>
+                            <font>font12</font>
+                            <textcolor>FFDDDDDD</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout height="34">
+                        <control type="image">
+                            <height>100%</height>
+                            <texture colordiffuse="FFE5C15B">white.png</texture>
+                        </control>
+                        <control type="label">
+                            <left>10</left>
+                            <right>10</right>
+                            <height>100%</height>
+                            <aligny>center</aligny>
+                            <font>font12</font>
+                            <textcolor>FF101010</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
+
+                <control type="label" id="130">
+                    <left>348</left>
+                    <right>32</right>
+                    <height>28</height>
+                    <font>font12</font>
+                    <textcolor>FFB8B8B8</textcolor>
+                    <label>-</label>
+                </control>
+
+                <control type="list" id="120">
+                    <left>22%</left>
+                    <top>60</top>
+                    <right>32</right>
+                    <bottom>32</bottom>
+                    <onleft>111</onleft>
+                    <onright>120</onright>
+                    <onup>120</onup>
+                    <ondown>120</ondown>
+                    <pagecontrol>-</pagecontrol>
+                    <itemlayout height="48">
+                        <control type="label">
+                            <left>12</left>
+                            <right>12</right>
+                            <height>100%</height>
+                            <aligny>top</aligny>
+                            <font>font13</font>
+                            <textcolor>FFE6E6E6</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label">
+                            <left>12</left>
+                            <top>50%</top>
+                            <right>12</right>
+                            <height>100%</height>
+                            <aligny>bottom</aligny>
+                            <font>font10</font>
+                            <textcolor>FF9A9A9A</textcolor>
+                            <label>$INFO[ListItem.Label2]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout height="48">
+                        <control type="image">
+                            <height>100%</height>
+                            <texture colordiffuse="33FFFFFF">white.png</texture>
+                        </control>
+                        <control type="label">
+                            <left>12</left>
+                            <right>12</right>
+                            <height>100%</height>
+                            <aligny>top</aligny>
+                            <font>font13</font>
+                            <textcolor>FFFFFFFF</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label">
+                            <left>12</left>
+                            <top>50%</top>
+                            <right>12</right>
+                            <height>100%</height>
+                            <aligny>bottom</aligny>
+                            <font>font10</font>
+                            <textcolor>FFC9C9C9</textcolor>
+                            <label>$INFO[ListItem.Label2]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
+            </control>
+        </control>
+    </controls>
+</window>
