@@ -15,11 +15,17 @@
                 <right>2</right>
                 <top>2</top>
                 <bottom>2</bottom>
-                <texture colordiffuse="black">white.png</texture>
+                <texture colordiffuse="FF494949">white.png</texture>
+            </control>
+            <control type="image">
+                <left>2</left>
+                <right>2</right>
+                <top>40</top>
+                <height>30</height>
+                <texture>white.png</texture>
             </control>
             <control type="label">
-                <top>10</top>
-                <height>42</height>
+                <height>38</height>
                 <font>font16</font>
                 <align>center</align>
                 <textcolor>FFFFFFFF</textcolor>
@@ -28,31 +34,19 @@
             <control type="group">
                 <left>32</left>
                 <right>32</right>
-                <top>60</top>
+                <top>40</top>
                 <bottom>32</bottom>
-                <!-- <control type="button" id="100">
-                    <right>24</right>
-                    <top>22</top>
-                    <width>56</width>
-                    <height>42</height>
-                    <label>X</label>
-                    <textcolor>FFFFFFFF</textcolor>
-                    <focusedcolor>FF101010</focusedcolor>
-                    <texturefocus colordiffuse="FFE5C15B">white.png</texturefocus>
-                    <texturenofocus colordiffuse="00000000">white.png</texturenofocus>
-                </control> -->
-
                 <control type="label">
-                    <width>250</width>
-                    <height>28</height>
+                    <width>24%</width>
+                    <height>30</height>
                     <font>font12</font>
-                    <textcolor>FFB8B8B8</textcolor>
+                    <textcolor>FF333333</textcolor>
                     <label>$ADDON[service.audio.stream.monitor 32034]</label>
                 </control>
 
                 <control type="list" id="111">
                     <top>60</top>
-                    <width>20%</width>
+                    <width>24%</width>
                     <bottom>32</bottom>
                     <onright>120</onright>
                     <onleft>111</onleft>
@@ -88,30 +82,28 @@
                 </control>
 
                 <control type="label" id="130">
-                    <left>348</left>
-                    <right>32</right>
+                    <left>25%</left>
                     <height>28</height>
                     <font>font12</font>
-                    <textcolor>FFB8B8B8</textcolor>
-                    <label>-</label>
+                    <textcolor>FF333333</textcolor>
+                    <label/>
                 </control>
 
                 <control type="list" id="120">
-                    <left>22%</left>
+                    <left>25%</left>
                     <top>60</top>
-                    <right>32</right>
                     <bottom>32</bottom>
                     <onleft>111</onleft>
                     <onright>120</onright>
                     <onup>120</onup>
                     <ondown>120</ondown>
                     <pagecontrol>-</pagecontrol>
-                    <itemlayout height="48">
+                    <itemlayout height="60">
                         <control type="label">
                             <left>12</left>
                             <right>12</right>
-                            <height>100%</height>
-                            <aligny>top</aligny>
+                            <height>50%</height>
+                            <aligny>bottom</aligny>
                             <font>font13</font>
                             <textcolor>FFE6E6E6</textcolor>
                             <label>$INFO[ListItem.Label]</label>
@@ -120,23 +112,29 @@
                             <left>12</left>
                             <top>50%</top>
                             <right>12</right>
-                            <height>100%</height>
-                            <aligny>bottom</aligny>
+                            <height>50%</height>
+                            <aligny>top</aligny>
                             <font>font10</font>
                             <textcolor>FF9A9A9A</textcolor>
                             <label>$INFO[ListItem.Label2]</label>
                         </control>
+                        <control type="image">
+                            <height>2</height>
+                            <bottom>0</bottom>
+                            <texture colordiffuse="33FFFFFF">white.png</texture>
+                        </control>
                     </itemlayout>
-                    <focusedlayout height="48">
+                    <focusedlayout height="60">
                         <control type="image">
                             <height>100%</height>
                             <texture colordiffuse="33FFFFFF">white.png</texture>
+                            <visible>Control.HasFocus(120)</visible>
                         </control>
                         <control type="label">
                             <left>12</left>
                             <right>12</right>
-                            <height>100%</height>
-                            <aligny>top</aligny>
+                            <height>50%</height>
+                            <aligny>bottom</aligny>
                             <font>font13</font>
                             <textcolor>FFFFFFFF</textcolor>
                             <label>$INFO[ListItem.Label]</label>
@@ -145,8 +143,8 @@
                             <left>12</left>
                             <top>50%</top>
                             <right>12</right>
-                            <height>100%</height>
-                            <aligny>bottom</aligny>
+                            <height>50%</height>
+                            <aligny>top</aligny>
                             <font>font10</font>
                             <textcolor>FFC9C9C9</textcolor>
                             <label>$INFO[ListItem.Label2]</label>
