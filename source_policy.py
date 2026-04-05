@@ -1,3 +1,4 @@
+import re
 from collections import deque
 from constants import SOURCE_FAMILIES as _SOURCE_FAMILIES
 from metadata import is_song_pair as _is_song_pair, is_generic_song_pair as _is_generic_song_pair
@@ -87,10 +88,20 @@ class SourcePolicy:
             return False
         return (str(pair[0]).strip().lower(), str(pair[1]).strip().lower()) in self._known_songs
 
+    @staticmethod
+    def _looks_like_numeric_id_pair(pair):
+        if not _is_song_pair(pair):
+            return False
+        left = str(pair[0] or '').strip()
+        right = str(pair[1] or '').strip()
+        return bool(re.match(r'^\d{3,}$', left) and re.match(r'^\d{3,}$', right))
+
     def _is_generic_pair(self, pair, station_name):
         """Zentraler Generic-Check: bekannter Song schlägt alle Generic-Checks."""
         if self._is_known_song(pair):
             return False
+        if self._looks_like_numeric_id_pair(pair):
+            return True
         return _is_generic_song_pair(pair, station_name, self._generic_keywords)
 
     def _active_switch_margin(self):
@@ -226,12 +237,20 @@ class SourcePolicy:
         mp_reliable_comparator = not self._mp_unusable()
         icy_reliable_comparator = not self._icy_structural_generic
 
-        if mp_reliable_comparator and _is_song_pair(mp_pair):
+        if (
+            mp_reliable_comparator
+            and _is_song_pair(mp_pair)
+            and not self._looks_like_numeric_id_pair(mp_pair)
+        ):
             comparator_count += 1
             if mp_pair != api_pair:
                 conflict_count += 1
 
-        if icy_reliable_comparator and _is_song_pair(icy_pair):
+        if (
+            icy_reliable_comparator
+            and _is_song_pair(icy_pair)
+            and not self._looks_like_numeric_id_pair(icy_pair)
+        ):
             comparator_count += 1
             if icy_pair != api_pair:
                 conflict_count += 1

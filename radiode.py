@@ -37,7 +37,12 @@ def parse_radiode_api_title(full_title, station_name=None):
 
     # 1) Standard: "ARTIST - TITLE"
     if ' - ' in text:
-        parts = text.split(' - ', 1)
+        # Bei Mehrfach-Trennern bevorzugt am letzten Trenner teilen:
+        # "Artist A - Artist B - Title" -> Artist="Artist A - Artist B", Title="Title"
+        if text.count(' - ') > 1:
+            parts = text.rsplit(' - ', 1)
+        else:
+            parts = text.split(' - ', 1)
         artist = parts[0].strip()
         title = parts[1].strip()
     else:

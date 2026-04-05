@@ -1561,6 +1561,9 @@ class RadioMonitor(xbmc.Monitor):
             return None, None
         if a in invalid_values or t in invalid_values:
             return None, None
+        # ID-Rauschen wie "277353 - 386535" nicht als Song werten.
+        if re.match(r'^\d{3,}$', a) and re.match(r'^\d{3,}$', t):
+            return None, None
         if _NUMERIC_ID_RE.match(a) or _NUMERIC_ID_RE.match(t):
             return None, None
         return a, t
@@ -3436,7 +3439,13 @@ class RadioMonitor(xbmc.Monitor):
                             except Exception as e:
                                 log_debug(f"Fehler bei JSON-RPC Notify: {str(e)}")
                             
-                            log_info(f"Neuer Titel: {stream_title} (Artist: {artist if artist else 'N/A'}, Title: {title if title else 'N/A'}, Album: {album if album else 'N/A'})")
+                            log_info(
+                                f"Neuer Titel: {title if title else stream_title} "
+                                f"(Artist: {artist if artist else 'N/A'}, "
+                                f"Title: {title if title else 'N/A'}, "
+                                f"Album: {album if album else 'N/A'}, "
+                                f"StreamTitleRaw: {stream_title if stream_title else 'N/A'})"
+                            )
                             if title:
                                 last_song_key = current_song_key
                                 if self._persist_data and artist and self._profile_store:
