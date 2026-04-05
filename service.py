@@ -787,7 +787,7 @@ class RadioMonitor(xbmc.Monitor):
 
         key_changed = (key != self._active_station_profile_key)
         if key_changed:
-            self._close_station_profile_session()
+            self._close_station_profile_session(persist=bool(self._persist_data))
             self._active_station_profile_key = key
             self._station_profile_session = self._profile_store.start_session(key, station_name)
             self._station_profile_policy_enabled = False
@@ -858,18 +858,19 @@ class RadioMonitor(xbmc.Monitor):
         self._station_profile_session.observe(observation, context)
         self._profile_store.flush_if_due(min_interval_s=STATION_PROFILE_SAVE_INTERVAL_S)
 
-    def _close_station_profile_session(self):
+    def _close_station_profile_session(self, persist=True):
         if self._profile_store is None or self._station_profile_session is None:
             return
         try:
-            profile = self._profile_store.finish_session(self._station_profile_session)
-            if profile is not None:
-                log_debug(
-                    f"Station-Profil Session gespeichert: key='{self._station_profile_session.station_key}', "
-                    f"sessions={profile.get('sessions', 0)}, "
-                    f"stable={profile.get('sessions_above_threshold', 0)}, "
-                    f"confidence={profile.get('confidence', 0.0):.2f}"
-                )
+            if persist:
+                profile = self._profile_store.finish_session(self._station_profile_session)
+                if profile is not None:
+                    log_debug(
+                        f"Station-Profil Session gespeichert: key='{self._station_profile_session.station_key}', "
+                        f"sessions={profile.get('sessions', 0)}, "
+                        f"stable={profile.get('sessions_above_threshold', 0)}, "
+                        f"confidence={profile.get('confidence', 0.0):.2f}"
+                    )
         finally:
             self._station_profile_session = None
             self._station_profile_policy_enabled = False
@@ -878,11 +879,12 @@ class RadioMonitor(xbmc.Monitor):
             self.source_policy.clear_station_profile()
 
     def _flush_station_profiles(self):
-        if not self._persist_data or self._profile_store is None:
+        if self._profile_store is None:
             return
-        self._close_station_profile_session()
+        self._close_station_profile_session(persist=bool(self._persist_data))
         self._active_station_profile_key = ''
-        self._profile_store.flush()
+        if self._persist_data:
+            self._profile_store.flush()
 
     def _clear_timer_debug_properties(self):
         """Loescht Debug-Properties fuer MB-Dauer und Song-Timer."""
@@ -3782,6 +3784,11 @@ class RadioMonitor(xbmc.Monitor):
         # Cleanup beim Beenden
         self.stop_metadata_monitoring()
         self._flush_station_profiles()
+        try:
+            if self._profile_store is not None:
+                self._profile_store.close(flush=bool(self._persist_data))
+        except Exception as e:
+            log_debug(f"Station profile store close fehlgeschlagen: {e}")
         try:
             if self.analysis_store is not None:
                 self.analysis_store.close()

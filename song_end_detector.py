@@ -6,7 +6,7 @@ multiple guards are satisfied (age, hold, no fresh song, optional extra signal).
 """
 import re
 from constants import GENERIC_STRING_MIN_LEN, GENERIC_STRING_MAX_DIGIT_SEQ
-from metadata import is_song_pair as _is_song_pair
+from metadata import is_song_pair as _is_song_pair, is_generic_metadata_text as _is_generic_metadata_text
 
 
 class SongEndDetector:
@@ -81,16 +81,7 @@ class SongEndDetector:
 
     @staticmethod
     def _is_generic_text(text, station_name, keywords):
-        value = str(text or "").strip().lower()
-        if not value:
-            return False
-        station_l = str(station_name or "").strip().lower()
-        if station_l and station_l in value:
-            return True
-        for token in keywords:
-            if token and token in value:
-                return True
-        return False
+        return _is_generic_metadata_text(text, station_name, keywords)
 
     @staticmethod
     def _looks_like_song(text):

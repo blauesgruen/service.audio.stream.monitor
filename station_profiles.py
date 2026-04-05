@@ -766,3 +766,15 @@ class StationProfileStore:
             self._last_flush_ts = time.time()
         except Exception:
             pass
+
+    def close(self, flush=True):
+        try:
+            if flush:
+                self.flush()
+        except Exception:
+            pass
+        try:
+            if self._song_db is not None:
+                self._song_db.close()
+        except Exception:
+            pass

@@ -1,6 +1,6 @@
 from collections import deque
 from constants import SOURCE_FAMILIES as _SOURCE_FAMILIES
-from metadata import is_song_pair as _is_song_pair
+from metadata import is_song_pair as _is_song_pair, is_generic_song_pair as _is_generic_song_pair
 
 
 class SourceHealth:
@@ -65,17 +65,6 @@ class SourcePolicy:
         self._generic_keywords = []
         self._known_songs = frozenset()
 
-    @staticmethod
-    def _contains_station(pair, station_name):
-        if not _is_song_pair(pair):
-            return False
-        station_l = (station_name or '').strip().lower()
-        if not station_l:
-            return False
-        a_l = str(pair[0] or '').strip().lower()
-        t_l = str(pair[1] or '').strip().lower()
-        return station_l in a_l or station_l in t_l
-
     def set_generic_keywords(self, keywords):
         """Setzt senderspezifische Keywords für die generische Pair-Erkennung."""
         self._generic_keywords = [
@@ -98,18 +87,11 @@ class SourcePolicy:
             return False
         return (str(pair[0]).strip().lower(), str(pair[1]).strip().lower()) in self._known_songs
 
-    def _is_keyword_generic(self, pair):
-        """Prüft, ob ein Pair einen bekannten generischen Sender-String enthält."""
-        if not self._generic_keywords or not _is_song_pair(pair):
-            return False
-        text = f"{pair[0]} {pair[1]}".lower()
-        return any(kw in text for kw in self._generic_keywords)
-
     def _is_generic_pair(self, pair, station_name):
         """Zentraler Generic-Check: bekannter Song schlägt alle Generic-Checks."""
         if self._is_known_song(pair):
             return False
-        return self._contains_station(pair, station_name) or self._is_keyword_generic(pair)
+        return _is_generic_song_pair(pair, station_name, self._generic_keywords)
 
     def _active_switch_margin(self):
         if self._profile_switch_margin is not None and self._profile_confidence >= 0.60:
