@@ -3,8 +3,8 @@
     <defaultcontrol always="true">111</defaultcontrol>
     <controls>
         <control type="group">
-            <width>60%</width>
-            <height>80%</height>
+            <width>80%</width>
+            <height>90%</height>
             <centerleft>50%</centerleft>
             <centertop>50%</centertop>
             <control type="image">
@@ -43,11 +43,10 @@
                     <textcolor>FF333333</textcolor>
                     <label>$ADDON[service.audio.stream.monitor 32034]</label>
                 </control>
-
                 <control type="list" id="111">
                     <top>60</top>
                     <width>24%</width>
-                    <bottom>32</bottom>
+                    <bottom>0</bottom>
                     <onright>120</onright>
                     <onleft>111</onleft>
                     <onup>111</onup>
@@ -80,7 +79,6 @@
                         </control>
                     </focusedlayout>
                 </control>
-
                 <control type="label" id="130">
                     <left>25%</left>
                     <height>28</height>
@@ -88,17 +86,16 @@
                     <textcolor>FF333333</textcolor>
                     <label/>
                 </control>
-
                 <control type="list" id="120">
                     <left>25%</left>
                     <top>60</top>
-                    <bottom>32</bottom>
+                    <bottom>0</bottom>
                     <onleft>111</onleft>
                     <onright>120</onright>
                     <onup>120</onup>
                     <ondown>120</ondown>
                     <pagecontrol>-</pagecontrol>
-                    <itemlayout height="60">
+                    <itemlayout height="65">
                         <control type="label">
                             <left>12</left>
                             <right>12</right>
@@ -114,17 +111,17 @@
                             <right>12</right>
                             <height>50%</height>
                             <aligny>top</aligny>
-                            <font>font10</font>
+                            <font>font16</font>
                             <textcolor>FF9A9A9A</textcolor>
                             <label>$INFO[ListItem.Label2]</label>
                         </control>
                         <control type="image">
-                            <height>2</height>
+                            <height>1</height>
                             <bottom>0</bottom>
                             <texture colordiffuse="33FFFFFF">white.png</texture>
                         </control>
                     </itemlayout>
-                    <focusedlayout height="60">
+                    <focusedlayout height="65">
                         <control type="image">
                             <height>100%</height>
                             <texture colordiffuse="33FFFFFF">white.png</texture>
@@ -145,7 +142,7 @@
                             <right>12</right>
                             <height>50%</height>
                             <aligny>top</aligny>
-                            <font>font10</font>
+                            <font>font16</font>
                             <textcolor>FFC9C9C9</textcolor>
                             <label>$INFO[ListItem.Label2]</label>
                         </control>

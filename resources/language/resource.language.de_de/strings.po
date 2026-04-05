@@ -72,8 +72,8 @@ msgid "Date"
 msgstr "Datum"
 
 msgctxt "#32041"
-msgid "Last seen"
-msgstr "Zuletzt gesehen"
+msgid "Last heard"
+msgstr "Zuletzt gehört"
 
 msgctxt "#32042"
 msgid "Could not open song history."
