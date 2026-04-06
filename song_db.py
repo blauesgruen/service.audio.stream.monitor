@@ -8,13 +8,17 @@ Tables:
 """
 import os
 import sqlite3
+import threading
+import time
 from datetime import datetime
 
 from constants import (
     KEYWORD_PROMOTE_MIN_SEEN,
     SONG_CACHE_MAX_PER_STATION,
+    SONG_RECOUNT_WINDOW_S,
     STATION_PROFILE_KEYWORD_STATS_MAX,
 )
+from logger import log_warning
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS songs (
@@ -22,6 +26,7 @@ CREATE TABLE IF NOT EXISTS songs (
     artist       TEXT NOT NULL,
     title        TEXT NOT NULL,
     last_seen    TEXT NOT NULL,
+    last_seen_ts INTEGER NOT NULL DEFAULT 0,
     count        INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (station_key, artist, title)
 );
@@ -55,23 +60,26 @@ class SongDatabase:
     def __init__(self, db_path):
         self._db_path = str(db_path or '')
         self._conn = None
+        self._lock = threading.RLock()
         self._open()
 
     def _open(self):
         if not self._db_path:
             return
-        try:
-            dir_path = os.path.dirname(self._db_path)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
-            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute('PRAGMA journal_mode=WAL')
-            self._conn.executescript(_SCHEMA)
-            self._conn.commit()
-            self._migrate()
-        except Exception:
-            self._conn = None
+        with self._lock:
+            try:
+                dir_path = os.path.dirname(self._db_path)
+                if dir_path:
+                    os.makedirs(dir_path, exist_ok=True)
+                self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                self._conn.execute('PRAGMA journal_mode=WAL')
+                self._conn.executescript(_SCHEMA)
+                self._conn.commit()
+                self._migrate()
+            except Exception as e:
+                self._conn = None
+                log_warning(f"Song DB open fehlgeschlagen: {e}")
 
     @staticmethod
     def _looks_like_song(text):
@@ -85,7 +93,14 @@ class SongDatabase:
         return False
 
     def _migrate(self):
-        """Schema migrations for generic_strings and cleanup."""
+        """Schema migrations for songs/generic_strings and cleanup."""
+        songs_cursor = self._exec("PRAGMA table_info(songs)")
+        if songs_cursor is not None:
+            song_cols = {row['name'] for row in songs_cursor.fetchall()}
+            if 'last_seen_ts' not in song_cols:
+                self._exec("ALTER TABLE songs ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0")
+                self._commit()
+
         cursor = self._exec("PRAGMA table_info(generic_strings)")
         if cursor is None:
             return
@@ -117,21 +132,84 @@ class SongDatabase:
             self._commit()
 
     def _exec(self, sql, params=()):
-        if self._conn is None:
-            return None
-        try:
-            return self._conn.execute(sql, params)
-        except Exception:
-            return None
+        with self._lock:
+            if self._conn is None:
+                return None
+            try:
+                return self._conn.execute(sql, params)
+            except Exception as e:
+                op = str(sql or '').strip().split('\n', 1)[0][:80]
+                log_warning(f"Song DB exec fehlgeschlagen ({op}): {e}")
+                return None
 
     def _commit(self):
-        if self._conn is not None:
-            try:
-                self._conn.commit()
-            except Exception:
-                pass
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.commit()
+                except Exception as e:
+                    log_warning(f"Song DB commit fehlgeschlagen: {e}")
 
     # --- Songs ---
+
+    def _is_recent_song_duplicate(self, station_key, artist, title, now_ts, window_s):
+        if window_s <= 0:
+            return False
+        recent_cursor = self._exec(
+            """
+            SELECT last_seen_ts
+            FROM songs
+            WHERE station_key = ? AND artist = ? AND title = ?
+            """,
+            (station_key, artist, title)
+        )
+        if recent_cursor is None:
+            return False
+        existing = recent_cursor.fetchone()
+        if existing is None:
+            return False
+        last_seen_ts = int(existing['last_seen_ts'] or 0)
+        return last_seen_ts > 0 and (now_ts - last_seen_ts) < window_s
+
+    def _touch_song_last_seen(self, station_key, artist, title, day_value, now_ts):
+        touch_cursor = self._exec(
+            """
+            UPDATE songs
+            SET last_seen = ?, last_seen_ts = ?
+            WHERE station_key = ? AND artist = ? AND title = ?
+            """,
+            (day_value, now_ts, station_key, artist, title)
+        )
+        if touch_cursor is None:
+            log_warning(
+                f"Song DB touch fehlgeschlagen: station='{station_key}', artist='{artist}', title='{title}'"
+            )
+        self._commit()
+
+    def _upsert_song_counter(self, station_key, artist, title, day_value, now_ts):
+        return self._exec(
+            """
+            INSERT INTO songs (station_key, artist, title, last_seen, last_seen_ts, count)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(station_key, artist, title)
+            DO UPDATE SET
+                last_seen = excluded.last_seen,
+                last_seen_ts = excluded.last_seen_ts,
+                count = count + 1
+            """,
+            (station_key, artist, title, day_value, now_ts)
+        )
+
+    def _upsert_daily_counter(self, station_key, artist, title, day_value):
+        return self._exec(
+            """
+            INSERT INTO song_daily_counts (station_key, artist, title, day, count)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(station_key, artist, title, day)
+            DO UPDATE SET count = count + 1
+            """,
+            (station_key, artist, title, day_value)
+        )
 
     def record_song(self, station_key, artist, title):
         if not station_key or not artist or not title:
@@ -141,19 +219,21 @@ class SongDatabase:
         if not a or not t:
             return
 
+        now_ts = int(time.time())
         today = _today()
-        self._exec("""
-            INSERT INTO songs (station_key, artist, title, last_seen, count)
-            VALUES (?, ?, ?, ?, 1)
-            ON CONFLICT(station_key, artist, title)
-            DO UPDATE SET last_seen = excluded.last_seen, count = count + 1
-        """, (station_key, a, t, today))
-        self._exec("""
-            INSERT INTO song_daily_counts (station_key, artist, title, day, count)
-            VALUES (?, ?, ?, ?, 1)
-            ON CONFLICT(station_key, artist, title, day)
-            DO UPDATE SET count = count + 1
-        """, (station_key, a, t, today))
+        recount_window_s = max(0, int(SONG_RECOUNT_WINDOW_S or 0))
+
+        if self._is_recent_song_duplicate(station_key, a, t, now_ts, recount_window_s):
+            self._touch_song_last_seen(station_key, a, t, today, now_ts)
+            return
+
+        song_cursor = self._upsert_song_counter(station_key, a, t, today, now_ts)
+        daily_cursor = self._upsert_daily_counter(station_key, a, t, today)
+        if song_cursor is None or daily_cursor is None:
+            log_warning(
+                f"Song DB write unvollstaendig: station='{station_key}', artist='{a}', title='{t}'"
+            )
+            return
         self._commit()
         self._evict_songs(station_key)
 
@@ -165,7 +245,7 @@ class SongDatabase:
               AND rowid NOT IN (
                   SELECT rowid FROM songs
                   WHERE station_key = ?
-                  ORDER BY last_seen DESC
+                  ORDER BY last_seen_ts DESC, last_seen DESC
                   LIMIT ?
               )
         """, (station_key, station_key, limit))
@@ -299,9 +379,10 @@ class SongDatabase:
         return tuple(row['string'] for row in cursor.fetchall())
 
     def close(self):
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception as e:
+                    log_warning(f"Song DB close fehlgeschlagen: {e}")
+                self._conn = None

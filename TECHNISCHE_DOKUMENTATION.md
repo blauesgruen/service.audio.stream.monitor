@@ -42,7 +42,7 @@ Wichtig:
 - `station_profiles.py`
   - persistente Senderprofile je Station (EMA-Lernen, Confidence, Policy-Profilableitung)
 - `song_db.py`
-  - SQLite-Datenbank (`song_data.db`): Songs-LRU-Cache (max. 200 pro Sender) und Generic-Keywords (Jingles/Stationsinfos) je Sender
+  - SQLite-Datenbank (`song_data.db`): MB-verifizierte Songs (LRU + Tageszaehler + Recount-Schutz) und Generic-Keywords (Jingles/Stationsinfos) je Sender
 - `skin_colors.py`
   - liest `colors/Defaults.xml` des aktiven Skins, aktualisiert das `values`-Attribut von `bullet_color` in `resources/settings.xml` (in-place, Struktur bleibt erhalten; Datei muss vor Kodi-Start existieren)
 - `constants.py`
@@ -164,10 +164,13 @@ Im Loop:
 
 4. ICY-Analyse/Fallback
 - `metadata.parse_stream_title_complex()`
-- erkennt `"Title" von Artist`, mehrere Separatoren, Station-/Invalid-Werte
-- numerische Formate wie `123 - 456` gelten als "kein ICY"
+- erkennt `"Title" von Artist`, mehrere Separatoren (` - `, `–`, `—`, `|`, `: `), Station-/Invalid-Werte
+- numerische `digit-digit`-Formate wie `123 - 456` gelten als "kein ICY"
 - Mehrfach-Separator-Heuristik:
 - bei mehrfach ` - ` zuerst last-separator-Variante pruefen
+- Digit-/Numerik-Defensivpfad:
+- bei `MB score=0` und numerischem Einzelteil im ICY-Paar (z. B. `284684 - Real Title`) wird API bevorzugt
+- ohne API wird kein Song gesetzt (statt numerische IDs als Artist/Title zu uebernehmen)
 
 5. MB-Entscheidung fuer ICY-Fallback
 - `identify_artist_title_via_musicbrainz(...)`
@@ -237,15 +240,19 @@ API-only Startup-Heuristik:
 
 ### 6.6 SQLite-Datenbank (`song_data.db`)
 
-`SongDB` verwaltet zwei Tabellen:
+`SongDB` verwaltet drei Tabellen:
 
-**`songs`** — bestaetigte Songs als LRU-Cache pro Sender:
-- Spalten: `station_key`, `artist`, `title`, `mb_data` (JSON), `last_seen`
+**`songs`** - bestaetigte Songs als LRU-Cache pro Sender:
+- Spalten: `station_key`, `artist`, `title`, `last_seen`, `last_seen_ts`, `count`
 - Max. `SONG_CACHE_MAX_PER_STATION` (200) Eintraege je Sender; aelteste werden bei Ueberschreitung verdraengt
-- Wird beim Stationswechsel konsultiert, um zuvor erkannte Songs schneller zu verarbeiten
-- Schreibzugriff: UPSERT bei jedem neuen Song-Winner
+- Recount-Schutz: gleicher Song pro Sender wird innerhalb `SONG_RECOUNT_WINDOW_S` (aktuell `600s`) nicht erneut gezaehlt
+- Bei Recount innerhalb des Fensters werden nur `last_seen`/`last_seen_ts` aktualisiert (kein Count-Inkrement)
 
-**`generic_strings`** — sender-spezifische Jingle-/Stationsinfo-Strings:
+**`song_daily_counts`** - Tageszaehlung pro Song und Sender:
+- Spalten: `station_key`, `artist`, `title`, `day`, `count`
+- Wird nur erhoeht, wenn der Song den Recount-Schutz passiert
+
+**`generic_strings`** - sender-spezifische Jingle-/Stationsinfo-Strings:
 - Spalten: `station_key`, `string`, `seen`, `last_seen`, `promoted`
 - Wird NUR befuellt, wenn kein Song aktiv ist und kein Song in der Session bestaetigt wurde
 - Kandidaten: ICY-StreamTitle und API-Titel (normalisiert, Mindestlaenge `GENERIC_STRING_MIN_LEN=8`)
@@ -253,8 +260,14 @@ API-only Startup-Heuristik:
 - Promotion: nach `KEYWORD_PROMOTE_MIN_SEEN=5` Beobachtungen wird `promoted=1` gesetzt
 - Promotete Strings werden als Filter-Keywords verwendet, um nicht-songartige ICY-Bloecke zu erkennen
 
+Persistenz-Gating:
+- Song-DB-Schreiben wird zentral ueber `service._persist_confirmed_song_if_allowed(...)` angestossen
+- Persistiert werden nur Songs mit MB-Verifikation (`mbid` vorhanden)
+- Bei fehlender MB-Verifikation wird der Song nicht in `songs`/`song_daily_counts` gezaehlt
+
 Migration:
-- `_migrate()` erkennt altes Schema (Spalten `seen_generic`/`seen_song`) und baut die Tabelle neu auf
+- `_migrate()` erkennt altes Generic-Schema (`seen_generic`/`seen_song`) und baut `generic_strings` neu auf
+- `_migrate()` ergaenzt bei bestehenden Installationen die Spalte `last_seen_ts` in `songs`
 
 ### 6.7 TuneIn-Integration
 
@@ -367,6 +380,8 @@ Nicht verletzen ohne expliziten Grund:
 - Quellentracking (`_set_last_song_decision`) immer mit Originalwerten aus der Quelle – nie mit MB-korrigierten Werten
 - `resources/settings.xml` muss vor dem Kodi-Start existieren und darf niemals komplett ueberschrieben werden; `skin_colors.update_settings_colors()` aendert ausschliesslich das `values`-Attribut von `bullet_color`
 - alle DB- und JSON-Schreibzugriffe pruefen `self._persist_data` (Setting `persist_data`); Lesezugriffe sind davon unabhaengig
+- Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
+- Song-Recounts innerhalb `SONG_RECOUNT_WINDOW_S` nicht erneut zaehlen
 
 ## 11) Debugging-Playbook
 
@@ -379,6 +394,8 @@ Nicht verletzen ohne expliziten Grund:
    - `MB-Cache invalidiert wegen Titelwechsel`
    - `MB score=0, kein API – ICY-Rohdaten-Fallback: 'Artist - Title'`
    - `MB score=0 fuer alle Kandidaten, keine belastbaren Songdaten -> nutze nur Station/StreamTitle`
+   - `Song DB persist uebersprungen (kein MB-Verify): 'Artist - Title'`
+   - `Song DB ... fehlgeschlagen` (open/exec/commit/write/touch)
    - `MusicBrainz Entscheidung`
    - `Song-Timeout abgelaufen`
 

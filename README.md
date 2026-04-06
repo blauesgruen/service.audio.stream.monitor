@@ -11,6 +11,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Automatische Erkennung von Radio- und Musik-Streams
 - ✅ Auslesen von ICY-Metadaten (Icecast/Shoutcast)
 - ✅ Intelligente Trennung von Artist und Title (mehrere Trennzeichen, 'von'-Format, last-separator-Variante)
+- ✅ Defensiver Umgang mit numerischen ICY-Formaten: `digit-digit`-Strings wie `123 - 456` gelten als Nicht-Song; bei `MB score=0` mit numerischen Teilstrings wird API bevorzugt bzw. kein Song gesetzt
 - ✅ Stationsname-Filterung: ICY-Strings, die nur den Sendernamen enthalten, werden nicht als Artist/Title übernommen
 - ✅ MusicBrainz-Abgleich zur Kandidatenauswahl und Datenanreicherung (Album, AlbumDate, FirstRelease, MBID, Genre, Banddaten)
 - ✅ MB-Bereinigung der Schreibweise: Artist/Title werden korrigiert wenn MB eindeutig denselben Song bestätigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei komplett anderem MB-Treffer bleiben Originalwerte erhalten
@@ -23,7 +24,9 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
-- ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender) und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
+- ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender), Tageszaehler und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
+- ✅ Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
+- ✅ Recount-Schutz: gleicher Song pro Sender wird innerhalb von `10` Minuten nicht erneut gezaehlt (`SONG_RECOUNT_WINDOW_S`)
 - ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
 - ✅ Startup-Bypass fuer API-only-Sender: initialer Song-Block wird aufgehoben, wenn API stabil liefert und ICY/MusicPlayer keine belastbaren Songs liefern
 - ✅ `RadioMonitor.ApiNowPlaying` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel)
@@ -135,12 +138,18 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 - ` | ` (Pipe)
 - `: ` (Doppelpunkt)
 
+Parsing-Regeln:
+- Bei mehrfach vorkommendem ` - ` wird zunaechst die **last-separator-Variante** geprueft und ueber MB validiert.
+- Numerische `digit-digit`-Formate (z. B. `240846 - 245425`) werden als **Nicht-Song** behandelt.
+- Bei `MB score=0` und numerischen Teilstrings im ICY-Paar wird kein numerischer ICY-String als Song uebernommen.
+
 ### API-Whitelist und MB-Schwelle
 - API-Now-Playing wird nur verwendet, wenn die Quelle aus einem whitelisted Addon stammt (`plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`).
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierten Score (`MB score * artist similarity`) und akzeptiert Kandidaten erst oberhalb der Schwellen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`).
 - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
 - Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
+- Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
@@ -164,7 +173,7 @@ StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
 | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
-| `song_db.py` | SQLite-Datenbank: bestätigte Songs als LRU-Cache und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) |
+| `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz) und sender-spezifische Generic-Keywords |
 | `skin_colors.py` | Liest Farbdefinitionen des aktiven Skins und aktualisiert das Farb-Dropdown in `resources/settings.xml` (in-place) |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
 | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
@@ -207,4 +216,3 @@ MIT License - siehe LICENSE.txt
 ## Danksagung
 
 Dieses Addon wurde ursprünglich für das "Radio.de light" Addon von Publish3r entwickelt und zu einem universellen Service für alle Audio-Streams erweitert.
-

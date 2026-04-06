@@ -449,6 +449,22 @@ class RadioMonitor(xbmc.Monitor):
         name = re.sub(r'\s+', ' ', name)
         return f"name:{name}"
 
+    def _persist_confirmed_song_if_allowed(self, station_name, artist, title, mbid):
+        """
+        Persistiert Song-Counts nur fuer MB-verifizierte Songpaare.
+        """
+        if not (self._persist_data and self._profile_store and artist and title):
+            return
+        if not mbid:
+            log_debug(
+                f"Song DB persist uebersprungen (kein MB-Verify): "
+                f"'{artist} - {title}'"
+            )
+            return
+        station_key = self._build_station_profile_key(station_name)
+        if station_key:
+            self._profile_store.record_confirmed_song(station_key, artist, title)
+
     def _is_song_pair(self, pair):
         return _is_song_pair(pair)
 
@@ -1568,6 +1584,28 @@ class RadioMonitor(xbmc.Monitor):
             return None, None
         return a, t
 
+    def _is_dot_sensitive_artist_conflict(self, source_artist, mb_artist):
+        """
+        Erkennt Konflikte wie 'Haven.' vs 'Haven'.
+        In solchen Fällen darf MB den Artist/MBID nicht übernehmen, da der
+        Punkt bei manchen Künstlernamen semantisch relevant ist.
+        """
+        src = str(source_artist or '').strip()
+        mb = str(mb_artist or '').strip()
+        if not src or not mb:
+            return False
+        if src.casefold() == mb.casefold():
+            return False
+
+        src_has_dot = src.endswith('.')
+        mb_has_dot = mb.endswith('.')
+        if src_has_dot == mb_has_dot:
+            return False
+
+        src_base = re.sub(r'\.+$', '', src).strip().casefold()
+        mb_base = re.sub(r'\.+$', '', mb).strip().casefold()
+        return bool(src_base and mb_base and src_base == mb_base)
+
     def _read_musicplayer_candidates(self, invalid_values):
         """
         Liest MusicPlayer-Kandidaten (direkt + swapped) zentral aus.
@@ -1993,10 +2031,24 @@ class RadioMonitor(xbmc.Monitor):
         artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
         title_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
         combined = float(score) * ((artist_sim + title_sim) / 2.0)
+        dot_conflict = self._is_dot_sensitive_artist_conflict(artist, mb_artist)
+        if dot_conflict:
+            log_info(
+                f"MB-Kandidat geblockt (Punkt-Konflikt): "
+                f"source={source}, input_artist='{artist}', mb_artist='{mb_artist}'"
+            )
+            score = 0
+            combined = 0.0
+            mbid = ''
+            mb_album = ''
+            mb_album_date = ''
+            mb_first_release = ''
+            mb_duration_ms = 0
         # MB-Bereinigung: korrigierten Label nur uebernehmen wenn MB eindeutig
         # denselben Song bestaetigt (hohe Aehnlichkeit zu den Eingabewerten).
         # Verhindert, dass ein komplett anderer MB-Treffer die Labels ueberschreibt.
         if (mb_artist and mb_title
+                and not dot_conflict
                 and artist_sim >= _MB_LABEL_CORRECTION_MIN_SIM
                 and title_sim >= _MB_LABEL_CORRECTION_MIN_SIM):
             corrected_artist = mb_artist
@@ -2021,6 +2073,7 @@ class RadioMonitor(xbmc.Monitor):
             'mbid': mbid or '',
             'mb_first_release': mb_first_release or '',
             'mb_duration_ms': int(mb_duration_ms or 0),
+            'dot_conflict': bool(dot_conflict),
         }
 
     def _select_mb_winner(self, candidates):
@@ -2193,7 +2246,17 @@ class RadioMonitor(xbmc.Monitor):
                                 first_release = mb_first_release
                                 a_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
                                 t_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
-                                if mb_artist and mb_title and a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
+                                if self._is_dot_sensitive_artist_conflict(artist, mb_artist):
+                                    log_info(
+                                        f"MB-Bereinigung verworfen (API, Punkt-Konflikt): "
+                                        f"'{artist}' vs '{mb_artist}'"
+                                    )
+                                    mbid = ''
+                                    album = ''
+                                    album_date = ''
+                                    first_release = ''
+                                    duration_ms = 0
+                                elif mb_artist and mb_title and a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
                                     # MB bestaetigt denselben Song: korrigierte Schreibweise fuer Labels verwenden
                                     display_artist = mb_artist
                                     display_title = mb_title
@@ -2363,7 +2426,17 @@ class RadioMonitor(xbmc.Monitor):
                     # denselben Song bestaetigt. Original fuer Aenderungs-Detektion behalten.
                     artist = mp_artist
                     title = mp_title
-                    if mb_artist and mb_title:
+                    if self._is_dot_sensitive_artist_conflict(mp_artist, mb_artist):
+                        log_info(
+                            f"MB-Bereinigung verworfen (MP, Punkt-Konflikt): "
+                            f"'{mp_artist}' vs '{mb_artist}'"
+                        )
+                        mbid = ''
+                        mb_album = ''
+                        mb_album_date = ''
+                        mb_first_release = ''
+                        duration_ms = 0
+                    elif mb_artist and mb_title:
                         a_sim = _mb_similarity(mp_artist, mb_artist)
                         t_sim = _mb_similarity(mp_title, mb_title)
                         if a_sim >= _MB_LABEL_CORRECTION_MIN_SIM and t_sim >= _MB_LABEL_CORRECTION_MIN_SIM:
@@ -2896,6 +2969,13 @@ class RadioMonitor(xbmc.Monitor):
         if uncertain:
             # Unsicherer MB-Treffer: nur Zusatzdaten verwerfen.
             mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
+        elif self._is_dot_sensitive_artist_conflict(source_artist, mb_artist):
+            log_info(
+                f"MB-Bereinigung verworfen (ICY, Punkt-Konflikt): "
+                f"'{source_artist}' vs '{mb_artist}'"
+            )
+            mb_album, mb_album_date, mbid, mb_first_release, duration_ms = '', '', '', '', 0
+            uncertain = True
 
         if source_artist in invalid:
             source_artist = None
@@ -3448,10 +3528,12 @@ class RadioMonitor(xbmc.Monitor):
                             )
                             if title:
                                 last_song_key = current_song_key
-                                if self._persist_data and artist and self._profile_store:
-                                    station_key = self._build_station_profile_key(station_for_policy)
-                                    if station_key:
-                                        self._profile_store.record_confirmed_song(station_key, artist, title)
+                                self._persist_confirmed_song_if_allowed(
+                                    station_for_policy,
+                                    artist,
+                                    title,
+                                    mbid
+                                )
                             if decision_source:
                                 last_winner_source = decision_source
                                 initial_source_pending = False

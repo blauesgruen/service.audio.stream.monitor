@@ -198,6 +198,8 @@ GENERIC_STRING_MAX_DIGIT_SEQ = 3
 KEYWORD_PROMOTE_MIN_SEEN = 5
 # Maximale Anzahl bestätigter Songs im LRU-Cache pro Sender
 SONG_CACHE_MAX_PER_STATION = 200
+# Re-Count-Schutz: gleicher Song pro Sender wird innerhalb dieses Fensters nicht erneut gezählt.
+SONG_RECOUNT_WINDOW_S = 10 * 60
 
 # Song-Historie (Settings-Ansicht)
 SONG_HISTORY_STATION_LIMIT = 80
