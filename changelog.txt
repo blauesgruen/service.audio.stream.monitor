@@ -1,3 +1,12 @@
+v1.1.2 (2026-04-06)
+- Fix: Punkt-sensitiver Artist-Guard (`Haven.` != `Haven`) in allen MB-Korrekturpfaden; bei Konflikt keine MB-Label-Uebernahme und kein MBID-Setzen.
+- Anpassung: Song-DB-Persistenz zentralisiert (`_persist_confirmed_song_if_allowed`) und auf MB-verifizierte Songs begrenzt (`MBID` erforderlich).
+- Neu: Recount-Schutz in `song_data.db` (`SONG_RECOUNT_WINDOW_S=10*60`) – gleicher Song pro Sender wird innerhalb von 10 Minuten nicht erneut gezaehlt.
+- Anpassung: `songs`-Schema um `last_seen_ts` erweitert, Migration fuer bestehende DBs (`ALTER TABLE ... ADD COLUMN last_seen_ts`).
+- Anpassung: Trennzeichen-/Fallback-Doku aktualisiert (mehrere Separatoren inkl. last-separator-Heuristik und `digit-digit`-Behandlung).
+- Anpassung: Defensivpfad fuer numerische ICY-Teile bei `MB score=0` dokumentiert (API-Fallback bzw. kein Song ohne API).
+- Doku: README und TECHNISCHE_DOKUMENTATION auf aktuellen Stand gebracht (DB-Tabellen, Persistenz-Gating, Recount, Debug-Marker).
+
 v1.1.1 (2026-04-01)
 - Fix: Sender mit Nummern im Titel und Artist korrekt behandelt.
 - Fix: TuneIn-Station-ID aus Logo-URL extrahieren um TuneIn-Integration zu verbessern.
