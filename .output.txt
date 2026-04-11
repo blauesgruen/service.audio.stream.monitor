@@ -1,0 +1,1294 @@
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'resources/language/resource.language.de_de/strings.po', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'resources/language/resource.language.en_gb/strings.po', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'service.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'song_db.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'station_profiles.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/README.md b/README.md
+index fddb77d..b0e0536 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-﻿# Audio Stream Monitor
++# Audio Stream Monitor
+
+ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die Metadaten (Titel, Interpret, etc.) korrekt aus.
+
+@@ -25,6 +25,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
+ - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
+ - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
+ - ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender), Tageszaehler und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
++- ✅ Gemeinsame Verified-Source-DB in `addon_data/service.audio.stream.monitor/song_data.db`: ASM und `service.audio.stream.monitor.qf` teilen verifizierte Senderquellen (`verified_station_sources`)
+ - ✅ Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
+ - ✅ Recount-Schutz: gleicher Song pro Sender wird innerhalb von `10` Minuten nicht erneut gezaehlt (`SONG_RECOUNT_WINDOW_S`)
+ - ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
+@@ -40,6 +41,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
+ - ✅ Sofortiges Löschen der Labels bei Stop/Ende (Player-Callbacks)
+ - ✅ Streamwechsel wird abgefangen: Labels werden vor Neubefuellung zuerst geloescht
+ - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
++- ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
++- ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den Sendernamen (`RadioMonitor.QF.Request.*`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
+ - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
+
+ ## Verfügbare Window Properties
+@@ -66,6 +69,10 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
+ | `RadioMonitor.MBDurationS`      | Von MusicBrainz ermittelte Songdauer in Sekunden | "175" |
+ | `RadioMonitor.TimeoutTotal`     | Aktueller gesetzter Timeout in Sekunden | "160" |
+ | `RadioMonitor.TimeoutRemaining` | Verbleibende Zeit bis zum Label-Clear in Sekunden | "142" |
++| `RadioMonitor.VerifiedSourceUrl` | URL der gematchten verifizierten Senderquelle (falls vorhanden) | "https://stream.example.net/live" |
++| `RadioMonitor.VerifiedSourceBy` | Verifizierender Addon-Owner der Quelle | "service.audio.stream.monitor.qf" |
++| `RadioMonitor.VerifiedSourceConfidence` | Confidence der verifizierten Quelle (0..1) | "0.950" |
++| `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
+
+ ## Verwendung in Skins
+
+@@ -103,6 +110,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
+ <label>API: $INFO[Window(Home).Property(RadioMonitor.ApiNowPlaying)]</label>
+ ```
+
++### Beispiel 7: ASM-QF Song-Ergebnis
++```xml
++<label>QF: $INFO[Window(Home).Property(RadioMonitor.QF.Result)]</label>
++```
++
+ ## Installation
+
+ ### Empfohlene Methode: Kodinerds Repository
+@@ -150,6 +162,7 @@ Parsing-Regeln:
+ - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
+ - Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
+ - Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
++- Shared-DB fuer verifizierte Senderquellen: Tabelle `verified_station_sources` in `song_data.db` (unter `~userdata/addon_data/service.audio.stream.monitor/`). ASM nutzt URL-Matches als Stations-Hint; ASM-QF kann in dieselbe Tabelle schreiben.
+
+ ### Source-Policy und Senderprofile
+ - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
+@@ -173,7 +186,7 @@ Parsing-Regeln:
+ | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
+ | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
+ | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
+-| `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz) und sender-spezifische Generic-Keywords |
++| `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz), sender-spezifische Generic-Keywords und gemeinsame Tabelle `verified_station_sources` |
+ | `skin_colors.py` | Liest Farbdefinitionen des aktiven Skins und aktualisiert das Farb-Dropdown in `resources/settings.xml` (in-place) |
+ | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
+ | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |
+diff --git a/constants.py b/constants.py
+index 9506663..0a4fd13 100644
+--- a/constants.py
++++ b/constants.py
+@@ -16,6 +16,7 @@ except Exception:
+ ADDON_ID = ADDON.getAddonInfo('id')
+ ADDON_NAME = ADDON.getAddonInfo('name')
+ ADDON_VERSION = ADDON.getAddonInfo('version')
++QF_SERVICE_ADDON_ID = 'service.audio.stream.monitor.qf'
+
+ # --- API Endpunkte ---
+
+@@ -40,6 +41,7 @@ DEFAULT_HTTP_HEADERS = {
+ # --- Metadaten-Konstanten ---
+
+ INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
++STATION_NAME_MATCH_MIN_LEN = 5
+ RADIODE_PLUGIN_IDS = ('plugin.audio.radiode', 'plugin.audio.radio_de_light')
+ TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
+
+@@ -178,6 +180,23 @@ class PropertyNames:
+     RAW_API_RADIODE_NOWPLAYING = 'RadioMonitor.Source.Api.RadioDeNowPlayingRaw'
+     RAW_API_TUNEIN_JSON = 'RadioMonitor.Source.Api.TuneInJsonRaw'
+     RAW_API_TUNEIN_TEXT = 'RadioMonitor.Source.Api.TuneInTextRaw'
++    VERIFIED_SOURCE_URL = 'RadioMonitor.VerifiedSourceUrl'
++    VERIFIED_SOURCE_BY = 'RadioMonitor.VerifiedSourceBy'
++    VERIFIED_SOURCE_CONF = 'RadioMonitor.VerifiedSourceConfidence'
++    QF_REQUEST_ID = 'RadioMonitor.QF.Request.Id'
++    QF_REQUEST_STATION = 'RadioMonitor.QF.Request.Station'
++    QF_REQUEST_STATION_ID = 'RadioMonitor.QF.Request.StationId'
++    QF_REQUEST_MODE = 'RadioMonitor.QF.Request.Mode'
++    QF_REQUEST_TS = 'RadioMonitor.QF.Request.Ts'
++    QF_RESPONSE_ID = 'RadioMonitor.QF.Response.Id'
++    QF_RESPONSE_STATUS = 'RadioMonitor.QF.Response.Status'
++    QF_RESPONSE_ARTIST = 'RadioMonitor.QF.Response.Artist'
++    QF_RESPONSE_TITLE = 'RadioMonitor.QF.Response.Title'
++    QF_RESPONSE_SOURCE = 'RadioMonitor.QF.Response.Source'
++    QF_RESPONSE_REASON = 'RadioMonitor.QF.Response.Reason'
++    QF_RESPONSE_META = 'RadioMonitor.QF.Response.Meta'
++    QF_RESPONSE_TS = 'RadioMonitor.QF.Response.Ts'
++    QF_RESULT = 'RadioMonitor.QF.Result'
+     AN_TRACE_ID = 'RadioMonitor.Analysis.TraceId'
+     AN_TRIGGER = 'RadioMonitor.Analysis.Trigger'
+     AN_WINNER_SOURCE = 'RadioMonitor.Analysis.WinnerSource'
+diff --git a/resources/language/resource.language.de_de/strings.po b/resources/language/resource.language.de_de/strings.po
+index d6266fa..394d89d 100644
+--- a/resources/language/resource.language.de_de/strings.po
++++ b/resources/language/resource.language.de_de/strings.po
+@@ -31,6 +31,10 @@ msgctxt "#32021"
+ msgid "Save songs and keywords to database and JSON"
+ msgstr "Songs und Keywords in Datenbank und JSON speichern"
+
++msgctxt "#32022"
++msgid "Enable ASM-QF integration"
++msgstr "ASM-QF-Integration aktivieren"
++
+ msgctxt "#32031"
+ msgid "Show song history by station"
+ msgstr "Songverlauf pro Sender anzeigen"
+diff --git a/resources/language/resource.language.en_gb/strings.po b/resources/language/resource.language.en_gb/strings.po
+index b366f92..3e33ba7 100644
+--- a/resources/language/resource.language.en_gb/strings.po
++++ b/resources/language/resource.language.en_gb/strings.po
+@@ -31,6 +31,10 @@ msgctxt "#32021"
+ msgid "Save songs and keywords to database and JSON"
+ msgstr ""
+
++msgctxt "#32022"
++msgid "Enable ASM-QF integration"
++msgstr ""
++
+ msgctxt "#32031"
+ msgid "Show song history by station"
+ msgstr ""
+diff --git a/resources/settings.xml b/resources/settings.xml
+index 47975c3..1d2d834 100644
+--- a/resources/settings.xml
++++ b/resources/settings.xml
+@@ -6,6 +6,7 @@
+     </category>
+     <category label="32020">
+         <setting id="persist_data" type="bool" label="32021" default="true" />
++        <setting id="qf_enabled" type="bool" label="32022" default="false" />
+         <setting id="open_song_history" type="action" label="32031" action="RunScript(special://home/addons/service.audio.stream.monitor/default.py,show_song_history)" option="close" />
+     </category>
+ </settings>
+\ No newline at end of file
+diff --git a/service.py b/service.py
+index 07618a5..7b83568 100644
+--- a/service.py
++++ b/service.py
+@@ -13,9 +13,9 @@ except Exception:  # pragma: no cover - Kodi runtime dependency
+
+ # --- Modul-Imports ---
+ from constants import (
+-    ADDON, ADDON_ID, ADDON_NAME, ADDON_VERSION,
++    ADDON, ADDON_ID, ADDON_NAME, ADDON_VERSION, QF_SERVICE_ADDON_ID as _QF_SERVICE_ADDON_ID,
+     RADIODE_SEARCH_API_URL,
+-    DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES,
++    DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES, STATION_NAME_MATCH_MIN_LEN,
+     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
+     SONG_END_DETECTOR_ENABLED, SONG_END_MIN_SONG_AGE_S, SONG_END_HOLD_S,
+     SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
+@@ -78,13 +78,20 @@ from metadata import (
+     is_generic_song_pair as _is_generic_song_pair,
+     has_non_generic_song_pair as _has_non_generic_song_pair,
+     filter_non_generic_song_pairs as _filter_non_generic_song_pairs,
+-    append_non_generic_candidate as _append_non_generic_candidate,
+ )
+ from raw_candidate_extractors import (
+     extract_listitem_pair as _extract_listitem_pair,
+     extract_playing_item_pair as _extract_playing_item_pair,
+     extract_jsonrpc_pair as _extract_jsonrpc_pair,
+ )
++from pre_mb_policy import (
++    normalize_station_compare_text as _normalize_station_compare_text,
++    build_station_hints as _build_station_hints,
++    is_station_name_match_pair as _is_station_name_match_pair,
++    is_obvious_non_song_text as _pre_mb_is_obvious_non_song_text,
++    sanitize_pair_for_pre_mb as _sanitize_pair_for_pre_mb,
++    is_pre_mb_plausible_pair as _is_pre_mb_plausible_pair,
++)
+
+
+ # Window-Properties für die Skin
+@@ -122,6 +129,8 @@ class PlayerMonitor(xbmc.Player):
+                     if slug_match:
+                         slug = slug_match.group(1)
+                         self.radio_monitor.plugin_slug = slug
++                        if not self.radio_monitor.station_id:
++                            self.radio_monitor.station_id = slug
+                         log_info(f"Plugin-Slug aus iconimage: '{slug}'")
+             elif 'plugin.audio.radiode' in playing_file:
+                 self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_RADIODE)
+@@ -194,6 +203,7 @@ class RadioMonitor(xbmc.Monitor):
+     API_SOURCE_NONE = ''
+     API_SOURCE_RADIODE = 'radiode'
+     API_SOURCE_TUNEIN = 'tunein'
++    QF_SERVICE_ADDON_ID = _QF_SERVICE_ADDON_ID
+     STREAM_SOURCE_FAMILIES = _STREAM_SOURCE_FAMILIES
+     MP_SOURCE_FAMILY = _SOURCE_FAMILIES[0]  # 'musicplayer'
+     RADIODE_PLUGIN_IDS = _RADIODE_PLUGIN_IDS
+@@ -210,6 +220,7 @@ class RadioMonitor(xbmc.Monitor):
+     TRIGGER_MP_INVALID = _TRIGGER_MP_INVALID
+     TRIGGER_ICY_STALE = _TRIGGER_ICY_STALE
+     MP_GENERIC_HOLD_MAX_S = 120.0
++    STATION_NAME_MATCH_MIN_LEN = int(STATION_NAME_MATCH_MIN_LEN)
+
+     def __init__(self):
+         super(RadioMonitor, self).__init__()
+@@ -248,6 +259,14 @@ class RadioMonitor(xbmc.Monitor):
+         self._station_profile_policy_enabled = False
+         self._active_policy_profile = {}
+         self._last_station_profile_observe_ts = 0.0
++        self._last_verified_source_write = ('', '', '', 0.0)
++        self._qf_enabled = False
++        self._last_qf_install_request_ts = 0.0
++        self._last_qf_result = ''
++        self._qf_request_seq = 0
++        self._last_qf_request_id = ''
++        self._last_qf_request_station = ''
++        self._last_qf_request_ts = 0.0
+         self._mp_generic_hold_active = False
+         self._mp_generic_hold_since_ts = 0.0
+         self._mp_generic_hold_timed_out = False
+@@ -285,6 +304,7 @@ class RadioMonitor(xbmc.Monitor):
+
+     def _reset_api_context(self):
+         """Setzt API-relevanten Zustand zentral zurück."""
++        self.station_id = None
+         self.plugin_slug = None
+         self.station_slug = None
+         self.tunein_station_id = None
+@@ -449,6 +469,127 @@ class RadioMonitor(xbmc.Monitor):
+         name = re.sub(r'\s+', ' ', name)
+         return f"name:{name}"
+
++    def _clear_verified_source_properties(self):
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_URL)
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_BY)
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
++
++    def _set_verified_source_properties(self, source_row):
++        if not isinstance(source_row, dict):
++            self._clear_verified_source_properties()
++            return
++        source_url = str(source_row.get('source_url', '') or '').strip()
++        verified_by = str(source_row.get('verified_by', '') or '').strip()
++        confidence = source_row.get('confidence', '')
++        if source_url:
++            WINDOW.setProperty(_P.VERIFIED_SOURCE_URL, source_url)
++        else:
++            WINDOW.clearProperty(_P.VERIFIED_SOURCE_URL)
++        if verified_by:
++            WINDOW.setProperty(_P.VERIFIED_SOURCE_BY, verified_by)
++        else:
++            WINDOW.clearProperty(_P.VERIFIED_SOURCE_BY)
++        try:
++            conf_text = f"{float(confidence):.3f}"
++        except Exception:
++            conf_text = ''
++        if conf_text:
++            WINDOW.setProperty(_P.VERIFIED_SOURCE_CONF, conf_text)
++        else:
++            WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
++
++    def _resolve_verified_station_for_url(self, stream_url):
++        if self._profile_store is None:
++            return {}
++        source_url = str(stream_url or '').strip()
++        if not source_url:
++            return {}
++        try:
++            row = self._profile_store.get_verified_source_by_url(source_url)
++            if isinstance(row, dict):
++                return row
++        except Exception as e:
++            log_debug(f"Verified-source Lookup fehlgeschlagen: {e}")
++        return {}
++
++    def _apply_verified_source_hint(self, stream_url):
++        source_url = str(stream_url or '').strip()
++        if not source_url:
++            self._clear_verified_source_properties()
++            return ''
++        row = self._resolve_verified_station_for_url(source_url)
++        self._set_verified_source_properties(row if row else None)
++        station_name = str((row or {}).get('station_name', '') or '').strip()
++        if station_name and not (WINDOW.getProperty(_P.STATION) or '').strip():
++            self.set_property_safe(_P.STATION, station_name)
++            log_info(
++                f"Station aus verified source gesetzt: '{station_name}' "
++                f"(by='{(row or {}).get('verified_by', '') or 'unknown'}')"
++            )
++        return station_name
++
++    def _record_verified_station_source(
++        self,
++        station_name='',
++        stream_url='',
++        source_kind='asm_runtime',
++        verified_by='',
++        confidence=0.75,
++        meta=None,
++    ):
++        if not (self._persist_data and self._profile_store is not None):
++            return False
++        name = str(station_name or WINDOW.getProperty(_P.STATION) or '').strip()
++        source_url = str(stream_url or self.current_url or '').strip()
++        if not name or not source_url:
++            return False
++        station_key = self._build_station_profile_key(name)
++        if not station_key:
++            return False
++        source_kind_text = str(source_kind or 'asm_runtime')
++        now_ts = time.time()
++        dedup_key = (station_key, source_url, source_kind_text)
++        last_station_key, last_source_url, last_kind, last_ts = self._last_verified_source_write
++        if (
++            dedup_key == (last_station_key, last_source_url, last_kind)
++            and (now_ts - float(last_ts or 0.0)) < 30.0
++        ):
++            return False
++        verifier = str(verified_by or ADDON_ID).strip().lower()
++        try:
++            conf_value = float(confidence)
++        except Exception:
++            conf_value = 0.75
++        conf_value = max(0.0, min(1.0, conf_value))
++        details = {
++            'source_kind': source_kind_text,
++            'api_source': str(self.api_source or ''),
++            'plugin_slug': str(self.plugin_slug or ''),
++            'tunein_station_id': str(self.tunein_station_id or ''),
++        }
++        if isinstance(meta, dict):
++            details.update(meta)
++        elif meta is not None:
++            details['meta'] = str(meta)
++        try:
++            ok = self._profile_store.record_verified_source(
++                station_key=station_key,
++                source_url=source_url,
++                station_name=name,
++                source_kind=source_kind_text,
++                verified_by=verifier,
++                confidence=conf_value,
++                meta=details,
++            )
++            if ok:
++                self._last_verified_source_write = (
++                    station_key, source_url, source_kind_text, now_ts
++                )
++            return bool(ok)
++        except Exception as e:
++            log_debug(f"Verified-source Persist fehlgeschlagen: {e}")
++            return False
++
+     def _persist_confirmed_song_if_allowed(self, station_name, artist, title, mbid):
+         """
+         Persistiert Song-Counts nur fuer MB-verifizierte Songpaare.
+@@ -472,18 +613,29 @@ class RadioMonitor(xbmc.Monitor):
+         kw = self._get_station_generic_keywords(station_name)
+         return _is_generic_metadata_text(text, station_name, kw)
+
++    def _is_obvious_non_song_text(self, text, station_name=''):
++        kw = self._get_station_generic_keywords(station_name)
++        return _pre_mb_is_obvious_non_song_text(text, extra_keywords=kw)
++
+     @staticmethod
+-    def _is_obvious_non_song_text(text):
+-        value = str(text or '').strip().lower()
+-        if not value:
+-            return False
+-        # Typische Service-/Programmtexte statt Songdaten.
+-        if re.search(r"\b(anruf|hotline|verkehr|studio|nachrichten)\b", value):
+-            return True
+-        # Telefonnummern/Frequenzen in Blockform.
+-        if re.search(r"\b(?:0\d{2,4}[\s\-]?\d{2,}[\s\-]?\d{1,})\b", value):
+-            return True
+-        return False
++    def _normalize_station_compare_text(text):
++        return _normalize_station_compare_text(text)
++
++    def _station_name_compare_hints(self, station_name=''):
++        return _build_station_hints((
++            station_name,
++            WINDOW.getProperty(_P.STATION),
++            self.station_slug,
++            self.plugin_slug,
++            self.station_id,
++        ))
++
++    def _is_station_name_match_pair(self, pair, station_name=''):
++        return _is_station_name_match_pair(
++            pair,
++            station_hints=self._station_name_compare_hints(station_name),
++            min_len=self.STATION_NAME_MATCH_MIN_LEN,
++        )
+
+     def _is_generic_song_pair(self, pair, station_name=''):
+         kw = self._get_station_generic_keywords(station_name)
+@@ -501,25 +653,81 @@ class RadioMonitor(xbmc.Monitor):
+         kw = self._get_station_generic_keywords(station_name)
+         return _filter_non_generic_song_pairs(pairs, station_name, kw)
+
++    def _sanitize_pre_mb_pair(self, pair, station_name='', source='', reject_obvious_text=False):
++        effective_station = str(station_name or WINDOW.getProperty(_P.STATION) or '').strip()
++        invalid_values = INVALID_METADATA_VALUES + ['', effective_station]
++        source_name = str(source or '').strip().lower()
++        reject_station_match = bool(
++            source_name.startswith('api')
++            or source_name.startswith('icy')
++            or source_name in ('stream', '')
++        )
++        kw = self._get_station_generic_keywords(effective_station)
++        return _sanitize_pair_for_pre_mb(
++            pair,
++            station_name=effective_station,
++            invalid_values=invalid_values,
++            extra_keywords=kw,
++            station_hints=self._station_name_compare_hints(effective_station),
++            station_match_min_len=self.STATION_NAME_MATCH_MIN_LEN,
++            reject_generic=True,
++            reject_station_match=reject_station_match,
++            reject_obvious_text=bool(reject_obvious_text),
++        )
++
++    def _is_pre_mb_song_pair(self, pair, station_name='', source=''):
++        effective_station = str(station_name or WINDOW.getProperty(_P.STATION) or '').strip()
++        invalid_values = INVALID_METADATA_VALUES + ['', effective_station]
++        source_name = str(source or '').strip().lower()
++        reject_station_match = bool(
++            source_name.startswith('api')
++            or source_name.startswith('icy')
++            or source_name in ('stream', '')
++        )
++        kw = self._get_station_generic_keywords(effective_station)
++        return _is_pre_mb_plausible_pair(
++            pair,
++            station_name=effective_station,
++            invalid_values=invalid_values,
++            extra_keywords=kw,
++            station_hints=self._station_name_compare_hints(effective_station),
++            station_match_min_len=self.STATION_NAME_MATCH_MIN_LEN,
++            reject_generic=True,
++            reject_station_match=reject_station_match,
++            reject_obvious_text=True,
++        )
++
+     def _sanitize_musicplayer_pair(self, pair, station_name=''):
+-        kw = self._get_station_generic_keywords(station_name)
+-        if _is_generic_song_pair(pair, station_name, kw):
+-            return ('', '')
+-        return pair
++        return self._sanitize_pre_mb_pair(
++            pair,
++            station_name=station_name,
++            source='musicplayer',
++            reject_obvious_text=False,
++        )
+
+     def _sanitize_stream_source_pair(self, pair, station_name=''):
+-        if not _is_song_pair(pair):
+-            return ('', '')
+-        kw = self._get_station_generic_keywords(station_name)
+-        if _is_generic_song_pair(pair, station_name, kw):
+-            return ('', '')
+-        return pair
++        return self._sanitize_pre_mb_pair(
++            pair,
++            station_name=station_name,
++            source='stream',
++            reject_obvious_text=False,
++        )
+
+     def _append_non_generic_candidate(self, candidates, source, artist, title, station_name=''):
+-        kw = self._get_station_generic_keywords(station_name)
+-        return _append_non_generic_candidate(
+-            candidates, source, artist, title, station_name, kw, log_fn=log_debug
++        pair = self._sanitize_pre_mb_pair(
++            (artist, title),
++            station_name=station_name,
++            source=str(source or ''),
++            reject_obvious_text=False,
+         )
++        if not pair[0] or not pair[1]:
++            log_debug(
++                f"Kandidat verworfen (pre_mb_policy): source='{source}', "
++                f"pair='{str(artist or '').strip()} - {str(title or '').strip()}'"
++            )
++            return False
++        candidates.append({'source': str(source or ''), 'artist': pair[0], 'title': pair[1]})
++        return True
+
+     def _update_mp_generic_hold_state(self, last_winner_source, current_mp_pair, station_name=''):
+         """
+@@ -1055,6 +1263,11 @@ class RadioMonitor(xbmc.Monitor):
+         self._last_icy_format_hint = 'unknown'
+         self._station_profile_policy_enabled = False
+         self._active_policy_profile = {}
++        self._last_verified_source_write = ('', '', '', 0.0)
++        self._last_qf_result = ''
++        self._last_qf_request_id = ''
++        self._last_qf_request_station = ''
++        self._last_qf_request_ts = 0.0
+         self._mp_generic_hold_active = False
+         self._mp_generic_hold_since_ts = 0.0
+         self._mp_generic_hold_timed_out = False
+@@ -1085,6 +1298,16 @@ class RadioMonitor(xbmc.Monitor):
+         WINDOW.clearProperty(_P.ICY_NOW)
+         WINDOW.clearProperty(_P.SOURCE)
+         WINDOW.clearProperty(_P.SOURCE_DETAIL)
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_URL)
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_BY)
++        WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
++        WINDOW.clearProperty(_P.QF_REQUEST_ID)
++        WINDOW.clearProperty(_P.QF_REQUEST_STATION)
++        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
++        WINDOW.clearProperty(_P.QF_REQUEST_MODE)
++        WINDOW.clearProperty(_P.QF_REQUEST_TS)
++        self._clear_qf_response_properties()
++        WINDOW.clearProperty(_P.QF_RESULT)
+         WINDOW.clearProperty(_P.PLAYING)
+         WINDOW.clearProperty(_P.LOGO)
+         WINDOW.clearProperty(_P.BAND_FORM)
+@@ -1127,6 +1350,43 @@ class RadioMonitor(xbmc.Monitor):
+         'RadioMonitor.Album', 'RadioMonitor.Genre',
+     }
+
++    def _has_addon(self, addon_id):
++        addon_id = str(addon_id or '').strip()
++        if not addon_id:
++            return False
++        try:
++            if xbmc.getCondVisibility(f"System.HasAddon({addon_id})"):
++                return True
++        except Exception:
++            pass
++        try:
++            import xbmcaddon as _xbmcaddon
++            _xbmcaddon.Addon(id=addon_id)
++            return True
++        except Exception:
++            return False
++
++    def _ensure_qf_addon_installed(self):
++        if not self._qf_enabled:
++            return
++        if self._has_addon(self.QF_SERVICE_ADDON_ID):
++            return
++        now_ts = time.time()
++        if (now_ts - self._last_qf_install_request_ts) < 30.0:
++            return
++        self._last_qf_install_request_ts = now_ts
++        try:
++            xbmc.executebuiltin(f"InstallAddon({self.QF_SERVICE_ADDON_ID})")
++            log_info(
++                f"ASM-QF aktiviert, Addon fehlt: InstallAddon fuer "
++                f"'{self.QF_SERVICE_ADDON_ID}' gestartet"
++            )
++        except Exception as e:
++            log_warning(
++                f"ASM-QF aktiviert, Auto-Installation fehlgeschlagen "
++                f"('{self.QF_SERVICE_ADDON_ID}'): {e}"
++            )
++
+     def _load_bullet_settings(self):
+         """Liest Addon-Settings und aktualisiert Bullet-Prefix und Persistenz-Flag."""
+         import xbmcaddon as _xbmcaddon
+@@ -1135,12 +1395,15 @@ class RadioMonitor(xbmc.Monitor):
+         color   = addon.getSetting('bullet_color') or 'green'
+         self._bullet_prefix = f'[COLOR {color}]•[/COLOR] ' if enabled else ''
+         self._persist_data  = addon.getSetting('persist_data').lower() != 'false'
++        self._qf_enabled = (addon.getSetting('qf_enabled') or 'false').lower() == 'true'
+         if not self._persist_data:
+             log_info("Datenpersistenz deaktiviert – DB und JSON werden nicht geschrieben")
+
++        self._ensure_qf_addon_installed()
++
+     def onSettingsChanged(self):
+         self._load_bullet_settings()
+-        log_debug("Einstellungen neu geladen (Bullet-Prefix aktualisiert)")
++        log_debug("Einstellungen neu geladen (Bullet, Persistenz und ASM-QF Integration aktualisiert)")
+
+     def set_property_safe(self, key, value):
+         """Setzt eine Window-Property nur wenn der Wert nicht leer ist."""
+@@ -1158,11 +1421,57 @@ class RadioMonitor(xbmc.Monitor):
+     def set_logo_safe(self):
+         """Setzt Logo-Property nur wenn echtes Logo vorhanden, sonst Kodi-Fallback"""
+         if self.station_logo and self.is_real_logo(self.station_logo):
++            self._ensure_radiode_identity_from_value(self.station_logo, context='set_logo_safe')
+             self.set_property_safe(_P.LOGO, self.station_logo)
+         else:
+             # Kein echtes Logo → Property leer lassen (Kodi nutzt automatisch Fallback)
+             WINDOW.clearProperty(_P.LOGO)
+
++    def _extract_radiode_slug_from_value(self, value):
++        text = str(value or '').strip()
++        if not text:
++            return ''
++        # Beispiel: https://...radio-assets.com/300/starfmberlin.jpeg?version=...
++        match = re.search(r'radio-assets\.com/\d+/([^./?]+)', text, flags=re.IGNORECASE)
++        if match:
++            return str(match.group(1) or '').strip()
++        return ''
++
++    def _ensure_radiode_identity_from_value(self, value, context=''):
++        slug = self._extract_radiode_slug_from_value(value)
++        if not slug:
++            return
++        if self.plugin_slug != slug:
++            self.plugin_slug = slug
++            log_debug(f"radio.de Slug aus Kontext gesetzt: '{slug}' (context={context})")
++        if not self.station_id:
++            self.station_id = slug
++            log_debug(f"radio.de Station-ID aus Kontext gesetzt: '{slug}' (context={context})")
++        if self.api_source != self.API_SOURCE_RADIODE:
++            self._set_api_source(self.API_SOURCE_RADIODE)
++
++    def _capture_radiode_station_id_from_payload(self, context, payload):
++        ctx = str(context or '')
++        if not ctx.startswith('radiode.'):
++            return
++        station_id = ''
++        try:
++            if isinstance(payload, list) and payload and isinstance(payload[0], dict):
++                station_id = str(payload[0].get('stationId') or '').strip()
++            elif isinstance(payload, dict):
++                station_id = str(payload.get('stationId') or '').strip()
++        except Exception:
++            station_id = ''
++        if not station_id:
++            return
++        if self.station_id != station_id:
++            self.station_id = station_id
++            log_debug(f"radio.de Station-ID aus API-RAW gesetzt: '{station_id}' (context={ctx})")
++        if not self.plugin_slug:
++            self.plugin_slug = station_id
++        if self.api_source != self.API_SOURCE_RADIODE:
++            self._set_api_source(self.API_SOURCE_RADIODE)
++
+     def _compose_song_label(self, artist=None, title=None):
+         a = (artist or '').strip()
+         t = (title or '').strip()
+@@ -1170,6 +1479,18 @@ class RadioMonitor(xbmc.Monitor):
+             return f"{a} - {t}"
+         return t or a
+
++    def _sanitize_station_text(self, value):
++        """
++        Entfernt Kodi-Markup (z.B. [COLOR ...][/COLOR]) und Bullet-Zeichen
++        aus einem Stationslabel fuer externe Requests.
++        """
++        text = str(value or '')
++        if not text:
++            return ''
++        text = re.sub(r'\[[^\]]+\]', '', text)
++        text = text.replace('•', ' ')
++        return ' '.join(text.split()).strip()
++
+     def _set_api_nowplaying_label(self, artist=None, title=None):
+         value = self._compose_song_label(artist, title)
+         if value:
+@@ -1186,6 +1507,7 @@ class RadioMonitor(xbmc.Monitor):
+         if len(text) > 500:
+             text = text[:500] + '...'
+         log_debug(f"API-RAW[{context}]: {text}")
++        self._capture_radiode_station_id_from_payload(context, payload)
+         self.raw_sources.set_api_payload(context, payload)
+
+     def _debug_log_raw_payload(self, context, payload):
+@@ -1206,6 +1528,116 @@ class RadioMonitor(xbmc.Monitor):
+         else:
+             WINDOW.clearProperty(_P.ICY_NOW)
+
++    def _resolve_qf_station_id(self):
++        """
++        Liefert eine stabile Sender-ID fuer ASM-QF, falls verfuegbar.
++        Prioritaet: station_id > plugin_slug > tunein_station_id.
++        """
++        for candidate in (self.station_id, self.plugin_slug, self.tunein_station_id):
++            value = str(candidate or '').strip()
++            if value:
++                return value
++        return ''
++
++    def _send_qf_request(self, station_name, mode='asm_auto'):
++        station = self._sanitize_station_text(station_name)
++        if not station:
++            return False
++        station_id = self._resolve_qf_station_id()
++        now_ts = time.time()
++        self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
++        request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
++        WINDOW.setProperty(_P.QF_REQUEST_STATION, station)
++        WINDOW.setProperty(_P.QF_REQUEST_STATION_ID, station_id)
++        WINDOW.setProperty(_P.QF_REQUEST_MODE, str(mode or 'asm_auto'))
++        WINDOW.setProperty(_P.QF_REQUEST_TS, str(int(now_ts)))
++        # Request-ID immer zuletzt setzen, damit ASM-QF ein konsistentes Request-Paket liest.
++        WINDOW.setProperty(_P.QF_REQUEST_ID, request_id)
++        self._last_qf_request_id = request_id
++        self._last_qf_request_station = station
++        self._last_qf_request_ts = now_ts
++        log_debug(
++            f"ASM-QF Request gesendet: id='{request_id}', station='{station}', "
++            f"station_id='{station_id}', mode='{mode}'"
++        )
++        return True
++
++    def _clear_qf_response_properties(self):
++        WINDOW.clearProperty(_P.QF_RESPONSE_ID)
++        WINDOW.clearProperty(_P.QF_RESPONSE_STATUS)
++        WINDOW.clearProperty(_P.QF_RESPONSE_ARTIST)
++        WINDOW.clearProperty(_P.QF_RESPONSE_TITLE)
++        WINDOW.clearProperty(_P.QF_RESPONSE_SOURCE)
++        WINDOW.clearProperty(_P.QF_RESPONSE_REASON)
++        WINDOW.clearProperty(_P.QF_RESPONSE_META)
++        WINDOW.clearProperty(_P.QF_RESPONSE_TS)
++
++    def _tick_qf_request(self):
++        if not self._qf_enabled or not self.is_playing:
++            return
++        if not self._has_addon(self.QF_SERVICE_ADDON_ID):
++            self._ensure_qf_addon_installed()
++            return
++
++        station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
++        if not station_name:
++            return
++
++        now_ts = time.time()
++        station_changed = station_name.strip().lower() != self._last_qf_request_station.strip().lower()
++        request_due = (
++            not self._last_qf_request_id
++            or station_changed
++            or (now_ts - self._last_qf_request_ts) >= API_NOW_REFRESH_INTERVAL_S
++        )
++        if not request_due:
++            return
++
++        if station_changed:
++            self._last_qf_result = ''
++            self._clear_qf_response_properties()
++            WINDOW.clearProperty(_P.QF_RESULT)
++        self._send_qf_request(station_name=station_name, mode='asm_auto')
++
++    def _sync_qf_result_property(self):
++        """
++        Spiegelt das ASM-QF Song-Ergebnis in ein ASM-Label fuer Skins.
++        Ziel-Property: RadioMonitor.QF.Result
++        """
++        if not self._qf_enabled or not self.is_playing:
++            self._last_qf_result = ''
++            if not self.is_playing:
++                self._clear_qf_response_properties()
++            WINDOW.clearProperty(_P.QF_RESULT)
++            return
++
++        if not self._last_qf_request_id:
++            self._last_qf_result = ''
++            WINDOW.clearProperty(_P.QF_RESULT)
++            return
++
++        response_id = (WINDOW.getProperty(_P.QF_RESPONSE_ID) or '').strip()
++        if not response_id or response_id != self._last_qf_request_id:
++            return
++
++        status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
++        artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
++        title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
++        if status != 'hit':
++            self._last_qf_result = ''
++            WINDOW.clearProperty(_P.QF_RESULT)
++            return
++
++        label = self._compose_song_label(artist=artist, title=title)
++        if not label:
++            self._last_qf_result = ''
++            WINDOW.clearProperty(_P.QF_RESULT)
++            return
++
++        if label != self._last_qf_result:
++            self._last_qf_result = label
++            self.set_property_safe(_P.QF_RESULT, label)
++
+     def _capture_stream_url_raw(self, stream_url):
+         value = (stream_url or '').strip()
+         self.raw_sources.set_text(_P.RAW_STREAM_URL, value, max_len=2000)
+@@ -1429,6 +1861,12 @@ class RadioMonitor(xbmc.Monitor):
+                     log_debug(f"Station aus URL erkannt: {station_name}")
+
+                     self.station_slug = station_slug
++                    self._record_verified_station_source(
++                        station_name=station_name,
++                        stream_url=url,
++                        source_kind='asm_url_pattern',
++                        confidence=0.60,
++                    )
+
+                     return station_name
+
+@@ -2026,6 +2464,31 @@ class RadioMonitor(xbmc.Monitor):
+         """
+         Bewertet einen Kandidaten via MusicBrainz.
+         """
++        if not self._is_pre_mb_song_pair((artist, title), source=source):
++            log_debug(
++                f"MB-Kandidat[{source}] uebersprungen "
++                f"(pre_mb_policy): '{artist} - {title}'"
++            )
++            return {
++                'source': source,
++                'input_artist': artist,
++                'input_title': title,
++                'corrected_artist': artist,
++                'corrected_title': title,
++                'score': 0,
++                'artist_sim': 0.0,
++                'title_sim': 0.0,
++                'combined': 0.0,
++                'mb_artist': artist or '',
++                'mb_title': title or '',
++                'mb_album': '',
++                'mb_album_date': '',
++                'mbid': '',
++                'mb_first_release': '',
++                'mb_duration_ms': 0,
++                'dot_conflict': False,
++            }
++
+         score, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, mb_duration_ms = \
+             _musicbrainz_query_recording(title, artist)
+         artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
+@@ -2182,12 +2645,19 @@ class RadioMonitor(xbmc.Monitor):
+         )
+         if resolved_name:
+             self.set_property_safe(_P.STATION, resolved_name)
++            self._record_verified_station_source(
++                station_name=resolved_name,
++                source_kind='radiode_api',
++                confidence=0.95,
++            )
+         # Suche-Logo hat Vorrang (immer ueberschreiben), Details-Logo nur wenn noch keins vorhanden
+         if search_logo:
+             self.station_logo = search_logo
++            self._ensure_radiode_identity_from_value(search_logo, context='radiode_search_logo')
+             self.set_logo_safe()
+         elif det_logo and not self.station_logo:
+             self.station_logo = det_logo
++            self._ensure_radiode_identity_from_value(det_logo, context='radiode_details_logo')
+             self.set_logo_safe()
+         return artist, title
+
+@@ -2235,7 +2705,7 @@ class RadioMonitor(xbmc.Monitor):
+                         album, album_date, mbid, first_release, duration_ms = '', '', '', '', 0
+                         display_artist = artist
+                         display_title = title
+-                        if artist and title:
++                        if artist and title and self._is_pre_mb_song_pair((artist, title), station_name=station_name, source='api'):
+                             mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
+                             if uncertain:
+                                 mbid = ''
+@@ -2272,6 +2742,11 @@ class RadioMonitor(xbmc.Monitor):
+                                     album_date = ''
+                                     first_release = ''
+                                     duration_ms = 0
++                        elif artist and title:
++                            log_info(
++                                f"MB uebersprungen (pre_mb_policy, api): "
++                                f"'{artist} - {title}'"
++                            )
+
+                         if display_artist:
+                             # Reihenfolge: MBID und Title vor Artist setzen.
+@@ -2553,8 +3028,18 @@ class RadioMonitor(xbmc.Monitor):
+             station_name = icy_name
+             if station_name:
+                 log_debug(f"Station (ICY): {station_name}")
++                self._record_verified_station_source(
++                    station_name=station_name,
++                    stream_url=url,
++                    source_kind='icy_header',
++                    confidence=0.70,
++                )
+             else:
+                 log_debug("Kein icy-name im Header")
++                hinted = self._apply_verified_source_hint(url)
++                if hinted:
++                    station_name = hinted
++                    log_debug(f"Station aus verified source (URL): {station_name}")
+
+             if icy_genre:
+                 log_debug(f"Genre: {icy_genre}")
+@@ -2938,7 +3423,7 @@ class RadioMonitor(xbmc.Monitor):
+
+         # --- ICY-Analyse (bestehender Fallback) ---
+         if (
+-            (artist and title and self._is_generic_song_pair((artist, title), station_name))
++            (artist and title and not self._is_pre_mb_song_pair((artist, title), station_name=station_name, source='icy'))
+             or ((not artist) and title and self._is_generic_metadata_text(title, station_name))
+         ):
+             log_debug(f"ICY-Fallback verworfen (generisch): '{stream_title}'")
+@@ -3089,7 +3574,7 @@ class RadioMonitor(xbmc.Monitor):
+                             # Quellenwechsel pruefen (z.B. wenn Sender selten ICY schreibt).
+                             stream_title = last_title
+
+-                        station_name = stream_info.get('station', '')
++                        station_name = stream_info.get('station', '') or (WINDOW.getProperty(_P.STATION) or '')
+                         station_for_policy = station_name
+                         invalid_values = INVALID_METADATA_VALUES + ["", station_name]
+                         current_mp_pair = ('', '')
+@@ -3738,6 +4223,7 @@ class RadioMonitor(xbmc.Monitor):
+                         WINDOW.clearProperty(_P.MBID)
+                         WINDOW.clearProperty(_P.ALBUM)
+                         WINDOW.clearProperty(_P.STATION)
++                        self._apply_verified_source_hint(playing_file)
+
+                         # Basis-Informationen aus dem Player
+                         try:
+@@ -3759,6 +4245,7 @@ class RadioMonitor(xbmc.Monitor):
+                                 logo = listitem_icon
+                                 self.station_logo = logo
+                                 self._ensure_api_source_from_context(logo, 'check_playing_listitem_logo')
++                                self._ensure_radiode_identity_from_value(logo, context='check_playing_listitem_logo')
+                                 if self._can_use_tunein_api() and not self.tunein_station_id:
+                                     tunein_id = _tunein_extract_station_id(logo)
+                                     if tunein_id:
+@@ -3772,6 +4259,7 @@ class RadioMonitor(xbmc.Monitor):
+                                     logo = radiode_logo
+                                     self.station_logo = logo
+                                     self._ensure_api_source_from_context(logo, 'check_playing_radiode_logo')
++                                    self._ensure_radiode_identity_from_value(logo, context='check_playing_radiode_logo')
+
+                             # 3. Fallback: Player Art
+                             if not logo:
+@@ -3780,6 +4268,7 @@ class RadioMonitor(xbmc.Monitor):
+                                         logo = player_logo
+                                         self.station_logo = logo
+                                         self._ensure_api_source_from_context(logo, f'check_playing_{source}')
++                                        self._ensure_radiode_identity_from_value(logo, context=f'check_playing_{source}')
+                                         if self._can_use_tunein_api() and not self.tunein_station_id:
+                                             tunein_id = _tunein_extract_station_id(logo)
+                                             if tunein_id:
+@@ -3870,6 +4359,8 @@ class RadioMonitor(xbmc.Monitor):
+                 break
+
+             self.check_playing()
++            self._tick_qf_request()
++            self._sync_qf_result_property()
+             self._update_timeout_remaining_property()
+
+         # Cleanup beim Beenden
+diff --git a/song_db.py b/song_db.py
+index c8f92ab..e9f8837 100644
+--- a/song_db.py
++++ b/song_db.py
+@@ -1,11 +1,14 @@
+-﻿"""
++"""
+ SQLite-based database for station-specific learning data.
+
+ Tables:
+   songs             confirmed (artist, title) pairs per station (LRU cache)
+   song_daily_counts per-day play counter for (station, artist, title)
+   generic_strings   observed non-song texts with stats and promotion flag
++  verified_station_sources
++                    shared verified station->source mapping for ASM + ASM-QF
+ """
++import json
+ import os
+ import sqlite3
+ import threading
+@@ -46,6 +49,24 @@ CREATE TABLE IF NOT EXISTS song_daily_counts (
+     count        INTEGER NOT NULL DEFAULT 1,
+     PRIMARY KEY (station_key, artist, title, day)
+ );
++CREATE TABLE IF NOT EXISTS verified_station_sources (
++    station_key       TEXT NOT NULL,
++    station_name      TEXT NOT NULL DEFAULT '',
++    station_name_norm TEXT NOT NULL DEFAULT '',
++    source_url        TEXT NOT NULL,
++    source_url_norm   TEXT NOT NULL,
++    source_kind       TEXT NOT NULL DEFAULT 'stream',
++    verified_by       TEXT NOT NULL DEFAULT '',
++    confidence        REAL NOT NULL DEFAULT 1.0,
++    verified_at_utc   TEXT NOT NULL DEFAULT '',
++    last_seen_ts      INTEGER NOT NULL DEFAULT 0,
++    meta_json         TEXT NOT NULL DEFAULT '',
++    PRIMARY KEY (station_key, source_url_norm)
++);
++CREATE INDEX IF NOT EXISTS idx_verified_sources_url_norm
++ON verified_station_sources(source_url_norm);
++CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
++ON verified_station_sources(station_name_norm);
+ """
+
+
+@@ -53,6 +74,10 @@ def _today():
+     return datetime.utcnow().strftime('%Y-%m-%d')
+
+
++def _utc_iso():
++    return datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
++
++
+ class SongDatabase:
+
+     _SONG_SEPARATORS = (' - ', ' – ', ' — ', ' | ')
+@@ -101,6 +126,8 @@ class SongDatabase:
+                 self._exec("ALTER TABLE songs ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0")
+                 self._commit()
+
++        self._migrate_verified_sources_table()
++
+         cursor = self._exec("PRAGMA table_info(generic_strings)")
+         if cursor is None:
+             return
+@@ -131,6 +158,52 @@ class SongDatabase:
+             self._exec(f"DELETE FROM generic_strings WHERE rowid IN ({placeholders})", song_rowids)
+             self._commit()
+
++    def _migrate_verified_sources_table(self):
++        cursor = self._exec("PRAGMA table_info(verified_station_sources)")
++        if cursor is None:
++            return
++        cols = {row['name'] for row in cursor.fetchall()}
++        if not cols:
++            return
++
++        additions = (
++            ('station_name', "ALTER TABLE verified_station_sources ADD COLUMN station_name TEXT NOT NULL DEFAULT ''"),
++            ('station_name_norm', "ALTER TABLE verified_station_sources ADD COLUMN station_name_norm TEXT NOT NULL DEFAULT ''"),
++            ('source_url_norm', "ALTER TABLE verified_station_sources ADD COLUMN source_url_norm TEXT NOT NULL DEFAULT ''"),
++            ('source_kind', "ALTER TABLE verified_station_sources ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'stream'"),
++            ('verified_by', "ALTER TABLE verified_station_sources ADD COLUMN verified_by TEXT NOT NULL DEFAULT ''"),
++            ('confidence', "ALTER TABLE verified_station_sources ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0"),
++            ('verified_at_utc', "ALTER TABLE verified_station_sources ADD COLUMN verified_at_utc TEXT NOT NULL DEFAULT ''"),
++            ('last_seen_ts', "ALTER TABLE verified_station_sources ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0"),
++            ('meta_json', "ALTER TABLE verified_station_sources ADD COLUMN meta_json TEXT NOT NULL DEFAULT ''"),
++        )
++        changed = False
++        for col_name, ddl in additions:
++            if col_name not in cols:
++                self._exec(ddl)
++                changed = True
++
++        self._exec("""
++            UPDATE verified_station_sources
++            SET station_name_norm = LOWER(TRIM(station_name))
++            WHERE station_name_norm = ''
++        """)
++        self._exec("""
++            UPDATE verified_station_sources
++            SET source_url_norm = LOWER(TRIM(source_url))
++            WHERE source_url_norm = ''
++        """)
++        self._exec("""
++            CREATE INDEX IF NOT EXISTS idx_verified_sources_url_norm
++            ON verified_station_sources(source_url_norm)
++        """)
++        self._exec("""
++            CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
++            ON verified_station_sources(station_name_norm)
++        """)
++        if changed:
++            self._commit()
++
+     def _exec(self, sql, params=()):
+         with self._lock:
+             if self._conn is None:
+@@ -313,6 +386,168 @@ class SongDatabase:
+             return ()
+         return tuple(dict(row) for row in cursor.fetchall())
+
++    # --- Verified Station Sources ---
++
++    @staticmethod
++    def _normalize_station_key(station_key):
++        return str(station_key or '').strip().lower()
++
++    @staticmethod
++    def _normalize_station_name(station_name):
++        return ' '.join(str(station_name or '').strip().lower().split())
++
++    @staticmethod
++    def _normalize_source_url(source_url):
++        return str(source_url or '').strip().lower()
++
++    @staticmethod
++    def _encode_meta_json(meta):
++        if meta is None:
++            return ''
++        if isinstance(meta, str):
++            return meta.strip()
++        try:
++            return json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
++        except Exception:
++            return str(meta)
++
++    def record_verified_source(
++        self,
++        station_key,
++        source_url,
++        station_name='',
++        source_kind='stream',
++        verified_by='',
++        confidence=1.0,
++        meta=None,
++    ):
++        key = self._normalize_station_key(station_key)
++        source_url_raw = str(source_url or '').strip()
++        source_url_norm = self._normalize_source_url(source_url_raw)
++        if not key or not source_url_raw or not source_url_norm:
++            return False
++
++        name = str(station_name or '').strip()
++        name_norm = self._normalize_station_name(name)
++        kind = str(source_kind or 'stream').strip().lower() or 'stream'
++        verifier = str(verified_by or '').strip().lower()
++        meta_json = self._encode_meta_json(meta)
++        now_ts = int(time.time())
++        verified_at_utc = _utc_iso()
++        try:
++            conf_value = float(confidence)
++        except Exception:
++            conf_value = 1.0
++        conf_value = max(0.0, min(1.0, conf_value))
++
++        cursor = self._exec(
++            """
++            INSERT INTO verified_station_sources (
++                station_key, station_name, station_name_norm,
++                source_url, source_url_norm, source_kind,
++                verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
++            )
++            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++            ON CONFLICT(station_key, source_url_norm)
++            DO UPDATE SET
++                station_name = CASE
++                    WHEN excluded.station_name <> '' THEN excluded.station_name
++                    ELSE verified_station_sources.station_name
++                END,
++                station_name_norm = CASE
++                    WHEN excluded.station_name_norm <> '' THEN excluded.station_name_norm
++                    ELSE verified_station_sources.station_name_norm
++                END,
++                source_url = excluded.source_url,
++                source_kind = excluded.source_kind,
++                verified_by = CASE
++                    WHEN excluded.verified_by <> '' THEN excluded.verified_by
++                    ELSE verified_station_sources.verified_by
++                END,
++                confidence = excluded.confidence,
++                verified_at_utc = excluded.verified_at_utc,
++                last_seen_ts = excluded.last_seen_ts,
++                meta_json = CASE
++                    WHEN excluded.meta_json <> '' THEN excluded.meta_json
++                    ELSE verified_station_sources.meta_json
++                END
++            """,
++            (
++                key, name, name_norm,
++                source_url_raw, source_url_norm, kind,
++                verifier, conf_value, verified_at_utc, now_ts, meta_json
++            )
++        )
++        if cursor is None:
++            log_warning(
++                f"Verified source write fehlgeschlagen: station='{key}', url='{source_url_raw}'"
++            )
++            return False
++        self._commit()
++        return True
++
++    def get_verified_source_by_url(self, source_url):
++        source_url_norm = self._normalize_source_url(source_url)
++        if not source_url_norm:
++            return None
++        cursor = self._exec(
++            """
++            SELECT
++                station_key, station_name, station_name_norm,
++                source_url, source_url_norm, source_kind,
++                verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
++            FROM verified_station_sources
++            WHERE source_url_norm = ?
++            ORDER BY confidence DESC, last_seen_ts DESC
++            LIMIT 1
++            """,
++            (source_url_norm,)
++        )
++        if cursor is None:
++            return None
++        row = cursor.fetchone()
++        if row is None:
++            return None
++        return dict(row)
++
++    def get_verified_sources_for_station(self, station_key='', station_name='', limit=50):
++        station_key_norm = self._normalize_station_key(station_key)
++        station_name_norm = self._normalize_station_name(station_name)
++        max_rows = max(1, int(limit or 50))
++        if station_key_norm:
++            cursor = self._exec(
++                """
++                SELECT
++                    station_key, station_name, station_name_norm,
++                    source_url, source_url_norm, source_kind,
++                    verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
++                FROM verified_station_sources
++                WHERE station_key = ?
++                ORDER BY confidence DESC, last_seen_ts DESC, source_url ASC
++                LIMIT ?
++                """,
++                (station_key_norm, max_rows)
++            )
++        elif station_name_norm:
++            cursor = self._exec(
++                """
++                SELECT
++                    station_key, station_name, station_name_norm,
++                    source_url, source_url_norm, source_kind,
++                    verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
++                FROM verified_station_sources
++                WHERE station_name_norm = ?
++                ORDER BY confidence DESC, last_seen_ts DESC, source_url ASC
++                LIMIT ?
++                """,
++                (station_name_norm, max_rows)
++            )
++        else:
++            return ()
++        if cursor is None:
++            return ()
++        return tuple(dict(row) for row in cursor.fetchall())
++
+     # --- Generic Strings ---
+
+     def record_string_candidates(self, station_key, candidates):
+diff --git a/station_profiles.py b/station_profiles.py
+index b294d24..11fcfc9 100644
+--- a/station_profiles.py
++++ b/station_profiles.py
+@@ -736,6 +736,36 @@ class StationProfileStore:
+     def get_known_songs(self, station_key):
+         return self._song_db.get_known_songs(station_key)
+
++    def record_verified_source(
++        self,
++        station_key,
++        source_url,
++        station_name='',
++        source_kind='stream',
++        verified_by='',
++        confidence=1.0,
++        meta=None,
++    ):
++        return self._song_db.record_verified_source(
++            station_key=station_key,
++            source_url=source_url,
++            station_name=station_name,
++            source_kind=source_kind,
++            verified_by=verified_by,
++            confidence=confidence,
++            meta=meta,
++        )
++
++    def get_verified_source_by_url(self, source_url):
++        return self._song_db.get_verified_source_by_url(source_url)
++
++    def get_verified_sources_for_station(self, station_key='', station_name='', limit=50):
++        return self._song_db.get_verified_sources_for_station(
++            station_key=station_key,
++            station_name=station_name,
++            limit=limit,
++        )
++
+     def flush_if_due(self, min_interval_s=30.0):
+         now_ts = time.time()
+         if (now_ts - self._last_flush_ts) < float(min_interval_s):
