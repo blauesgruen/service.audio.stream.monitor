@@ -55,6 +55,11 @@ class RawSourceLabels:
         _P.RAW_API_RADIODE_NOWPLAYING,
         _P.RAW_API_TUNEIN_JSON,
         _P.RAW_API_TUNEIN_TEXT,
+        _P.AN_TRACE_ID,
+        _P.AN_TRIGGER,
+        _P.AN_WINNER_SOURCE,
+        _P.AN_WINNER_PAIR,
+        _P.AN_LAST_EVENT,
     )
 
     API_CONTEXT_MAP = {

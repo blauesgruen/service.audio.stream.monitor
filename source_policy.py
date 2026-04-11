@@ -226,7 +226,7 @@ class SourcePolicy:
     def _mp_unusable(self):
         return bool(self._mp_absent or self._mp_noise)
 
-    def _api_reliable_comparator_conflicts(self, api_pair, mp_pair, icy_pair):
+    def _api_reliable_comparator_conflicts(self, api_pair, mp_pair, icy_pair, qf_pair=None):
         """
         Liefert die Anzahl valider Vergleichsquellen und wie viele davon API widersprechen.
         Quellen, die der Senderprofil-Analyse nach strukturell unbrauchbar sind, werden ignoriert.
@@ -255,11 +255,27 @@ class SourcePolicy:
             if icy_pair != api_pair:
                 conflict_count += 1
 
+        if (
+            qf_pair
+            and _is_song_pair(qf_pair)
+            and not self._looks_like_numeric_id_pair(qf_pair)
+        ):
+            comparator_count += 1
+            if qf_pair != api_pair:
+                conflict_count += 1
+
         return comparator_count, conflict_count
 
     def _preferred_family(self, valid_pairs, last_winner_family):
         if not valid_pairs:
             return ''
+
+        # ASM-QF hat absolute Prioritaet, sobald valide Songdaten vorliegen.
+        if (
+            'asm-qf' in valid_pairs
+            and _is_song_pair(valid_pairs.get('asm-qf'))
+        ):
+            return 'asm-qf'
 
         # MP hat Prioritaet, sobald valide Songdaten vorliegen.
         # Ausnahme: Senderprofil markiert MP als strukturell unbrauchbar (absent/noise).
@@ -310,6 +326,8 @@ class SourcePolicy:
     @staticmethod
     def _source_family(source):
         s = str(source or '')
+        if s.startswith('asm-qf'):
+            return 'asm-qf'
         if s.startswith('musicplayer'):
             return 'musicplayer'
         if s.startswith('api'):
@@ -366,9 +384,11 @@ class SourcePolicy:
         stream_title_changed,
         initial_source_pending,
         reasons,
+        current_qf_pair=None,
     ):
         winner_family = self._source_family(last_winner_source)
         pairs = {
+            'asm-qf': current_qf_pair if _is_song_pair(current_qf_pair) else ('', ''),
             'musicplayer': current_mp_pair if _is_song_pair(current_mp_pair) else ('', ''),
             'api': current_api_pair if _is_song_pair(current_api_pair) else ('', ''),
             'icy': current_icy_pair if _is_song_pair(current_icy_pair) else ('', ''),
@@ -402,10 +422,25 @@ class SourcePolicy:
         api_pair = pairs.get('api', ('', ''))
         icy_pair = pairs.get('icy', ('', ''))
         mp_pair = pairs.get('musicplayer', ('', ''))
+        qf_pair = pairs.get('asm-qf', ('', ''))
         external_support_last = (
             (_is_song_pair(api_pair) and api_pair == last_winner_pair)
             or (_is_song_pair(icy_pair) and icy_pair == last_winner_pair)
+            or (_is_song_pair(qf_pair) and qf_pair == last_winner_pair)
         )
+
+        # ASM-QF-Prioritaet: wenn ASM-QF einen neuen, validen Song meldet, wird dieser
+        # bevorzugt uebernommen.
+        if (
+            winner_family != 'asm-qf'
+            and _is_song_pair(qf_pair)
+            and qf_pair != last_winner_pair
+        ):
+            # Sofortiger Confirm (required=1) fuer ASM-QF ist gewuenscht,
+            # da es bereits eine verifizierte Quelle sein sollte.
+            if self._confirm('asm-qf', qf_pair, 1):
+                return _finish(True, reasons['asm-qf'])
+            return _finish(False, reasons['asm-qf'])
 
         # MP-Prioritaet: wenn MP einen neuen, validen Song meldet, wird dieser
         # bevorzugt uebernommen (sofern MP nicht generisch ist).
@@ -447,7 +482,8 @@ class SourcePolicy:
                 comparator_count, conflict_count = self._api_reliable_comparator_conflicts(
                     active_pair,
                     mp_pair,
-                    icy_pair
+                    icy_pair,
+                    qf_pair=qf_pair
                 )
                 if comparator_count > 0 and conflict_count == comparator_count:
                     self.mark_lead_error('api')

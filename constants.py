@@ -60,12 +60,13 @@ MP_DECISION_ENABLED = False
 
 # --- Quellen-Familien ---
 
-SOURCE_FAMILIES = ('musicplayer', 'api', 'icy')
-STREAM_SOURCE_FAMILIES = ('api', 'icy')  # Subset: externe Stream-Quellen ohne MusicPlayer
+SOURCE_FAMILIES = ('asm-qf', 'musicplayer', 'api', 'icy')
+STREAM_SOURCE_FAMILIES = ('asm-qf', 'api', 'icy')  # Subset: externe Stream-Quellen ohne MusicPlayer
 ICY_FORMAT_KEYS = ('artist_title', 'title_artist', 'unknown')
 
 # Trigger-Bezeichner fuer Quellenwechsel
 TRIGGER_TITLE_CHANGE = 'Titelwechsel'
+TRIGGER_QF_CHANGE = 'ASM-QF-Wechsel'
 TRIGGER_API_CHANGE = 'API-Wechsel'
 TRIGGER_MP_CHANGE = 'MusicPlayer-Wechsel'
 TRIGGER_MP_INVALID = 'MusicPlayer ungueltig'

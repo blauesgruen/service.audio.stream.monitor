@@ -37,6 +37,7 @@ from constants import (
     MP_TRUST_MAX_MISMATCHES as _MP_TRUST_MAX_MISMATCHES,
     MP_DECISION_ENABLED as _MP_DECISION_ENABLED,
     TRIGGER_TITLE_CHANGE as _TRIGGER_TITLE_CHANGE,
+    TRIGGER_QF_CHANGE as _TRIGGER_QF_CHANGE,
     TRIGGER_API_CHANGE as _TRIGGER_API_CHANGE,
     TRIGGER_MP_CHANGE as _TRIGGER_MP_CHANGE,
     TRIGGER_MP_INVALID as _TRIGGER_MP_INVALID,
@@ -205,7 +206,7 @@ class RadioMonitor(xbmc.Monitor):
     API_SOURCE_TUNEIN = 'tunein'
     QF_SERVICE_ADDON_ID = _QF_SERVICE_ADDON_ID
     STREAM_SOURCE_FAMILIES = _STREAM_SOURCE_FAMILIES
-    MP_SOURCE_FAMILY = _SOURCE_FAMILIES[0]  # 'musicplayer'
+    MP_SOURCE_FAMILY = 'musicplayer'
     RADIODE_PLUGIN_IDS = _RADIODE_PLUGIN_IDS
     TUNEIN_PLUGIN_IDS = _TUNEIN_PLUGIN_IDS
     RADIODE_URL_HINTS = ('radio.de', 'radio-assets.com')
@@ -219,6 +220,7 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_MP_CHANGE = _TRIGGER_MP_CHANGE
     TRIGGER_MP_INVALID = _TRIGGER_MP_INVALID
     TRIGGER_ICY_STALE = _TRIGGER_ICY_STALE
+    TRIGGER_QF_CHANGE = _TRIGGER_QF_CHANGE
     MP_GENERIC_HOLD_MAX_S = 120.0
     STATION_NAME_MATCH_MIN_LEN = int(STATION_NAME_MATCH_MIN_LEN)
 
@@ -1637,6 +1639,11 @@ class RadioMonitor(xbmc.Monitor):
         if label != self._last_qf_result:
             self._last_qf_result = label
             self.set_property_safe(_P.QF_RESULT, label)
+            # Im Exklusiv-Modus werden Artist/Title Labels sofort mit den 
+            # ASM-QF Daten vorbefüllt (Poll-Feedback), noch bevor MB entscheidet.
+            if self._qf_enabled:
+                self.set_property_safe(_P.ARTIST, artist)
+                self.set_property_safe(_P.TITLE, title)
 
     def _capture_stream_url_raw(self, stream_url):
         value = (stream_url or '').strip()
@@ -1757,6 +1764,7 @@ class RadioMonitor(xbmc.Monitor):
                     'listitem': list(listitem_pair or ('', '')),
                     'playing_item': list(playing_item_pair or ('', '')),
                     'jsonrpc': list(jsonrpc_pair or ('', '')),
+                    'asm-qf': list(self._last_policy_context.get('current_qf_pair') or ('', '')),
                 },
                 'policy': dict(self._last_policy_context or {}),
                 'source_hints': self._get_station_profile_hints(station_name),
@@ -2176,13 +2184,15 @@ class RadioMonitor(xbmc.Monitor):
         current_icy_pair,
         station_name,
         stream_title_changed,
-        initial_source_pending
+        initial_source_pending,
+        current_qf_pair=None
     ):
         """
         Zentrale Trigger-Erkennung ueber das modulare Source-Policy-Modell.
         """
         reasons = {
             'title': self.TRIGGER_TITLE_CHANGE,
+            'asm-qf': self.TRIGGER_QF_CHANGE,
             'api': self.TRIGGER_API_CHANGE,
             'musicplayer': self.TRIGGER_MP_CHANGE,
             'mp_invalid': self.TRIGGER_MP_INVALID,
@@ -2202,13 +2212,15 @@ class RadioMonitor(xbmc.Monitor):
             station_name=station_name,
             stream_title_changed=stream_title_changed,
             initial_source_pending=initial_source_pending,
-            reasons=reasons
+            reasons=reasons,
+            current_qf_pair=current_qf_pair
         )
         self._last_policy_context = {
             'station_name': station_name,
             'current_mp_pair': current_mp_pair if self._is_song_pair(current_mp_pair) else ('', ''),
             'current_api_pair': current_api_pair if self._is_song_pair(current_api_pair) else ('', ''),
             'current_icy_pair': current_icy_pair if self._is_song_pair(current_icy_pair) else ('', ''),
+            'current_qf_pair': current_qf_pair if self._is_song_pair(current_qf_pair) else ('', ''),
             'stream_title_changed': bool(stream_title_changed),
             'triggered': bool(changed),
             'trigger_reason': reason if changed else ''
@@ -2239,8 +2251,10 @@ class RadioMonitor(xbmc.Monitor):
         return stream_title
 
     def _source_family(self, source):
-        """Normalisiert eine Source auf ihre Familie (api/icy/musicplayer)."""
+        """Normalisiert eine Source auf ihre Familie (asm-qf/api/icy/musicplayer)."""
         s = str(source or '')
+        if s.startswith('asm-qf'):
+            return 'asm-qf'
         if s.startswith('musicplayer'):
             return 'musicplayer'
         if s.startswith('icy'):
@@ -2305,11 +2319,13 @@ class RadioMonitor(xbmc.Monitor):
         - Erst wenn die gelockte Quelle keine validen Daten liefert, wird auf alle Kandidaten geoeffnet.
         """
         locked_family = self._source_family(locked_source)
-        if locked_family not in ('musicplayer', 'api', 'icy'):
+        if locked_family not in ('asm-qf', 'musicplayer', 'api', 'icy'):
             return candidates
 
         has_locked_data = False
-        if locked_family == 'musicplayer':
+        if locked_family == 'asm-qf':
+            has_locked_data = bool(self._last_policy_context.get('current_qf_pair'))
+        elif locked_family == 'musicplayer':
             has_locked_data = bool(mp_pairs)
         elif locked_family == 'api':
             has_locked_data = bool(api_candidate and api_candidate[0] and api_candidate[1])
@@ -2339,6 +2355,10 @@ class RadioMonitor(xbmc.Monitor):
         """
         locked_source_name = str(locked_source or '')
         locked_family = self._source_family(locked_source_name)
+        if locked_family == 'asm-qf':
+            pair = self._last_policy_context.get('current_qf_pair')
+            if pair and pair[0] and pair[1]:
+                return locked_source_name, pair
         if locked_family == 'musicplayer' and mp_pairs:
             pair = self._select_musicplayer_pair_for_source(locked_source_name, mp_pairs)
             if pair and pair[0] and pair[1]:
@@ -2412,7 +2432,7 @@ class RadioMonitor(xbmc.Monitor):
         """Speichert die letzte Gewinnerquelle zentral fuer source-locked Trigger."""
         self._last_decision_source = str(source or '')
         source_family = self._source_family(self._last_decision_source)
-        if source_family in ('musicplayer', 'icy', 'api'):
+        if source_family in ('asm-qf', 'musicplayer', 'icy', 'api'):
             self.set_property_safe(_P.SOURCE, source_family)
             self.set_property_safe(_P.SOURCE_DETAIL, self._last_decision_source)
             log_debug(
@@ -2559,7 +2579,8 @@ class RadioMonitor(xbmc.Monitor):
 
         valid = [
             ev for ev in evaluations
-            if ev['score'] >= self.MB_WINNER_MIN_SCORE and ev['combined'] >= self.MB_WINNER_MIN_COMBINED
+            if (ev['score'] >= self.MB_WINNER_MIN_SCORE and ev['combined'] >= self.MB_WINNER_MIN_COMBINED)
+            or str(ev.get('source', '')).startswith('asm-qf')
         ]
         if not valid:
             log_debug(
@@ -2569,6 +2590,8 @@ class RadioMonitor(xbmc.Monitor):
 
         def _source_rank(source):
             s = str(source or '')
+            if s.startswith('asm-qf'):
+                return 3
             if s.startswith('musicplayer'):
                 return 2
             if s.startswith('icy'):
@@ -2597,34 +2620,42 @@ class RadioMonitor(xbmc.Monitor):
                     f"(Trigger={trigger_reason}, entfernt={filtered_count})")
 
         winner_pool = effective_valid
-        # Einheitliche Gewinnerregel:
-        # - Bei Gleichstand entscheidet die Quellen-Prioritaet (MusicPlayer > ICY > API).
-        # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
-        pair_support = {}
-        for ev in effective_valid:
-            pair = (ev.get('input_artist'), ev.get('input_title'))
-            fam = self._source_family(ev.get('source'))
-            pair_support.setdefault(pair, set()).add(fam)
-        consensus_pairs = {
-            pair for pair, families in pair_support.items() if len(families) >= 2
-        }
-        if consensus_pairs:
-            consensus_pool = [
-                ev for ev in effective_valid
-                if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
-            ]
-            if consensus_pool:
-                winner_pool = consensus_pool
-                log_debug(
-                    f"MB-Winner: Konsens aktiv "
-                    f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
+
+        # Dominanz-Regel fuer ASM-QF: wenn ASM-QF Daten liefert, ist dies
+        # die vorrangige Auswahl, unabhängig von Konsens anderer Quellen.
+        qf_candidates = [ev for ev in effective_valid if str(ev.get('source', '')).startswith('asm-qf')]
+        if qf_candidates:
+            winner_pool = qf_candidates
+            log_debug(f"MB-Winner: ASM-QF Dominanz aktiv (candidates={len(qf_candidates)})")
+        else:
+            # Einheitliche Gewinnerregel:
+            # - Bei Gleichstand entscheidet die Quellen-Prioritaet (MusicPlayer > ICY > API).
+            # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
+            pair_support = {}
+            for ev in effective_valid:
+                pair = (ev.get('input_artist'), ev.get('input_title'))
+                fam = self._source_family(ev.get('source'))
+                pair_support.setdefault(pair, set()).add(fam)
+            consensus_pairs = {
+                pair for pair, families in pair_support.items() if len(families) >= 2
+            }
+            if consensus_pairs:
+                consensus_pool = [
+                    ev for ev in effective_valid
+                    if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
+                ]
+                if consensus_pool:
+                    winner_pool = consensus_pool
+                    log_debug(
+                        f"MB-Winner: Konsens aktiv "
+                        f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
 
         winner = max(
             winner_pool,
             key=lambda ev: (
+                _source_rank(ev.get('source')),
                 ev['combined'],
-                ev['score'],
-                _source_rank(ev.get('source'))
+                ev['score']
             )
         )
         log_info(
@@ -3177,6 +3208,32 @@ class RadioMonitor(xbmc.Monitor):
             if mp_swapped[0] and mp_swapped[1]:
                 candidates.append({'source': 'musicplayer_swapped', 'artist': mp_swapped[0], 'title': mp_swapped[1]})
 
+        # ASM-QF-Kandidaten ergänzen
+        if self._qf_enabled:
+            qf_artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
+            qf_title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+            qf_artist, qf_title = self._normalize_song_candidate(qf_artist, qf_title, invalid)
+            qf_valid = self._append_non_generic_candidate(
+                candidates,
+                'asm-qf',
+                qf_artist,
+                qf_title,
+                station_name
+            )
+            if qf_valid:
+                if qf_artist != qf_title:
+                    s_artist, s_title = self._normalize_song_candidate(qf_title, qf_artist, invalid)
+                    self._append_non_generic_candidate(
+                        candidates,
+                        'asm-qf_swapped',
+                        s_artist,
+                        s_title,
+                        station_name
+                    )
+                # Wenn ASM-QF valide Daten liefert, werden alle anderen
+                # Kandidaten verworfen (Exklusiv-Modus).
+                candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf')]
+
         trigger_reason = str(getattr(self, '_parse_trigger_reason', '') or '')
         candidates = self._apply_api_stale_override(
             candidates,
@@ -3610,6 +3667,34 @@ class RadioMonitor(xbmc.Monitor):
                             self._latest_api_pair = ('', '')
                             current_api_pair = ('', '')
 
+                        # ASM-QF-Daten synchronisieren und auslesen
+                        current_qf_pair = ('', '')
+                        if self._qf_enabled:
+                            self._sync_qf_result_property()
+                            qf_artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
+                            qf_title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+                            current_qf_pair = self._normalize_song_candidate(qf_artist, qf_title, invalid_values)
+                            current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
+
+                        # Exklusivität für ASM-QF: Wenn ASM-QF aktiviert ist, werden andere Quellen
+                        # in diesem Durchlauf ignoriert (Candidates auf leer gesetzt).
+                        qf_exclusive = self._qf_enabled and bool(current_qf_pair[0] and current_qf_pair[1])
+                        if qf_exclusive:
+                            current_mp_pair = ('', '')
+                            current_icy_pair = ('', '')
+                            current_api_pair = ('', '')
+                            # Lokale Variablen für die Trigger-Prüfung ebenfalls leeren,
+                            # damit keine Misch-Entscheidungen entstehen.
+                            icy_artist, icy_title = ('', '')
+                            # API-Label ebenfalls leeren, damit im Exklusiv-Modus keine
+                            # alten API-Reste in der UI stehen.
+                            WINDOW.clearProperty(_P.API_NOW)
+                        elif self._qf_enabled:
+                            # Falls QF aktiv aber (noch) keine Daten liefert, pollt ASM-QF bereits alle 10s.
+                            # Wir warten hier passiv mit, indem wir API/ICY/MP zwar noch erlauben,
+                            # aber ASM-QF wird bei Eintreffen sofort dominieren (siehe oben).
+                            pass
+
                         # StreamTitle unabhängig vom Gewinner aktuell halten.
                         stream_title_changed = (stream_title != last_title)
                         if stream_title_changed:
@@ -3710,7 +3795,8 @@ class RadioMonitor(xbmc.Monitor):
                             current_icy_pair,
                             station_name,
                             stream_title_changed,
-                            (initial_source_pending if allow_initial_trigger else False)
+                            (initial_source_pending if allow_initial_trigger else False),
+                            current_qf_pair=current_qf_pair
                         )
 
                         mp_generic_hold_active = False
@@ -3967,8 +4053,8 @@ class RadioMonitor(xbmc.Monitor):
 
                             # Aktualisiere Kodi Player Metadaten (fuer Standard InfoLabels)
                             winner_source_for_player = str(decision_source or last_winner_source or '')
-                            if winner_source_for_player.startswith('musicplayer'):
-                                log_debug("Player InfoTag Update uebersprungen (Quelle=musicplayer)")
+                            if winner_source_for_player.startswith('musicplayer') or winner_source_for_player.startswith('asm-qf'):
+                                log_debug(f"Player InfoTag Update uebersprungen (Quelle={winner_source_for_player})")
                             else:
                                 logo = WINDOW.getProperty(_P.LOGO)
                                 self.update_player_metadata(artist if artist else None,
