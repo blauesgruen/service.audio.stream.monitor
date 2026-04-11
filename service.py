@@ -662,6 +662,7 @@ class RadioMonitor(xbmc.Monitor):
         reject_station_match = bool(
             source_name.startswith('api')
             or source_name.startswith('icy')
+            or source_name.startswith('asm-qf')
             or source_name in ('stream', '')
         )
         kw = self._get_station_generic_keywords(effective_station)
@@ -684,6 +685,7 @@ class RadioMonitor(xbmc.Monitor):
         reject_station_match = bool(
             source_name.startswith('api')
             or source_name.startswith('icy')
+            or source_name.startswith('asm-qf')
             or source_name in ('stream', '')
         )
         kw = self._get_station_generic_keywords(effective_station)
@@ -1629,6 +1631,19 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
             return
+
+        station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
+        qf_prefill_pair = self._sanitize_pre_mb_pair(
+            (artist, title),
+            station_name=station_name,
+            source='asm-qf',
+            reject_obvious_text=True,
+        )
+        if not (qf_prefill_pair[0] and qf_prefill_pair[1]):
+            self._last_qf_result = ''
+            WINDOW.clearProperty(_P.QF_RESULT)
+            return
+        artist, title = qf_prefill_pair
 
         label = self._compose_song_label(artist=artist, title=title)
         if not label:
@@ -3360,6 +3375,7 @@ class RadioMonitor(xbmc.Monitor):
                     str(locked_source_family).startswith('icy')
                     and (
                         self._is_generic_song_pair(locked_source_pair, station_name)
+                        or self._is_station_name_match_pair(locked_source_pair, station_name)
                         or self._is_obvious_non_song_text(
                             f"{locked_source_pair[0]} - {locked_source_pair[1]}"
                         )
@@ -3435,6 +3451,7 @@ class RadioMonitor(xbmc.Monitor):
                     _a, _t = icy_fallback_pair
                     if (
                         self._is_generic_song_pair((_a, _t), station_name)
+                        or self._is_station_name_match_pair((_a, _t), station_name)
                         or self._is_obvious_non_song_text(f"{_a} - {_t}")
                         or self._is_obvious_non_song_text(stream_title)
                     ):
