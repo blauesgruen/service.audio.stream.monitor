@@ -1,4 +1,4 @@
-﻿# Audio Stream Monitor
+# Audio Stream Monitor
 
 Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die Metadaten (Titel, Interpret, etc.) korrekt aus.
 
@@ -25,6 +25,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
 - ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender), Tageszaehler und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
+- ✅ Gemeinsame Verified-Source-DB in `addon_data/service.audio.stream.monitor/song_data.db`: ASM und `service.audio.stream.monitor.qf` teilen verifizierte Senderquellen (`verified_station_sources`)
 - ✅ Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
 - ✅ Recount-Schutz: gleicher Song pro Sender wird innerhalb von `10` Minuten nicht erneut gezaehlt (`SONG_RECOUNT_WINDOW_S`)
 - ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
@@ -40,6 +41,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Sofortiges Löschen der Labels bei Stop/Ende (Player-Callbacks)
 - ✅ Streamwechsel wird abgefangen: Labels werden vor Neubefuellung zuerst geloescht
 - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
+- ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
+- ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den Sendernamen (`RadioMonitor.QF.Request.*`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
@@ -66,6 +69,10 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.MBDurationS`      | Von MusicBrainz ermittelte Songdauer in Sekunden | "175" |
 | `RadioMonitor.TimeoutTotal`     | Aktueller gesetzter Timeout in Sekunden | "160" |
 | `RadioMonitor.TimeoutRemaining` | Verbleibende Zeit bis zum Label-Clear in Sekunden | "142" |
+| `RadioMonitor.VerifiedSourceUrl` | URL der gematchten verifizierten Senderquelle (falls vorhanden) | "https://stream.example.net/live" |
+| `RadioMonitor.VerifiedSourceBy` | Verifizierender Addon-Owner der Quelle | "service.audio.stream.monitor.qf" |
+| `RadioMonitor.VerifiedSourceConfidence` | Confidence der verifizierten Quelle (0..1) | "0.950" |
+| `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
 
 ## Verwendung in Skins
 
@@ -101,6 +108,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 ### Beispiel 6: Aktuelle API-Daten
 ```xml
 <label>API: $INFO[Window(Home).Property(RadioMonitor.ApiNowPlaying)]</label>
+```
+
+### Beispiel 7: ASM-QF Song-Ergebnis
+```xml
+<label>QF: $INFO[Window(Home).Property(RadioMonitor.QF.Result)]</label>
 ```
 
 ## Installation
@@ -150,6 +162,7 @@ Parsing-Regeln:
 - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
 - Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
 - Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
+- Shared-DB fuer verifizierte Senderquellen: Tabelle `verified_station_sources` in `song_data.db` (unter `~userdata/addon_data/service.audio.stream.monitor/`). ASM nutzt URL-Matches als Stations-Hint; ASM-QF kann in dieselbe Tabelle schreiben.
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
@@ -173,7 +186,7 @@ Parsing-Regeln:
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
 | `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
-| `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz) und sender-spezifische Generic-Keywords |
+| `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz), sender-spezifische Generic-Keywords und gemeinsame Tabelle `verified_station_sources` |
 | `skin_colors.py` | Liest Farbdefinitionen des aktiven Skins und aktualisiert das Farb-Dropdown in `resources/settings.xml` (in-place) |
 | `logger.py` | Logging-Wrapper (log_debug/info/warning/error) |
 | `cache.py` | Thread-safe MusicBrainz-Cache mit TTL |

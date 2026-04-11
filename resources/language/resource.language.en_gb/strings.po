@@ -31,6 +31,10 @@ msgctxt "#32021"
 msgid "Save songs and keywords to database and JSON"
 msgstr ""
 
+msgctxt "#32022"
+msgid "Enable ASM-QF integration"
+msgstr ""
+
 msgctxt "#32031"
 msgid "Show song history by station"
 msgstr ""

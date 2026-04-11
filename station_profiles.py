@@ -736,6 +736,36 @@ class StationProfileStore:
     def get_known_songs(self, station_key):
         return self._song_db.get_known_songs(station_key)
 
+    def record_verified_source(
+        self,
+        station_key,
+        source_url,
+        station_name='',
+        source_kind='stream',
+        verified_by='',
+        confidence=1.0,
+        meta=None,
+    ):
+        return self._song_db.record_verified_source(
+            station_key=station_key,
+            source_url=source_url,
+            station_name=station_name,
+            source_kind=source_kind,
+            verified_by=verified_by,
+            confidence=confidence,
+            meta=meta,
+        )
+
+    def get_verified_source_by_url(self, source_url):
+        return self._song_db.get_verified_source_by_url(source_url)
+
+    def get_verified_sources_for_station(self, station_key='', station_name='', limit=50):
+        return self._song_db.get_verified_sources_for_station(
+            station_key=station_key,
+            station_name=station_name,
+            limit=limit,
+        )
+
     def flush_if_due(self, min_interval_s=30.0):
         now_ts = time.time()
         if (now_ts - self._last_flush_ts) < float(min_interval_s):

@@ -16,6 +16,7 @@ except Exception:
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
 ADDON_VERSION = ADDON.getAddonInfo('version')
+QF_SERVICE_ADDON_ID = 'service.audio.stream.monitor.qf'
 
 # --- API Endpunkte ---
 
@@ -40,6 +41,7 @@ DEFAULT_HTTP_HEADERS = {
 # --- Metadaten-Konstanten ---
 
 INVALID_METADATA_VALUES = ['Unknown', 'Radio Stream', 'Internet Radio']
+STATION_NAME_MATCH_MIN_LEN = 5
 RADIODE_PLUGIN_IDS = ('plugin.audio.radiode', 'plugin.audio.radio_de_light')
 TUNEIN_PLUGIN_IDS = ('plugin.audio.tunein2017',)
 
@@ -178,6 +180,23 @@ class PropertyNames:
     RAW_API_RADIODE_NOWPLAYING = 'RadioMonitor.Source.Api.RadioDeNowPlayingRaw'
     RAW_API_TUNEIN_JSON = 'RadioMonitor.Source.Api.TuneInJsonRaw'
     RAW_API_TUNEIN_TEXT = 'RadioMonitor.Source.Api.TuneInTextRaw'
+    VERIFIED_SOURCE_URL = 'RadioMonitor.VerifiedSourceUrl'
+    VERIFIED_SOURCE_BY = 'RadioMonitor.VerifiedSourceBy'
+    VERIFIED_SOURCE_CONF = 'RadioMonitor.VerifiedSourceConfidence'
+    QF_REQUEST_ID = 'RadioMonitor.QF.Request.Id'
+    QF_REQUEST_STATION = 'RadioMonitor.QF.Request.Station'
+    QF_REQUEST_STATION_ID = 'RadioMonitor.QF.Request.StationId'
+    QF_REQUEST_MODE = 'RadioMonitor.QF.Request.Mode'
+    QF_REQUEST_TS = 'RadioMonitor.QF.Request.Ts'
+    QF_RESPONSE_ID = 'RadioMonitor.QF.Response.Id'
+    QF_RESPONSE_STATUS = 'RadioMonitor.QF.Response.Status'
+    QF_RESPONSE_ARTIST = 'RadioMonitor.QF.Response.Artist'
+    QF_RESPONSE_TITLE = 'RadioMonitor.QF.Response.Title'
+    QF_RESPONSE_SOURCE = 'RadioMonitor.QF.Response.Source'
+    QF_RESPONSE_REASON = 'RadioMonitor.QF.Response.Reason'
+    QF_RESPONSE_META = 'RadioMonitor.QF.Response.Meta'
+    QF_RESPONSE_TS = 'RadioMonitor.QF.Response.Ts'
+    QF_RESULT = 'RadioMonitor.QF.Result'
     AN_TRACE_ID = 'RadioMonitor.Analysis.TraceId'
     AN_TRIGGER = 'RadioMonitor.Analysis.Trigger'
     AN_WINNER_SOURCE = 'RadioMonitor.Analysis.WinnerSource'

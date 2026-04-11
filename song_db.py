@@ -1,11 +1,14 @@
-﻿"""
+"""
 SQLite-based database for station-specific learning data.
 
 Tables:
   songs             confirmed (artist, title) pairs per station (LRU cache)
   song_daily_counts per-day play counter for (station, artist, title)
   generic_strings   observed non-song texts with stats and promotion flag
+  verified_station_sources
+                    shared verified station->source mapping for ASM + ASM-QF
 """
+import json
 import os
 import sqlite3
 import threading
@@ -46,11 +49,33 @@ CREATE TABLE IF NOT EXISTS song_daily_counts (
     count        INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (station_key, artist, title, day)
 );
+CREATE TABLE IF NOT EXISTS verified_station_sources (
+    station_key       TEXT NOT NULL,
+    station_name      TEXT NOT NULL DEFAULT '',
+    station_name_norm TEXT NOT NULL DEFAULT '',
+    source_url        TEXT NOT NULL,
+    source_url_norm   TEXT NOT NULL,
+    source_kind       TEXT NOT NULL DEFAULT 'stream',
+    verified_by       TEXT NOT NULL DEFAULT '',
+    confidence        REAL NOT NULL DEFAULT 1.0,
+    verified_at_utc   TEXT NOT NULL DEFAULT '',
+    last_seen_ts      INTEGER NOT NULL DEFAULT 0,
+    meta_json         TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (station_key, source_url_norm)
+);
+CREATE INDEX IF NOT EXISTS idx_verified_sources_url_norm
+ON verified_station_sources(source_url_norm);
+CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
+ON verified_station_sources(station_name_norm);
 """
 
 
 def _today():
     return datetime.utcnow().strftime('%Y-%m-%d')
+
+
+def _utc_iso():
+    return datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
 
 
 class SongDatabase:
@@ -101,6 +126,8 @@ class SongDatabase:
                 self._exec("ALTER TABLE songs ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0")
                 self._commit()
 
+        self._migrate_verified_sources_table()
+
         cursor = self._exec("PRAGMA table_info(generic_strings)")
         if cursor is None:
             return
@@ -129,6 +156,52 @@ class SongDatabase:
         if song_rowids:
             placeholders = ','.join('?' for _ in song_rowids)
             self._exec(f"DELETE FROM generic_strings WHERE rowid IN ({placeholders})", song_rowids)
+            self._commit()
+
+    def _migrate_verified_sources_table(self):
+        cursor = self._exec("PRAGMA table_info(verified_station_sources)")
+        if cursor is None:
+            return
+        cols = {row['name'] for row in cursor.fetchall()}
+        if not cols:
+            return
+
+        additions = (
+            ('station_name', "ALTER TABLE verified_station_sources ADD COLUMN station_name TEXT NOT NULL DEFAULT ''"),
+            ('station_name_norm', "ALTER TABLE verified_station_sources ADD COLUMN station_name_norm TEXT NOT NULL DEFAULT ''"),
+            ('source_url_norm', "ALTER TABLE verified_station_sources ADD COLUMN source_url_norm TEXT NOT NULL DEFAULT ''"),
+            ('source_kind', "ALTER TABLE verified_station_sources ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'stream'"),
+            ('verified_by', "ALTER TABLE verified_station_sources ADD COLUMN verified_by TEXT NOT NULL DEFAULT ''"),
+            ('confidence', "ALTER TABLE verified_station_sources ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0"),
+            ('verified_at_utc', "ALTER TABLE verified_station_sources ADD COLUMN verified_at_utc TEXT NOT NULL DEFAULT ''"),
+            ('last_seen_ts', "ALTER TABLE verified_station_sources ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0"),
+            ('meta_json', "ALTER TABLE verified_station_sources ADD COLUMN meta_json TEXT NOT NULL DEFAULT ''"),
+        )
+        changed = False
+        for col_name, ddl in additions:
+            if col_name not in cols:
+                self._exec(ddl)
+                changed = True
+
+        self._exec("""
+            UPDATE verified_station_sources
+            SET station_name_norm = LOWER(TRIM(station_name))
+            WHERE station_name_norm = ''
+        """)
+        self._exec("""
+            UPDATE verified_station_sources
+            SET source_url_norm = LOWER(TRIM(source_url))
+            WHERE source_url_norm = ''
+        """)
+        self._exec("""
+            CREATE INDEX IF NOT EXISTS idx_verified_sources_url_norm
+            ON verified_station_sources(source_url_norm)
+        """)
+        self._exec("""
+            CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
+            ON verified_station_sources(station_name_norm)
+        """)
+        if changed:
             self._commit()
 
     def _exec(self, sql, params=()):
@@ -309,6 +382,168 @@ class SongDatabase:
             ORDER BY day_count DESC, total_count DESC, last_seen DESC, artist ASC, title ASC
             LIMIT ?
         """, (target_day, str(station_key), max_rows))
+        if cursor is None:
+            return ()
+        return tuple(dict(row) for row in cursor.fetchall())
+
+    # --- Verified Station Sources ---
+
+    @staticmethod
+    def _normalize_station_key(station_key):
+        return str(station_key or '').strip().lower()
+
+    @staticmethod
+    def _normalize_station_name(station_name):
+        return ' '.join(str(station_name or '').strip().lower().split())
+
+    @staticmethod
+    def _normalize_source_url(source_url):
+        return str(source_url or '').strip().lower()
+
+    @staticmethod
+    def _encode_meta_json(meta):
+        if meta is None:
+            return ''
+        if isinstance(meta, str):
+            return meta.strip()
+        try:
+            return json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+        except Exception:
+            return str(meta)
+
+    def record_verified_source(
+        self,
+        station_key,
+        source_url,
+        station_name='',
+        source_kind='stream',
+        verified_by='',
+        confidence=1.0,
+        meta=None,
+    ):
+        key = self._normalize_station_key(station_key)
+        source_url_raw = str(source_url or '').strip()
+        source_url_norm = self._normalize_source_url(source_url_raw)
+        if not key or not source_url_raw or not source_url_norm:
+            return False
+
+        name = str(station_name or '').strip()
+        name_norm = self._normalize_station_name(name)
+        kind = str(source_kind or 'stream').strip().lower() or 'stream'
+        verifier = str(verified_by or '').strip().lower()
+        meta_json = self._encode_meta_json(meta)
+        now_ts = int(time.time())
+        verified_at_utc = _utc_iso()
+        try:
+            conf_value = float(confidence)
+        except Exception:
+            conf_value = 1.0
+        conf_value = max(0.0, min(1.0, conf_value))
+
+        cursor = self._exec(
+            """
+            INSERT INTO verified_station_sources (
+                station_key, station_name, station_name_norm,
+                source_url, source_url_norm, source_kind,
+                verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(station_key, source_url_norm)
+            DO UPDATE SET
+                station_name = CASE
+                    WHEN excluded.station_name <> '' THEN excluded.station_name
+                    ELSE verified_station_sources.station_name
+                END,
+                station_name_norm = CASE
+                    WHEN excluded.station_name_norm <> '' THEN excluded.station_name_norm
+                    ELSE verified_station_sources.station_name_norm
+                END,
+                source_url = excluded.source_url,
+                source_kind = excluded.source_kind,
+                verified_by = CASE
+                    WHEN excluded.verified_by <> '' THEN excluded.verified_by
+                    ELSE verified_station_sources.verified_by
+                END,
+                confidence = excluded.confidence,
+                verified_at_utc = excluded.verified_at_utc,
+                last_seen_ts = excluded.last_seen_ts,
+                meta_json = CASE
+                    WHEN excluded.meta_json <> '' THEN excluded.meta_json
+                    ELSE verified_station_sources.meta_json
+                END
+            """,
+            (
+                key, name, name_norm,
+                source_url_raw, source_url_norm, kind,
+                verifier, conf_value, verified_at_utc, now_ts, meta_json
+            )
+        )
+        if cursor is None:
+            log_warning(
+                f"Verified source write fehlgeschlagen: station='{key}', url='{source_url_raw}'"
+            )
+            return False
+        self._commit()
+        return True
+
+    def get_verified_source_by_url(self, source_url):
+        source_url_norm = self._normalize_source_url(source_url)
+        if not source_url_norm:
+            return None
+        cursor = self._exec(
+            """
+            SELECT
+                station_key, station_name, station_name_norm,
+                source_url, source_url_norm, source_kind,
+                verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
+            FROM verified_station_sources
+            WHERE source_url_norm = ?
+            ORDER BY confidence DESC, last_seen_ts DESC
+            LIMIT 1
+            """,
+            (source_url_norm,)
+        )
+        if cursor is None:
+            return None
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def get_verified_sources_for_station(self, station_key='', station_name='', limit=50):
+        station_key_norm = self._normalize_station_key(station_key)
+        station_name_norm = self._normalize_station_name(station_name)
+        max_rows = max(1, int(limit or 50))
+        if station_key_norm:
+            cursor = self._exec(
+                """
+                SELECT
+                    station_key, station_name, station_name_norm,
+                    source_url, source_url_norm, source_kind,
+                    verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
+                FROM verified_station_sources
+                WHERE station_key = ?
+                ORDER BY confidence DESC, last_seen_ts DESC, source_url ASC
+                LIMIT ?
+                """,
+                (station_key_norm, max_rows)
+            )
+        elif station_name_norm:
+            cursor = self._exec(
+                """
+                SELECT
+                    station_key, station_name, station_name_norm,
+                    source_url, source_url_norm, source_kind,
+                    verified_by, confidence, verified_at_utc, last_seen_ts, meta_json
+                FROM verified_station_sources
+                WHERE station_name_norm = ?
+                ORDER BY confidence DESC, last_seen_ts DESC, source_url ASC
+                LIMIT ?
+                """,
+                (station_name_norm, max_rows)
+            )
+        else:
+            return ()
         if cursor is None:
             return ()
         return tuple(dict(row) for row in cursor.fetchall())
