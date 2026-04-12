@@ -5,7 +5,7 @@ Thread-safe Cache mit TTL (Time-To-Live) für Song-Metadaten.
 """
 import time
 import threading
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple
 from logger import log_debug
 
 

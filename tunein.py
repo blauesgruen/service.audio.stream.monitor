@@ -9,7 +9,6 @@ from constants import (
     INVALID_METADATA_VALUES,
     NUMERIC_ID_PATTERN as _NUMERIC_ID_RE,
     TUNEIN_DESCRIBE_API_URL,
-    TUNEIN_TUNE_API_URL,
     TUNEIN_PARTNER_ID,
 )
 from metadata import parse_stream_title_simple as _parse_stream_title_simple

@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover - Kodi runtime dependency
 
 # --- Modul-Imports ---
 from constants import (
-    ADDON, ADDON_ID, ADDON_NAME, ADDON_VERSION, QF_SERVICE_ADDON_ID as _QF_SERVICE_ADDON_ID,
+    ADDON, ADDON_ID, QF_SERVICE_ADDON_ID as _QF_SERVICE_ADDON_ID,
     RADIODE_SEARCH_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES, STATION_NAME_MATCH_MIN_LEN,
     SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
@@ -27,7 +27,6 @@ from constants import (
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
     SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
     STARTUP_SOURCE_QUALIFY_WINDOW_S, STARTUP_API_ONLY_STABLE_POLLS,
-    SOURCE_FAMILIES as _SOURCE_FAMILIES,
     STREAM_SOURCE_FAMILIES as _STREAM_SOURCE_FAMILIES,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
     TUNEIN_PLUGIN_IDS as _TUNEIN_PLUGIN_IDS,
@@ -61,10 +60,7 @@ from musicbrainz import (
     mb_similarity as _mb_similarity,
     _mb_cache,
 )
-from radiode import (
-    parse_radiode_api_title as _parse_radiode_api_title,
-    get_nowplaying as _radiode_get_nowplaying,
-)
+from radiode import get_nowplaying as _radiode_get_nowplaying
 from tunein import (
     extract_station_id as _tunein_extract_station_id,
     get_nowplaying as _tunein_get_nowplaying,
