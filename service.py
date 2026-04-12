@@ -1579,13 +1579,16 @@ class RadioMonitor(xbmc.Monitor):
         """
         return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
 
-    def _current_qf_hit_pair(self, invalid_values):
+    def _current_qf_hit_pair(self, invalid_values, require_fresh=True):
         """
-        Liefert das aktuelle QF-Paar nur bei frischer, passender "hit"-Response.
+        Liefert das aktuelle QF-Paar bei passender "hit"-Response.
+        Standard: nur fresh responses (request_id match).
+        Für aktiven ASM-QF-Lock kann require_fresh=False gesetzt werden, damit
+        QF-Paarwechsel nicht an Request-Race-Conditions scheitern.
         """
         _ = invalid_values
         snapshot = self._qf_response_snapshot()
-        if not snapshot.get('fresh'):
+        if require_fresh and not snapshot.get('fresh'):
             return ('', '')
         if snapshot.get('status') != 'hit':
             return ('', '')
@@ -3315,7 +3318,9 @@ class RadioMonitor(xbmc.Monitor):
         # ASM-QF-Kandidaten ergänzen
         qf_valid = False
         if self._qf_enabled:
-            qf_artist, qf_title = self._current_qf_hit_pair(invalid)
+            qf_locked = str(getattr(self, '_parse_locked_source', '') or '').startswith('asm-qf')
+            qf_require_fresh = not (qf_authoritative or qf_locked)
+            qf_artist, qf_title = self._current_qf_hit_pair(invalid, require_fresh=qf_require_fresh)
             qf_artist = str(qf_artist or '').strip()
             qf_title = str(qf_title or '').strip()
             if qf_artist and qf_title:
@@ -3772,7 +3777,11 @@ class RadioMonitor(xbmc.Monitor):
                         qf_authoritative = False
                         if self._qf_enabled:
                             self._sync_qf_result_property()
-                            current_qf_pair = self._current_qf_hit_pair(invalid_values)
+                            qf_require_fresh = not str(last_winner_source or '').startswith('asm-qf')
+                            current_qf_pair = self._current_qf_hit_pair(
+                                invalid_values,
+                                require_fresh=qf_require_fresh
+                            )
                             current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
                             qf_authoritative = self._is_qf_authoritative()
 
@@ -3886,6 +3895,11 @@ class RadioMonitor(xbmc.Monitor):
                         allow_initial_trigger = (not in_startup_window) or startup_consensus
 
                         # Source-locked Trigger: nur die letzte Gewinnerquelle entscheidet den Wechsel-Trigger.
+                        stream_title_changed_for_policy = stream_title_changed
+                        if str(last_winner_source or '').startswith('asm-qf'):
+                            # Bei ASM-QF-Lock darf ICY-StreamTitle keinen Trigger beeinflussen.
+                            stream_title_changed_for_policy = False
+
                         source_changed_trigger, trigger_reason = self._determine_source_change_trigger(
                             last_winner_source,
                             last_winner_pair,
@@ -3893,7 +3907,7 @@ class RadioMonitor(xbmc.Monitor):
                             current_api_pair,
                             current_icy_pair,
                             station_name,
-                            stream_title_changed,
+                            stream_title_changed_for_policy,
                             (initial_source_pending if allow_initial_trigger else False),
                             current_qf_pair=current_qf_pair
                         )
@@ -4223,7 +4237,11 @@ class RadioMonitor(xbmc.Monitor):
                                 source_changed=source_changed_trigger,
                                 note='title_applied'
                             )
-                        elif stream_title_changed and last_winner_source:
+                        elif (
+                            stream_title_changed
+                            and last_winner_source
+                            and not str(last_winner_source).startswith('asm-qf')
+                        ):
                             log_debug(
                                 f"StreamTitle-Wechsel ignoriert: beobachtete_Quelle='{last_winner_source}' "
                                 f"hat keinen Wechsel gemeldet"
