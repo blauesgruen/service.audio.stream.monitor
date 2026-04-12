@@ -230,6 +230,7 @@ class RadioMonitor(xbmc.Monitor):
         self.metadata_generation = 0  # invalidates stale workers on restart
         self.station_id = None    # radio.de Station ID
         self.station_logo = None  # Logo URL von radio.de API
+        self._logo_locked_for_session = False  # Logo nur einmal pro Session setzen
         self.station_slug = None  # Sender-Slug aus Stream-URL (für API-Fallback)
         self.plugin_slug = None   # Sender-Slug aus radio.de light Plugin-URL (iconimage)
         self.tunein_station_id = None  # TuneIn Station-ID (z.B. s12345)
@@ -1248,6 +1249,7 @@ class RadioMonitor(xbmc.Monitor):
 
         # Reset Logo und API-Kontext
         self.station_logo = None
+        self._logo_locked_for_session = False
         self._reset_api_context()
         self._reset_song_timeout_state(clear_debug=True)
         self._reset_musicplayer_trust_state('clear_properties')
@@ -1423,13 +1425,13 @@ class RadioMonitor(xbmc.Monitor):
         return not any(x in str(url) for x in invalid)
     
     def set_logo_safe(self):
-        """Setzt Logo-Property nur wenn echtes Logo vorhanden, sonst Kodi-Fallback"""
+        """Setzt Logo-Property pro Session genau einmal bei echtem Logo."""
+        if self._logo_locked_for_session:
+            return
         if self.station_logo and self.is_real_logo(self.station_logo):
             self._ensure_radiode_identity_from_value(self.station_logo, context='set_logo_safe')
             self.set_property_safe(_P.LOGO, self.station_logo)
-        else:
-            # Kein echtes Logo → Property leer lassen (Kodi nutzt automatisch Fallback)
-            WINDOW.clearProperty(_P.LOGO)
+            self._logo_locked_for_session = True
 
     def _extract_radiode_slug_from_value(self, value):
         text = str(value or '').strip()
@@ -2927,9 +2929,8 @@ class RadioMonitor(xbmc.Monitor):
                             # Logo sofort nach Artist setzen
                             self.set_logo_safe()
 
-                            # Aktualisiere Kodi Player Metadaten
-                            logo = WINDOW.getProperty(_P.LOGO)
-                            self.update_player_metadata(artist, title, album if album else station_name, logo if logo else None, mbid if mbid else None)
+                            # Push in laufende Kodi-Labels ist bei Streams nicht verlaesslich.
+                            # Deshalb hier bewusst kein update_player_metadata().
                         else:
                             # Artist und MBID bewusst NICHT löschen —
                             # alten Wert behalten bis neuer gesichert ist.
@@ -2945,9 +2946,8 @@ class RadioMonitor(xbmc.Monitor):
                             self.set_property_safe(_P.STREAM_TTL, title)
                             log_info(f"API Update: {title}")
                             
-                            # Aktualisiere Kodi Player Metadaten
-                            logo = WINDOW.getProperty(_P.LOGO)
-                            self.update_player_metadata(None, title, station_name, logo if logo else None, None)
+                            # Push in laufende Kodi-Labels ist bei Streams nicht verlaesslich.
+                            # Deshalb hier bewusst kein update_player_metadata().
 
                         # Song-Timeout: Timer (neu) starten sobald ein Titel erkannt wurde.
                         self._start_song_timeout(
@@ -4164,44 +4164,13 @@ class RadioMonitor(xbmc.Monitor):
                             log_debug(f"RadioMonitor.Genre = {WINDOW.getProperty(_P.GENRE)}")
                             log_debug(f"RadioMonitor.Logo = {WINDOW.getProperty(_P.LOGO)}")
 
-                            # Aktualisiere Kodi Player Metadaten (fuer Standard InfoLabels)
-                            winner_source_for_player = str(decision_source or last_winner_source or '')
-                            if winner_source_for_player.startswith('musicplayer') or winner_source_for_player.startswith('asm-qf'):
-                                log_debug(f"Player InfoTag Update uebersprungen (Quelle={winner_source_for_player})")
-                            else:
-                                logo = WINDOW.getProperty(_P.LOGO)
-                                self.update_player_metadata(artist if artist else None,
-                                                            title if title else None,
-                                                            album if album else station_name,
-                                                            logo if logo else None,
-                                                            mbid if mbid else None)
+                            # Push in laufende Kodi-Labels ist bei Streams nicht verlaesslich.
+                            # Deshalb kein update_player_metadata()/JSON-RPC-Overwrite.
                             
                             self._capture_playing_item_raw()
                             self._capture_jsonrpc_player_raw()
                             
                             log_debug("========================")
-                            
-                            # Versuche die MusicPlayer InfoLabels zu überschreiben
-                            # indem wir die JSON-RPC API nutzen
-                            try:
-                                json_query = {
-                                    "jsonrpc": "2.0",
-                                    "method": "JSONRPC.NotifyAll",
-                                    "params": {
-                                        "sender": "service.audio.stream.monitor",
-                                        "message": "UpdateMusicInfo",
-                                        "data": {
-                                            "artist": artist,
-                                            "title": title,
-                                            "streamtitle": stream_title,
-                                            "mbid": mbid if mbid else ""
-                                        }
-                                    },
-                                    "id": 1
-                                }
-                                xbmc.executeJSONRPC(json.dumps(json_query))
-                            except Exception as e:
-                                log_debug(f"Fehler bei JSON-RPC Notify: {str(e)}")
                             
                             log_info(
                                 f"Neuer Titel: {title if title else stream_title} "
