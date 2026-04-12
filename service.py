@@ -1914,7 +1914,6 @@ class RadioMonitor(xbmc.Monitor):
             debug_log=self._debug_log_api_raw
         )
 
-        return None, None
     def _refresh_api_nowplaying_property(self, station_name=None, force=False):
         """
         Aktualisiert RadioMonitor.ApiNowPlaying periodisch aus der aktiven API-Quelle.
@@ -3114,12 +3113,13 @@ class RadioMonitor(xbmc.Monitor):
         
     def parse_stream_title(self, stream_title, station_name=None, stream_url=None):
         """
-        Trennt Artist und Title aus dem ICY-StreamTitle.
-        Priorität:
-        1. Kandidaten aus API + ICY bilden
-        2. MusicBrainz bewertet jeden Kandidaten (Score + Similarity)
-        3. Kandidat mit bestem MB-Combined gewinnt
-        4. Falls MB nichts belastbares liefert: bestehender ICY-Fallback
+        Ermittelt den finalen Song-Kandidaten aus allen aktiven Quellen.
+        Ablauf (vereinfacht):
+        1. Kandidaten sammeln (ICY, API, optional MusicPlayer, optional ASM-QF).
+        2. Source-Policies anwenden (Lock/Stale/Priorisierung).
+        3. MusicBrainz bewertet Kandidaten und bestimmt den Gewinner.
+        4. Bei MB=0 greifen definierte Source-Fallbacks (Lock/API/ICY).
+        5. Letzter Fallback: bestehende ICY-Analyse.
         """
         # Parse-Zyklus starten, ohne die zuletzt gesetzte Quelle sofort zu loeschen.
         # Sonst flackert RadioMonitor.Source zwischen '' und dem finalen Gewinner.
@@ -3136,7 +3136,8 @@ class RadioMonitor(xbmc.Monitor):
         mp_swapped = (None, None)
         mp_pairs = []
 
-        # MusicPlayer-Kandidaten optional lesen (zentrale Abschaltung ueber MP_DECISION_ENABLED).
+        # MusicPlayer-Kandidaten optional lesen (aktiv via MP_DECISION_ENABLED
+        # oder bei als verlaesslich erkanntem MP-Profil).
         if self._is_mp_decision_active():
             mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
             mp_pairs = self._filter_non_generic_song_pairs(
