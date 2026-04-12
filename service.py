@@ -21,7 +21,7 @@ from constants import (
     SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
     SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
     SONG_END_NEAR_TIMEOUT_S,
-    API_NOW_REFRESH_INTERVAL_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
+    API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
@@ -1528,6 +1528,68 @@ class RadioMonitor(xbmc.Monitor):
         else:
             WINDOW.clearProperty(_P.ICY_NOW)
 
+    def _qf_response_snapshot(self):
+        response_id = (WINDOW.getProperty(_P.QF_RESPONSE_ID) or '').strip()
+        status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
+        artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
+        title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+        fresh = bool(
+            self._last_qf_request_id
+            and response_id
+            and response_id == self._last_qf_request_id
+        )
+        return {
+            'fresh': fresh,
+            'response_id': response_id,
+            'status': status,
+            'artist': artist,
+            'title': title,
+        }
+
+    def _is_qf_fallback_exception(self):
+        """
+        Liefert True, wenn QF fuer den aktuellen Zyklus als nicht verfuegbar gilt
+        und API/ICY/MP als Ausnahmefall einspringen duerfen.
+        """
+        if not self._qf_enabled or not self.is_playing:
+            return True
+        if not self._last_qf_request_id:
+            return True
+
+        snapshot = self._qf_response_snapshot()
+        if snapshot.get('fresh'):
+            # Harte Fehler -> Fallback erlaubt.
+            return snapshot.get('status') in ('resolve_error', 'error', 'timeout')
+
+        # Keine frische Response: erst nach Timeout Fallback erlauben.
+        try:
+            age_s = max(0.0, float(time.time() - float(self._last_qf_request_ts or 0.0)))
+        except Exception:
+            age_s = float(QF_NO_RESPONSE_FALLBACK_S)
+        return age_s >= float(QF_NO_RESPONSE_FALLBACK_S)
+
+    def _is_qf_authoritative(self):
+        """
+        QF ist autoritativ, solange kein expliziter Ausnahmefall vorliegt.
+        Das gilt auch dann, wenn QF aktuell "kein Song" liefert.
+        """
+        return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
+
+    def _current_qf_hit_pair(self, invalid_values):
+        """
+        Liefert das aktuelle QF-Paar nur bei frischer, passender "hit"-Response.
+        """
+        snapshot = self._qf_response_snapshot()
+        if not snapshot.get('fresh'):
+            return ('', '')
+        if snapshot.get('status') != 'hit':
+            return ('', '')
+        return self._normalize_song_candidate(
+            snapshot.get('artist'),
+            snapshot.get('title'),
+            invalid_values
+        )
+
     def _send_qf_request(self, station_name, mode='asm_auto'):
         station = self._sanitize_station_text(station_name)
         if not station:
@@ -1604,17 +1666,16 @@ class RadioMonitor(xbmc.Monitor):
             WINDOW.clearProperty(_P.QF_RESULT)
             return
 
-        response_id = (WINDOW.getProperty(_P.QF_RESPONSE_ID) or '').strip()
-        if not response_id or response_id != self._last_qf_request_id:
+        snapshot = self._qf_response_snapshot()
+        if not snapshot.get('fresh'):
             return
 
-        status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
-        artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
-        title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
-        if status != 'hit':
+        if snapshot.get('status') != 'hit':
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
             return
+        artist = snapshot.get('artist') or ''
+        title = snapshot.get('title') or ''
 
         station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
         qf_prefill_pair = self._sanitize_pre_mb_pair(
@@ -3111,6 +3172,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_decision_pair = ('', '')
         invalid = INVALID_METADATA_VALUES + ["", station_name]
         artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
+        qf_authoritative = self._is_qf_authoritative()
 
         # --- Kandidaten sammeln ---
         candidates = []
@@ -3122,7 +3184,7 @@ class RadioMonitor(xbmc.Monitor):
 
         # MusicPlayer-Kandidaten optional lesen (aktiv via MP_DECISION_ENABLED
         # oder bei als verlaesslich erkanntem MP-Profil).
-        if self._is_mp_decision_active():
+        if self._is_mp_decision_active() and not qf_authoritative:
             mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
             mp_pairs = self._filter_non_generic_song_pairs(
                 self._valid_song_pairs(mp_direct, mp_swapped),
@@ -3135,57 +3197,60 @@ class RadioMonitor(xbmc.Monitor):
 
         # API-Kandidat
         api_candidate_available = bool(stream_url and (station_name or self.plugin_slug or self.tunein_station_id))
-        if api_candidate_available and not self._is_api_source_allowed():
-            self._log_api_source_blocked('parse_stream_title_api_first')
-        if api_candidate_available and self._is_api_source_allowed():
-            api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
-            api_artist, api_title = self._normalize_song_candidate(api_artist, api_title, invalid)
-            if api_artist and api_title:
-                api_key = (api_artist, api_title)
-                if self._api_timeout_block_key and api_key == self._api_timeout_block_key:
-                    log_info(f"API-Kandidat geblockt nach Timeout: '{api_artist} - {api_title}'")
-                else:
-                    if self._api_timeout_block_key != ('', '') and api_key != self._api_timeout_block_key:
-                        log_info(f"API-Song geaendert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'")
-                        self._api_timeout_block_key = ('', '')
-                    if self._append_non_generic_candidate(
-                        candidates,
-                        'api',
-                        api_artist,
-                        api_title,
-                        station_name
-                    ):
-                        if api_artist != api_title:
-                            s_artist, s_title = self._normalize_song_candidate(api_title, api_artist, invalid)
-                            self._append_non_generic_candidate(
-                                candidates,
-                                'api_swapped',
-                                s_artist,
-                                s_title,
-                                station_name
-                            )
-                        api_candidate = (api_artist, api_title)
-                        api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
-                        self._last_seen_api_key = api_key
+        if not qf_authoritative:
+            if api_candidate_available and not self._is_api_source_allowed():
+                self._log_api_source_blocked('parse_stream_title_api_first')
+            if api_candidate_available and self._is_api_source_allowed():
+                api_artist, api_title = self.get_nowplaying_from_apis(station_name, stream_url)
+                api_artist, api_title = self._normalize_song_candidate(api_artist, api_title, invalid)
+                if api_artist and api_title:
+                    api_key = (api_artist, api_title)
+                    if self._api_timeout_block_key and api_key == self._api_timeout_block_key:
+                        log_info(f"API-Kandidat geblockt nach Timeout: '{api_artist} - {api_title}'")
+                    else:
+                        if self._api_timeout_block_key != ('', '') and api_key != self._api_timeout_block_key:
+                            log_info(f"API-Song geaendert, Timeout-Block aufgehoben: '{api_artist} - {api_title}'")
+                            self._api_timeout_block_key = ('', '')
+                        if self._append_non_generic_candidate(
+                            candidates,
+                            'api',
+                            api_artist,
+                            api_title,
+                            station_name
+                        ):
+                            if api_artist != api_title:
+                                s_artist, s_title = self._normalize_song_candidate(api_title, api_artist, invalid)
+                                self._append_non_generic_candidate(
+                                    candidates,
+                                    'api_swapped',
+                                    s_artist,
+                                    s_title,
+                                    station_name
+                                )
+                            api_candidate = (api_artist, api_title)
+                            api_changed = (self._last_seen_api_key != ('', '') and api_key != self._last_seen_api_key)
+                            self._last_seen_api_key = api_key
 
         # ICY-Kandidaten (direkt + ggf. swapped)
-        icy_artist, icy_title = self._normalize_song_candidate(artist, title, invalid)
-        if self._append_non_generic_candidate(
-            candidates,
-            'icy',
-            icy_artist,
-            icy_title,
-            station_name
-        ):
-            if not is_von and icy_artist != icy_title:
-                s_artist, s_title = self._normalize_song_candidate(icy_title, icy_artist, invalid)
-                self._append_non_generic_candidate(
-                    candidates,
-                    'icy_swapped',
-                    s_artist,
-                    s_title,
-                    station_name
-                )
+        icy_artist, icy_title = (None, None)
+        if not qf_authoritative:
+            icy_artist, icy_title = self._normalize_song_candidate(artist, title, invalid)
+            if self._append_non_generic_candidate(
+                candidates,
+                'icy',
+                icy_artist,
+                icy_title,
+                station_name
+            ):
+                if not is_von and icy_artist != icy_title:
+                    s_artist, s_title = self._normalize_song_candidate(icy_title, icy_artist, invalid)
+                    self._append_non_generic_candidate(
+                        candidates,
+                        'icy_swapped',
+                        s_artist,
+                        s_title,
+                        station_name
+                    )
 
         icy_candidate_pairs = [
             (c.get('artist'), c.get('title'))
@@ -3193,7 +3258,7 @@ class RadioMonitor(xbmc.Monitor):
             if str(c.get('source', '')).startswith('icy')
         ]
         mp_candidates_allowed = False
-        if self._is_mp_decision_active():
+        if self._is_mp_decision_active() and not qf_authoritative:
             mp_candidates_allowed = self._should_use_musicplayer_candidates(
                 mp_pairs,
                 api_candidate,
@@ -3209,10 +3274,9 @@ class RadioMonitor(xbmc.Monitor):
                 candidates.append({'source': 'musicplayer_swapped', 'artist': mp_swapped[0], 'title': mp_swapped[1]})
 
         # ASM-QF-Kandidaten ergänzen
+        qf_valid = False
         if self._qf_enabled:
-            qf_artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
-            qf_title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
-            qf_artist, qf_title = self._normalize_song_candidate(qf_artist, qf_title, invalid)
+            qf_artist, qf_title = self._current_qf_hit_pair(invalid)
             qf_valid = self._append_non_generic_candidate(
                 candidates,
                 'asm-qf',
@@ -3233,6 +3297,10 @@ class RadioMonitor(xbmc.Monitor):
                 # Wenn ASM-QF valide Daten liefert, werden alle anderen
                 # Kandidaten verworfen (Exklusiv-Modus).
                 candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf')]
+            elif qf_authoritative:
+                log_info("ASM-QF autoritativ: kein valider QF-Song -> kein Song")
+                self._set_last_song_decision('', None, None)
+                return None, None, '', '', '', '', 0
 
         trigger_reason = str(getattr(self, '_parse_trigger_reason', '') or '')
         candidates = self._apply_api_stale_override(
@@ -3671,16 +3739,16 @@ class RadioMonitor(xbmc.Monitor):
 
                         # ASM-QF-Daten synchronisieren und auslesen
                         current_qf_pair = ('', '')
+                        qf_authoritative = False
                         if self._qf_enabled:
                             self._sync_qf_result_property()
-                            qf_artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
-                            qf_title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
-                            current_qf_pair = self._normalize_song_candidate(qf_artist, qf_title, invalid_values)
+                            current_qf_pair = self._current_qf_hit_pair(invalid_values)
                             current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
+                            qf_authoritative = self._is_qf_authoritative()
 
-                        # Exklusivität für ASM-QF: Wenn ASM-QF aktiviert ist, werden andere Quellen
-                        # in diesem Durchlauf ignoriert (Candidates auf leer gesetzt).
-                        qf_exclusive = self._qf_enabled and bool(current_qf_pair[0] and current_qf_pair[1])
+                        # QF-Dominanz: Solange QF autoritativ ist, werden andere Quellen in diesem
+                        # Durchlauf nicht fuer die Songentscheidung genutzt.
+                        qf_exclusive = bool(self._qf_enabled and qf_authoritative)
                         if qf_exclusive:
                             current_mp_pair = ('', '')
                             current_icy_pair = ('', '')
@@ -3692,9 +3760,8 @@ class RadioMonitor(xbmc.Monitor):
                             # alten API-Reste in der UI stehen.
                             WINDOW.clearProperty(_P.API_NOW)
                         elif self._qf_enabled:
-                            # Falls QF aktiv aber (noch) keine Daten liefert, pollt ASM-QF bereits alle 10s.
-                            # Wir warten hier passiv mit, indem wir API/ICY/MP zwar noch erlauben,
-                            # aber ASM-QF wird bei Eintreffen sofort dominieren (siehe oben).
+                            # QF ist aktiv, aber im Ausnahmefall (Fehler/Timeout) darf auf
+                            # API/ICY/MP zurückgefallen werden.
                             pass
 
                         # StreamTitle unabhängig vom Gewinner aktuell halten.

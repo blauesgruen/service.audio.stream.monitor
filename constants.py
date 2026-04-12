@@ -90,6 +90,10 @@ MB_WORK_CONTEXT_RATE_LIMIT_S = 1.0
 SONG_TIMEOUT_EARLY_CLEAR_S = 15
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
 API_NOW_REFRESH_INTERVAL_S = 10
+# QF-Dominanz: Solange innerhalb dieses Fensters keine frische QF-Response vorliegt,
+# bleibt QF weiterhin fuehrend (kein Fallback auf API/ICY/MP).
+# Erst danach darf bei QF-Ausfall auf andere Quellen zurueckgegriffen werden.
+QF_NO_RESPONSE_FALLBACK_S = 25.0
 # Song-Ende-Detektor (fruehes Leeren vor dem harten Timeout).
 # Keywords sind nur Hinweise und loesen nie allein aus.
 SONG_END_DETECTOR_ENABLED = True
