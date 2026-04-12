@@ -1528,27 +1528,15 @@ class RadioMonitor(xbmc.Monitor):
         else:
             WINDOW.clearProperty(_P.ICY_NOW)
 
-    def _resolve_qf_station_id(self):
-        """
-        Liefert eine stabile Sender-ID fuer ASM-QF, falls verfuegbar.
-        Prioritaet: station_id > plugin_slug > tunein_station_id.
-        """
-        for candidate in (self.station_id, self.plugin_slug, self.tunein_station_id):
-            value = str(candidate or '').strip()
-            if value:
-                return value
-        return ''
-
     def _send_qf_request(self, station_name, mode='asm_auto'):
         station = self._sanitize_station_text(station_name)
         if not station:
             return False
-        station_id = self._resolve_qf_station_id()
         now_ts = time.time()
         self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
         request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
         WINDOW.setProperty(_P.QF_REQUEST_STATION, station)
-        WINDOW.setProperty(_P.QF_REQUEST_STATION_ID, station_id)
+        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.setProperty(_P.QF_REQUEST_MODE, str(mode or 'asm_auto'))
         WINDOW.setProperty(_P.QF_REQUEST_TS, str(int(now_ts)))
         # Request-ID immer zuletzt setzen, damit ASM-QF ein konsistentes Request-Paket liest.
@@ -1558,7 +1546,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_ts = now_ts
         log_debug(
             f"ASM-QF Request gesendet: id='{request_id}', station='{station}', "
-            f"station_id='{station_id}', mode='{mode}'"
+            f"mode='{mode}'"
         )
         return True
 

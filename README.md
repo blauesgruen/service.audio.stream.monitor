@@ -42,7 +42,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Streamwechsel wird abgefangen: Labels werden vor Neubefuellung zuerst geloescht
 - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
 - ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
-- ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den Sendernamen (`RadioMonitor.QF.Request.*`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
+- ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den bereinigten Sendernamen (`RadioMonitor.QF.Request.Station`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
