@@ -20,9 +20,9 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Intelligente Album-Auswahl: nur Releases des gewählten Best-Recordings werden berücksichtigt; bevorzugt wird das erste passende Studioalbum (Special-/Exclusive-Editionen werden bei Gleichstand nachrangig behandelt)
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons; TuneIn-Abfrage ueber `Describe.ashx` mit Partner-ID (korrekte `has_song`/Now-Playing-Antworten)
-- ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen; ICY-Songwechsel werden sofort erkannt (kein Multi-Poll-Confirm, da ICY-Metadaten nur einmal pro Songwechsel ankommen)
+- ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`asm-qf`/`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen; ICY-Songwechsel werden sofort erkannt (kein Multi-Poll-Confirm, da ICY-Metadaten nur einmal pro Songwechsel ankommen)
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
-- ✅ MusicPlayer wird als Songquelle mitbewertet (direkt + swapped) und kann bei MB-Nulltreffern ueber Konsens mit API/ICY uebernommen werden
+- ✅ MusicPlayer als eigenstaendige Entscheidungsquelle ist per Feature-Flag vorhanden, aktuell aber standardmaessig deaktiviert (`MP_DECISION_ENABLED=false`); der MusicPlayer-Fallback ohne ICY/API bleibt aktiv
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
 - ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender), Tageszaehler und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
 - ✅ Gemeinsame Verified-Source-DB in `addon_data/service.audio.stream.monitor/song_data.db`: ASM und `service.audio.stream.monitor.qf` teilen verifizierte Senderquellen (`verified_station_sources`)
@@ -60,7 +60,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.AlbumDate`        | Erscheinungsjahr des Albums | "1975" |
 | `RadioMonitor.FirstRelease`     | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle`      | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
-| `RadioMonitor.Source`           | Aktive Song-Quellenfamilie (`musicplayer`, `api`, `icy`) | "musicplayer" |
+| `RadioMonitor.Source`           | Aktive Song-Quellenfamilie (`asm-qf`, `musicplayer`, `api`, `icy`) | "asm-qf" |
 | `RadioMonitor.Genre`            | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo`             | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed`       | Gründungsjahr (nur bei Bands) | "1995" |
@@ -184,7 +184,7 @@ Parsing-Regeln:
 | `radiode.py` | radio.de API: Titel-Parser und Now-Playing-Abfrage |
 | `tunein.py` | TuneIn API: Station-ID-Erkennung, Titel-Parser und Now-Playing-Abfrage |
 | `constants.py` | API-URLs, Property-Namen (_P), Timeouts, Regex |
-| `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`musicplayer`/`api`/`icy`) |
+| `source_policy.py` | Zustandsbasierte Quellenbewertung und Trigger-Entscheidung (`asm-qf`/`musicplayer`/`api`/`icy`) |
 | `station_profiles.py` | Persistente Senderprofile (EMA-Lernen), Policy-Profilableitung und Rollenerkennung (`mp_noise`, `mp_absent`, `icy_structural_generic`) |
 | `song_db.py` | SQLite-Datenbank: MB-verifizierte Songs (LRU + Tageszaehler + 10-Minuten-Recount-Schutz), sender-spezifische Generic-Keywords und gemeinsame Tabelle `verified_station_sources` |
 | `skin_colors.py` | Liest Farbdefinitionen des aktiven Skins und aktualisiert das Farb-Dropdown in `resources/settings.xml` (in-place) |

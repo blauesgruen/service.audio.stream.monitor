@@ -38,7 +38,7 @@ Wichtig:
 - `api_client.py`
   - HTTP-Client mit Retry + Exponential-Backoff
 - `source_policy.py`
-  - zustandsbasierte Trigger-Entscheidung ueber Quellenfamilien (`musicplayer`, `api`, `icy`)
+  - zustandsbasierte Trigger-Entscheidung ueber Quellenfamilien (`asm-qf`, `musicplayer`, `api`, `icy`)
 - `station_profiles.py`
   - persistente Senderprofile je Station (EMA-Lernen, Confidence, Policy-Profilableitung)
 - `song_db.py`
@@ -143,20 +143,21 @@ Im Loop:
 
 ### 6.2 parse_stream_title() und Source-Policy
 
-1. Kandidatenbildung (MusicPlayer + API + ICY)
+1. Kandidatenbildung (ASM-QF + API + ICY + optional MusicPlayer)
+- ASM-QF-Kandidaten (bei aktivem QF): Exklusiv-Modus, wenn ein valides QF-Paar vorliegt (andere Kandidaten werden verworfen)
 - MusicPlayer-Kandidaten (direkt + swapped)
 - API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
 - ICY-Kandidaten aus `metadata.parse_stream_title_complex()` (direkt + optional swapped)
 
 2. MB-Winner
 - jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
-- Winner nur oberhalb der Schwellwerte (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
-- Tie-Break bei Gleichstand: ICY wird bevorzugt
+- Kandidaten gelten als valide, wenn sie die Schwellwerte erreichen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`) **oder** aus `asm-qf*` stammen
+- Quell-Prioritaet bei Gleichstand: `asm-qf > musicplayer > icy > api`; bei vorhandenen ASM-QF-Kandidaten greift zusaetzlich eine explizite ASM-QF-Dominanz
 - MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte
 
 3. Sonderfall alle MB-Scores = 0
 - bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich (kein API-Override gegen Lock)
-- wenn MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
+- wenn MusicPlayer-Entscheidungspfad aktiv ist und MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
 - wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
 - wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs): API wird ebenfalls uebernommen
 - **ICY-Rohdaten-Fallback**: kein API, kein Lock, aber valides ICY-Direktpaar vorhanden -> Artist/Title direkt aus ICY-Split (ohne MB-Anreicherung, kein MBID, Timeout=Fallback); typisch fuer DJ-Sets und Radiosendungen, die MB nicht kennt
@@ -334,6 +335,38 @@ Timer-Debug-Properties:
 - `RadioMonitor.TimeoutTotal`
 - `RadioMonitor.TimeoutRemaining`
 
+### 8.1 Timing-Tuning-Map (ohne Code-Aenderung)
+
+Ziel: schnelle Orientierung, welche Zeitparameter welche Laufzeiteffekte haben.
+
+| Prioritaet | Parameter | Default | Wirkung bei kleinerem Wert | Wirkung bei groesserem Wert |
+|---|---|---:|---|---|
+| hoch | `PLAYER_BUFFER_SETTLE_S` | `2.0s` | fruehere Quellenentscheidung, mehr Fruehfehler bei instabilem Start | stabilerer Start, spaetere Erstentscheidung |
+| hoch | `PLAYER_BUFFER_MAX_WAIT_S` | `45.0s` | schnelleres Weiterlaufen trotz Buffering, mehr Risiko falscher Quelle | robuster bei schwierigen Streams, laengere Wartezeit |
+| hoch | `API_METADATA_POLL_INTERVAL_S` | `10s` | schnellere API-Titelwechsel, mehr API/CPU-Last | traeger, dafuer ruhiger und sparsamer |
+| hoch | `MUSICPLAYER_FALLBACK_POLL_INTERVAL_S` | `5s` | schnellere MP-Updates, mehr Polling-Last | traeger, dafuer weniger Last |
+| hoch | `API_NOW_REFRESH_INTERVAL_S` | `10s` | frischeres `ApiNowPlaying`, mehr Request-Last/Flattern | stabiler, aber laenger stale |
+| hoch | `SONG_TIMEOUT_FALLBACK_S` | `240s` | alte Titel verschwinden frueher | alte Titel bleiben laenger sichtbar |
+| hoch | `SONG_TIMEOUT_EARLY_CLEAR_S` | `15s` | Timer loescht spaeter bei bekannter MB-Laenge | Timer loescht frueher bei bekannter MB-Laenge |
+| mittel | `SONG_END_MIN_SONG_AGE_S` | `45.0s` | aggressiveres Frueh-Loeschen | konservativer, weniger Fehl-Loeschungen |
+| mittel | `SONG_END_HOLD_S` | `8.0s` | schnellere Reaktion auf Endsignal | stabiler gegen kurze Stoerimpulse |
+| mittel | `SONG_END_STALE_API_MIN_S` | `12.0s` | stale API wird frueher als Zusatzsignal genutzt | stale API wirkt spaeter |
+| mittel | `SONG_END_NEAR_TIMEOUT_S` | `30.0s` | near-timeout Signal spaeter/seltener | near-timeout Signal frueher/haeufiger |
+| mittel | `STARTUP_SOURCE_QUALIFY_WINDOW_S` | `20.0s` | schnellere Stabilisierung, mehr Quellwechsel am Anfang | spaetere, dafuer stabilere Fruehphase |
+| mittel | `MB_WORK_CONTEXT_MAX_SECONDS` | `3.0s` | schnellere MB-Antwort, weniger Kontextqualitaet | tiefere MB-Kontextaufloesung, mehr Latenz |
+| mittel | `MB_WORK_CONTEXT_MAX_PAGES` | `1` | weniger MB-Browse-Aufwand | mehr Treffertiefe, mehr Latenz |
+| mittel | `MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS` | `2` | weniger MB-Detailcalls | bessere Album/FirstRelease-Qualitaet, mehr Latenz |
+| mittel | `MB_WORK_CONTEXT_RATE_LIMIT_S` | `1.0s` | schnellere MB-Folgecalls, hoeheres API-Risiko | API-schonender, aber traeger |
+| niedrig | `ANALYSIS_FLUSH_INTERVAL_S` | `5.0s` | haeufigere Disk-Flushes | spaetere Analyse-Persistenz |
+| niedrig | `STATION_PROFILE_OBSERVE_INTERVAL_S` | `5.0s` | schnellere Profilreaktion | traegere Profilanpassung |
+| niedrig | `STATION_PROFILE_SAVE_INTERVAL_S` | `30.0s` | haeufigeres Speichern | weniger I/O, spaetere Persistenz |
+| niedrig | `STATION_PROFILE_MIN_SESSION_S` | `600s` | schnellere Profilbildung | robustere Profile, aber spaeter nutzbar |
+| niedrig | `SONG_RECOUNT_WINDOW_S` | `600s` | gleiche Songs werden frueher erneut gezaehlt | staerkerer Doppelzaehl-Schutz |
+
+Hinweise:
+- In Produktionsbetrieb zuerst nur **eine** hoch-priorisierte Stellschraube auf einmal aendern.
+- Fuer Label-Stabilitaet sind in der Praxis meist `PLAYER_BUFFER_*`, `SONG_TIMEOUT_*`, `API_*_INTERVAL_S` und die `SONG_END_*`-Schwellen entscheidend.
+
 ## 9) MusicBrainz-Logik (Kernpunkte)
 
 ### 9.1 Query-Strategie Artist/Title-Reihenfolge
@@ -415,4 +448,4 @@ Sichere Erweiterungen:
 Vorher pruefen:
 - beeinflusst die Aenderung Artist/ArtistMBID Trigger-Reihenfolge?
 - kann sie stale Properties bei Streamwechsel erzeugen?
-- bleibt Fallback-Kette (ICY -> API -> MusicPlayer) konsistent?
+- bleibt Fallback-Kette (ASM-QF/ICY -> API -> MusicPlayer) konsistent?
