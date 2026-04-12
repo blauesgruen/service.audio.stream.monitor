@@ -560,8 +560,5 @@ class SourcePolicy:
     def debug_scores(self):
         return {family: round(self._score(family), 3) for family in self.FAMILIES}
 
-    def learning_scores(self):
-        return {family: float(self._base_score(family)) for family in self.FAMILIES}
-
     def latest_observation(self):
         return dict(self._last_observation or {})

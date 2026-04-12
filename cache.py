@@ -82,11 +82,6 @@ class MusicBrainzCache:
         if expired_keys:
             log_debug(f"Cache Cleanup: {len(expired_keys)} abgelaufene Eintraege entfernt")
 
-    def cleanup_expired(self):
-        """Entfernt abgelaufene Cache-Einträge (öffentliche API)."""
-        with self._lock:
-            self._cleanup_expired_unlocked()
-
     def clear(self):
         """Leert den gesamten Cache."""
         with self._lock:
