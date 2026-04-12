@@ -265,6 +265,8 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
         self._last_qf_request_ts = 0.0
+        self._last_qf_response_id = ''
+        self._last_qf_response_match_ts = 0.0
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -1268,6 +1270,8 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
         self._last_qf_request_ts = 0.0
+        self._last_qf_response_id = ''
+        self._last_qf_response_match_ts = 0.0
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -1579,16 +1583,17 @@ class RadioMonitor(xbmc.Monitor):
         """
         Liefert das aktuelle QF-Paar nur bei frischer, passender "hit"-Response.
         """
+        _ = invalid_values
         snapshot = self._qf_response_snapshot()
         if not snapshot.get('fresh'):
             return ('', '')
         if snapshot.get('status') != 'hit':
             return ('', '')
-        return self._normalize_song_candidate(
-            snapshot.get('artist'),
-            snapshot.get('title'),
-            invalid_values
-        )
+        artist = str(snapshot.get('artist') or '').strip()
+        title = str(snapshot.get('title') or '').strip()
+        if not (artist and title):
+            return ('', '')
+        return (artist, title)
 
     def _send_qf_request(self, station_name, mode='asm_auto'):
         station = self._sanitize_station_text(station_name)
@@ -1635,10 +1640,31 @@ class RadioMonitor(xbmc.Monitor):
 
         now_ts = time.time()
         station_changed = station_name.strip().lower() != self._last_qf_request_station.strip().lower()
+
+        # Solange die letzte Anfrage noch unbeantwortet ist, keine neue Request-ID senden.
+        # Sonst "ueberholt" der naechste Request die laufende Antwort und die Rueckmeldung
+        # wird wegen ID-Mismatch als non-fresh verworfen.
+        if self._last_qf_request_id and not station_changed:
+            snapshot = self._qf_response_snapshot()
+            if not snapshot.get('fresh'):
+                request_age_s = max(0.0, float(now_ts - float(self._last_qf_request_ts or 0.0)))
+                if request_age_s < float(QF_NO_RESPONSE_FALLBACK_S):
+                    return
+
         request_due = (
             not self._last_qf_request_id
             or station_changed
-            or (now_ts - self._last_qf_request_ts) >= API_NOW_REFRESH_INTERVAL_S
+            or (
+                now_ts - (
+                    self._last_qf_response_match_ts
+                    if (
+                        self._last_qf_response_match_ts > 0.0
+                        and self._last_qf_response_id
+                        and self._last_qf_response_id == self._last_qf_request_id
+                    )
+                    else self._last_qf_request_ts
+                )
+            ) >= API_NOW_REFRESH_INTERVAL_S
         )
         if not request_due:
             return
@@ -1667,33 +1693,43 @@ class RadioMonitor(xbmc.Monitor):
             return
 
         snapshot = self._qf_response_snapshot()
+        qf_authoritative = self._is_qf_authoritative()
         if not snapshot.get('fresh'):
             return
+        response_id = snapshot.get('response_id') or ''
+        if response_id and response_id != self._last_qf_response_id:
+            self._last_qf_response_id = response_id
+            self._last_qf_response_match_ts = time.time()
 
         if snapshot.get('status') != 'hit':
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
+            # QF bleibt in diesem Zustand autoritativ (z.B. "kein Song"):
+            # Song-Labels aktiv leeren, damit kein alter Song stehen bleibt.
+            if qf_authoritative:
+                WINDOW.clearProperty(_P.ARTIST)
+                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
+                WINDOW.clearProperty(_P.TITLE)
             return
-        artist = snapshot.get('artist') or ''
-        title = snapshot.get('title') or ''
-
-        station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
-        qf_prefill_pair = self._sanitize_pre_mb_pair(
-            (artist, title),
-            station_name=station_name,
-            source='asm-qf',
-            reject_obvious_text=True,
-        )
-        if not (qf_prefill_pair[0] and qf_prefill_pair[1]):
+        artist = str(snapshot.get('artist') or '').strip()
+        title = str(snapshot.get('title') or '').strip()
+        if not (artist and title):
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
+            if qf_authoritative:
+                WINDOW.clearProperty(_P.ARTIST)
+                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
+                WINDOW.clearProperty(_P.TITLE)
             return
-        artist, title = qf_prefill_pair
 
         label = self._compose_song_label(artist=artist, title=title)
         if not label:
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
+            if qf_authoritative:
+                WINDOW.clearProperty(_P.ARTIST)
+                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
+                WINDOW.clearProperty(_P.TITLE)
             return
 
         if label != self._last_qf_result:
@@ -1703,6 +1739,9 @@ class RadioMonitor(xbmc.Monitor):
             # ASM-QF Daten vorbefüllt (Poll-Feedback), noch bevor MB entscheidet.
             if self._qf_enabled:
                 self.set_property_safe(_P.ARTIST, artist)
+                # Viele Skins rendern ArtistDisplay statt Artist.
+                # Daher QF-Prefill konsistent auf beide Properties schreiben.
+                self.set_property_safe(_P.ARTIST_DISPLAY, artist)
                 self.set_property_safe(_P.TITLE, title)
 
     def _capture_stream_url_raw(self, stream_url):
@@ -3277,23 +3316,14 @@ class RadioMonitor(xbmc.Monitor):
         qf_valid = False
         if self._qf_enabled:
             qf_artist, qf_title = self._current_qf_hit_pair(invalid)
-            qf_valid = self._append_non_generic_candidate(
-                candidates,
-                'asm-qf',
-                qf_artist,
-                qf_title,
-                station_name
-            )
+            qf_artist = str(qf_artist or '').strip()
+            qf_title = str(qf_title or '').strip()
+            if qf_artist and qf_title:
+                qf_valid = True
+                candidates.append({'source': 'asm-qf', 'artist': qf_artist, 'title': qf_title})
             if qf_valid:
                 if qf_artist != qf_title:
-                    s_artist, s_title = self._normalize_song_candidate(qf_title, qf_artist, invalid)
-                    self._append_non_generic_candidate(
-                        candidates,
-                        'asm-qf_swapped',
-                        s_artist,
-                        s_title,
-                        station_name
-                    )
+                    candidates.append({'source': 'asm-qf_swapped', 'artist': qf_title, 'title': qf_artist})
                 # Wenn ASM-QF valide Daten liefert, werden alle anderen
                 # Kandidaten verworfen (Exklusiv-Modus).
                 candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf')]
@@ -4514,8 +4544,8 @@ class RadioMonitor(xbmc.Monitor):
                 break
                 
             self.check_playing()
-            self._tick_qf_request()
             self._sync_qf_result_property()
+            self._tick_qf_request()
             self._update_timeout_remaining_property()
             
         # Cleanup beim Beenden
