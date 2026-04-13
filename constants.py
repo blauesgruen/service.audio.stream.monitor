@@ -87,13 +87,16 @@ MB_WORK_CONTEXT_RATE_LIMIT_S = 1.0
 # Song-Timeout: Wie lange Properties nach dem letzten Titelwechsel behalten werden.
 # Wenn MB eine Songlaenge liefert, wird SONG_TIMEOUT_EARLY_CLEAR_S abgezogen.
 # Wenn keine MB-Laenge bekannt ist, greift SONG_TIMEOUT_FALLBACK_S.
-SONG_TIMEOUT_EARLY_CLEAR_S = 15
+SONG_TIMEOUT_EARLY_CLEAR_S = 20
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
 API_NOW_REFRESH_INTERVAL_S = 10
 # QF-Dominanz: Solange innerhalb dieses Fensters keine frische QF-Response vorliegt,
 # bleibt QF weiterhin fuehrend (kein Fallback auf API/ICY/MP).
 # Erst danach darf bei QF-Ausfall auf andere Quellen zurueckgegriffen werden.
 QF_NO_RESPONSE_FALLBACK_S = 25.0
+# Kurzes Grace-Fenster fuer non-fresh QF-Hits bei Request-ID-Race.
+# Nur innerhalb dieses Fensters duerfen hit-Paare trotz id_mismatch als nutzbar gelten.
+QF_HIT_MISMATCH_GRACE_S = 3.0
 # Song-Ende-Detektor (fruehes Leeren vor dem harten Timeout).
 # Keywords sind nur Hinweise und loesen nie allein aus.
 SONG_END_DETECTOR_ENABLED = True
@@ -132,7 +135,7 @@ SOURCE_POLICY_WINDOW = 40
 SOURCE_POLICY_SWITCH_MARGIN = 0.12
 SOURCE_POLICY_SINGLE_CONFIRM_POLLS = 2
 # Startup source qualification window (after buffering settled)
-STARTUP_SOURCE_QUALIFY_WINDOW_S = 20.0
+STARTUP_SOURCE_QUALIFY_WINDOW_S = 8.0
 STARTUP_API_ONLY_STABLE_POLLS = 3
 # Nach Ende des Kodi-Bufferings kurz stabilen Zustand abwarten,
 # bevor die Quellenentscheidung startet.

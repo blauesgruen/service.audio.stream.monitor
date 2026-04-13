@@ -370,7 +370,7 @@ Ziel: schnelle Orientierung, welche Zeitparameter welche Laufzeiteffekte haben.
 | mittel | `SONG_END_HOLD_S` | `8.0s` | schnellere Reaktion auf Endsignal | stabiler gegen kurze Stoerimpulse |
 | mittel | `SONG_END_STALE_API_MIN_S` | `12.0s` | stale API wird frueher als Zusatzsignal genutzt | stale API wirkt spaeter |
 | mittel | `SONG_END_NEAR_TIMEOUT_S` | `30.0s` | near-timeout Signal spaeter/seltener | near-timeout Signal frueher/haeufiger |
-| mittel | `STARTUP_SOURCE_QUALIFY_WINDOW_S` | `20.0s` | schnellere Stabilisierung, mehr Quellwechsel am Anfang | spaetere, dafuer stabilere Fruehphase |
+| mittel | `STARTUP_SOURCE_QUALIFY_WINDOW_S` | `8.0s` | schnellere Stabilisierung, mehr Quellwechsel am Anfang | spaetere, dafuer stabilere Fruehphase |
 | mittel | `MB_WORK_CONTEXT_MAX_SECONDS` | `3.0s` | schnellere MB-Antwort, weniger Kontextqualitaet | tiefere MB-Kontextaufloesung, mehr Latenz |
 | mittel | `MB_WORK_CONTEXT_MAX_PAGES` | `1` | weniger MB-Browse-Aufwand | mehr Treffertiefe, mehr Latenz |
 | mittel | `MB_WORK_CONTEXT_MAX_DETAIL_LOOKUPS` | `2` | weniger MB-Detailcalls | bessere Album/FirstRelease-Qualitaet, mehr Latenz |

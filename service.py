@@ -21,7 +21,8 @@ from constants import (
     SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
     SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
     SONG_END_NEAR_TIMEOUT_S,
-    API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
+    API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, QF_HIT_MISMATCH_GRACE_S,
+    PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
@@ -1666,6 +1667,29 @@ class RadioMonitor(xbmc.Monitor):
             'fresh_reason': fresh_reason,
         }
 
+    def _is_qf_usable_nonfresh_hit(self, snapshot):
+        """
+        Erlaubt kurzzeitig die Nutzung eines non-fresh QF-Hits bei Request-Race,
+        solange ein valides Song-Paar vorliegt und der Zeitabstand klein ist.
+        """
+        if not isinstance(snapshot, dict):
+            return False
+        if snapshot.get('fresh'):
+            return False
+        if str(snapshot.get('status') or '').strip().lower() != 'hit':
+            return False
+        artist = str(snapshot.get('artist') or '').strip()
+        title = str(snapshot.get('title') or '').strip()
+        if not (artist and title):
+            return False
+        fresh_reason = str(snapshot.get('fresh_reason') or '').strip().lower()
+        if fresh_reason not in ('id_mismatch_waiting', 'id_mismatch_ts_ok'):
+            return False
+        gap_raw = snapshot.get('gap_raw')
+        if not isinstance(gap_raw, (int, float)):
+            return False
+        return float(gap_raw) <= float(QF_HIT_MISMATCH_GRACE_S)
+
     def _is_qf_fallback_exception(self):
         """
         Liefert True, wenn QF fuer den aktuellen Zyklus als nicht verfuegbar gilt
@@ -1695,7 +1719,7 @@ class RadioMonitor(xbmc.Monitor):
         """
         return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
 
-    def _current_qf_hit_pair(self, invalid_values, require_fresh=True):
+    def _current_qf_hit_pair(self, invalid_values, require_fresh=True, allow_recent_nonfresh_hit=False):
         """
         Liefert das aktuelle QF-Paar bei passender "hit"-Response.
         Standard: nur fresh responses (request_id match).
@@ -1705,7 +1729,8 @@ class RadioMonitor(xbmc.Monitor):
         _ = invalid_values
         snapshot = self._qf_response_snapshot()
         if require_fresh and not snapshot.get('fresh'):
-            return ('', '')
+            if not (allow_recent_nonfresh_hit and self._is_qf_usable_nonfresh_hit(snapshot)):
+                return ('', '')
         if snapshot.get('status') != 'hit':
             return ('', '')
         artist = str(snapshot.get('artist') or '').strip()
@@ -4007,9 +4032,15 @@ class RadioMonitor(xbmc.Monitor):
                         if self._qf_enabled:
                             self._sync_qf_result_property()
                             qf_require_fresh = not str(last_winner_source or '').startswith('asm-qf')
+                            qf_allow_recent_nonfresh_hit = bool(
+                                qf_require_fresh
+                                and not last_winner_source
+                                and self._is_qf_authoritative()
+                            )
                             current_qf_pair = self._current_qf_hit_pair(
                                 invalid_values,
-                                require_fresh=qf_require_fresh
+                                require_fresh=qf_require_fresh,
+                                allow_recent_nonfresh_hit=qf_allow_recent_nonfresh_hit
                             )
                             current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
                             qf_authoritative = self._is_qf_authoritative()
@@ -4115,12 +4146,23 @@ class RadioMonitor(xbmc.Monitor):
                             and startup_qualify_until_ts > 0.0
                             and time.time() < startup_qualify_until_ts
                         )
+                        qf_startup_fast_path = bool(
+                            self._qf_enabled
+                            and qf_authoritative
+                            and current_qf_pair[0]
+                            and current_qf_pair[1]
+                        )
                         startup_consensus = self.startup_qualifier.has_startup_source_consensus(
                             current_mp_pair,
                             current_api_pair,
                             current_icy_pair,
                             station_name
                         )
+                        if in_startup_window and not startup_consensus and qf_startup_fast_path:
+                            log_debug(
+                                "Startup-Qualify Bypass: autoritativer ASM-QF-Hit vorhanden"
+                            )
+                            in_startup_window = False
                         allow_initial_trigger = (not in_startup_window) or startup_consensus
 
                         # Source-locked Trigger: nur die letzte Gewinnerquelle entscheidet den Wechsel-Trigger.
@@ -4181,7 +4223,17 @@ class RadioMonitor(xbmc.Monitor):
                             )
                             and not self._has_non_generic_song_pair(current_mp_pair, station_name)
                         )
-                        if initial_program_block and source_changed_trigger:
+                        if (
+                            initial_program_block
+                            and source_changed_trigger
+                            and not (
+                                trigger_reason == self.TRIGGER_QF_CHANGE
+                                and self._qf_enabled
+                                and qf_authoritative
+                                and current_qf_pair[0]
+                                and current_qf_pair[1]
+                            )
+                        ):
                             if self.startup_qualifier.should_bypass_initial_program_block(
                                 station_name,
                                 current_mp_pair,
@@ -4193,7 +4245,17 @@ class RadioMonitor(xbmc.Monitor):
                                     f"API-only-Verhalten erkannt (profil/heuristik)"
                                 )
                                 initial_program_block = False
-                        if initial_program_block and source_changed_trigger:
+                        if (
+                            initial_program_block
+                            and source_changed_trigger
+                            and not (
+                                trigger_reason == self.TRIGGER_QF_CHANGE
+                                and self._qf_enabled
+                                and qf_authoritative
+                                and current_qf_pair[0]
+                                and current_qf_pair[1]
+                            )
+                        ):
                             block_detail = "ICY/MP noch generisch (Nachrichten/Programmphase)"
                             if not self._is_mp_decision_active():
                                 block_detail = "ICY noch generisch (Nachrichten/Programmphase)"
@@ -4203,7 +4265,18 @@ class RadioMonitor(xbmc.Monitor):
                             )
                             source_changed_trigger = False
                             initial_source_pending = False
-                        elif in_startup_window and not startup_consensus and source_changed_trigger:
+                        elif (
+                            in_startup_window
+                            and not startup_consensus
+                            and source_changed_trigger
+                            and not (
+                                trigger_reason == self.TRIGGER_QF_CHANGE
+                                and self._qf_enabled
+                                and qf_authoritative
+                                and current_qf_pair[0]
+                                and current_qf_pair[1]
+                            )
+                        ):
                             remaining = max(0, int(round(startup_qualify_until_ts - time.time())))
                             log_debug(
                                 f"Startup-Qualify aktiv: Trigger geparkt "
@@ -4218,6 +4291,25 @@ class RadioMonitor(xbmc.Monitor):
                                 f"Songwechsel-Trigger aktiv: reason='{trigger_reason}', "
                                 f"beobachtete_Quelle='{observed_source}'"
                             )
+                            # First-Paint: Bei autoritativem QF-Hit Labels sofort sichtbar machen,
+                            # bevor parse_stream_title() + MB-Anreicherung abgeschlossen sind.
+                            if (
+                                self._qf_enabled
+                                and qf_authoritative
+                                and trigger_reason == self.TRIGGER_QF_CHANGE
+                                and current_qf_pair[0]
+                                and current_qf_pair[1]
+                            ):
+                                WINDOW.clearProperty(_P.MBID)
+                                self.set_property_safe(_P.TITLE, current_qf_pair[1])
+                                self.set_property_safe(_P.ARTIST, current_qf_pair[0])
+                                self.set_property_safe(_P.ARTIST_DISPLAY, current_qf_pair[0])
+                                self._log_qf_diag('first_paint_qf', {
+                                    'trigger_reason': trigger_reason,
+                                    'artist': current_qf_pair[0],
+                                    'title': current_qf_pair[1],
+                                    'req_id': self._last_qf_request_id or '-',
+                                })
                             # Bei Trigger: MusicBrainz-Cache invalidieren
                             try:
                                 _mb_cache.clear()
