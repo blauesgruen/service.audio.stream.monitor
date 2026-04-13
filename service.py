@@ -219,6 +219,8 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_QF_CHANGE = _TRIGGER_QF_CHANGE
     MP_GENERIC_HOLD_MAX_S = 120.0
     QF_NO_HIT_HOLD_S = 8.0
+    QF_NONFRESH_LOG_MIN_INTERVAL_S = 15.0
+    QF_NONFRESH_LOG_MIN_INTERVAL_STALE_S = 5.0
     STATION_NAME_MATCH_MIN_LEN = int(STATION_NAME_MATCH_MIN_LEN)
 
     def __init__(self):
@@ -270,6 +272,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
         self._last_qf_nonfresh_diag = ''
+        self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
         self._qf_no_hit_hold_s = float(self.QF_NO_HIT_HOLD_S)
@@ -1280,6 +1283,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
         self._last_qf_nonfresh_diag = ''
+        self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
         self._mp_generic_hold_active = False
@@ -1855,26 +1859,40 @@ class RadioMonitor(xbmc.Monitor):
             gap_source = snapshot.get('gap_source') or 'none'
             gap_raw = snapshot.get('gap_raw')
             gap_text = f"{float(gap_raw):.2f}s" if isinstance(gap_raw, (int, float)) else '-'
+            fresh_reason = snapshot.get('fresh_reason') or 'id_mismatch'
             diag = (
                 f"req={self._last_qf_request_id or '-'}|res={response_id}|"
-                f"reason={snapshot.get('fresh_reason') or 'id_mismatch'}|"
-                f"gap_source={gap_source}|gap_raw={gap_text}"
+                f"status={snapshot.get('status') or '-'}|reason={fresh_reason}|"
+                f"gap_source={gap_source}"
             )
+            now_ts = time.time()
+            min_interval_s = float(self.QF_NONFRESH_LOG_MIN_INTERVAL_S)
+            if fresh_reason == 'stale_response':
+                min_interval_s = float(self.QF_NONFRESH_LOG_MIN_INTERVAL_STALE_S)
+            should_log = False
             if diag != self._last_qf_nonfresh_diag:
+                should_log = True
+            elif (now_ts - float(self._last_qf_nonfresh_log_ts or 0.0)) >= min_interval_s:
+                should_log = True
+
+            if should_log:
                 self._last_qf_nonfresh_diag = diag
+                self._last_qf_nonfresh_log_ts = now_ts
+                log_level = 'info' if fresh_reason == 'stale_response' else 'debug'
                 self._log_qf_diag('non_fresh', {
                     'req_id': self._last_qf_request_id or '-',
                     'res_id': response_id,
                     'status': snapshot.get('status') or '-',
                     'fresh': False,
-                    'fresh_reason': snapshot.get('fresh_reason') or 'id_mismatch',
+                    'fresh_reason': fresh_reason,
                     'gap_source': gap_source,
                     'gap_s': gap_text,
                     'authoritative': qf_authoritative,
                     'hold_active': self._is_qf_no_hit_hold_active(),
-                })
+                }, level=log_level)
             return
         self._last_qf_nonfresh_diag = ''
+        self._last_qf_nonfresh_log_ts = 0.0
         response_id = snapshot.get('response_id') or ''
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
