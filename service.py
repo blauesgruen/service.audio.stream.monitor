@@ -1309,7 +1309,6 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
         WINDOW.clearProperty(_P.QF_REQUEST_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_STATION)
-        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_MODE)
         WINDOW.clearProperty(_P.QF_REQUEST_TS)
         self._clear_qf_response_properties()
@@ -1608,7 +1607,6 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
         request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
         WINDOW.setProperty(_P.QF_REQUEST_STATION, station)
-        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.setProperty(_P.QF_REQUEST_MODE, str(mode or 'asm_auto'))
         WINDOW.setProperty(_P.QF_REQUEST_TS, str(int(now_ts)))
         # Request-ID immer zuletzt setzen, damit ASM-QF ein konsistentes Request-Paket liest.

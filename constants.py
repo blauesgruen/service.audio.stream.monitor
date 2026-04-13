@@ -190,7 +190,6 @@ class PropertyNames:
     VERIFIED_SOURCE_CONF = 'RadioMonitor.VerifiedSourceConfidence'
     QF_REQUEST_ID = 'RadioMonitor.QF.Request.Id'
     QF_REQUEST_STATION = 'RadioMonitor.QF.Request.Station'
-    QF_REQUEST_STATION_ID = 'RadioMonitor.QF.Request.StationId'
     QF_REQUEST_MODE = 'RadioMonitor.QF.Request.Mode'
     QF_REQUEST_TS = 'RadioMonitor.QF.Request.Ts'
     QF_RESPONSE_ID = 'RadioMonitor.QF.Response.Id'
