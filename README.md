@@ -46,6 +46,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den bereinigten Sendernamen (`RadioMonitor.QF.Request.Station`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
 - ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
 - ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt (nicht strikt an `fresh`-Request-ID-Match gebunden)
+- ✅ QF-`no_hit` wird im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S=8s`), damit transiente Responses keine kurzen Label-Leerungen verursachen
+- ✅ Zentrales QF-Diagnose-Logging: `ASM-QF DIAG event=...` mit stabilen Feldern (`fresh_reason`, `gap_source`, `gap_s`, `hold_*`) zur Flapping-/Race-Analyse
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
@@ -209,6 +211,7 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
    - Windows (portable): `<Kodi-Ordner>\portable_data\temp\kodi.log`
    - Linux: `~/.kodi/temp/kodi.log`
 2. **Suche nach:** `[Audio Stream Monitor]`
+   - Fuer QF-Diagnose zusaetzlich nach `ASM-QF DIAG` filtern.
 3. **Für detaillierte Logs:** Aktiviere "Debug-Logging" in Kodi unter `Einstellungen → System → Logging`.
 
 ## Kompatibilität

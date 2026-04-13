@@ -218,6 +218,7 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_ICY_STALE = _TRIGGER_ICY_STALE
     TRIGGER_QF_CHANGE = _TRIGGER_QF_CHANGE
     MP_GENERIC_HOLD_MAX_S = 120.0
+    QF_NO_HIT_HOLD_S = 8.0
     STATION_NAME_MATCH_MIN_LEN = int(STATION_NAME_MATCH_MIN_LEN)
 
     def __init__(self):
@@ -268,6 +269,10 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
+        self._last_qf_nonfresh_diag = ''
+        self._qf_no_hit_hold_active = False
+        self._qf_no_hit_hold_since_ts = 0.0
+        self._qf_no_hit_hold_s = float(self.QF_NO_HIT_HOLD_S)
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -1274,6 +1279,9 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
+        self._last_qf_nonfresh_diag = ''
+        self._qf_no_hit_hold_active = False
+        self._qf_no_hit_hold_since_ts = 0.0
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -1525,6 +1533,36 @@ class RadioMonitor(xbmc.Monitor):
             text = text[:500] + '...'
         log_debug(f"RAW[{context}]: {text}")
 
+    def _log_qf_diag(self, event, fields=None, level='debug'):
+        payload = {'event': str(event or '').strip() or 'unknown'}
+        if isinstance(fields, dict):
+            payload.update(fields)
+
+        parts = []
+        for key, value in payload.items():
+            k = str(key or '').strip()
+            if not k:
+                continue
+            if value is None:
+                v = '-'
+            elif isinstance(value, bool):
+                v = 'true' if value else 'false'
+            elif isinstance(value, float):
+                v = f"{value:.3f}"
+            else:
+                v = str(value)
+            if any(ch in v for ch in (' ', '=', '|', '"')):
+                v = '"' + v.replace('"', "'") + '"'
+            parts.append(f"{k}={v}")
+
+        message = "ASM-QF DIAG " + ' '.join(parts)
+        if level == 'info':
+            log_info(message)
+        elif level == 'warning':
+            log_warning(message)
+        else:
+            log_debug(message)
+
     def _set_icy_nowplaying_label(self, stream_title=None, artist=None, title=None):
         raw = (stream_title or '').strip()
         value = raw if raw else self._compose_song_label(artist, title)
@@ -1533,22 +1571,95 @@ class RadioMonitor(xbmc.Monitor):
         else:
             WINDOW.clearProperty(_P.ICY_NOW)
 
+    def _parse_qf_epoch_ts(self, raw_value):
+        text = str(raw_value or '').strip()
+        if not text:
+            return None
+        try:
+            value = float(text)
+        except Exception:
+            return None
+        if value <= 0:
+            return None
+        # Heuristik: Werte > 1e11 sind sehr wahrscheinlich Millisekunden-Epoch.
+        if value > 1e11:
+            value = value / 1000.0
+        now_ts = float(time.time())
+        # Unplausible Werte verwerfen (zu alt/zu weit in der Zukunft).
+        if value < 946684800.0 or value > (now_ts + 3600.0):
+            return None
+        return float(value)
+
     def _qf_response_snapshot(self):
         response_id = (WINDOW.getProperty(_P.QF_RESPONSE_ID) or '').strip()
         status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
         artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
         title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+        response_ts_raw = WINDOW.getProperty(_P.QF_RESPONSE_TS) or ''
+        request_ts_raw = WINDOW.getProperty(_P.QF_REQUEST_TS) or ''
+        response_ts = self._parse_qf_epoch_ts(response_ts_raw)
+        request_ts = self._parse_qf_epoch_ts(request_ts_raw)
+        if request_ts is None and self._last_qf_request_ts:
+            request_ts = float(self._last_qf_request_ts)
+
         fresh = bool(
             self._last_qf_request_id
             and response_id
             and response_id == self._last_qf_request_id
         )
+
+        now_ts = float(time.time())
+        server_gap = None
+        if self._last_qf_request_ts:
+            try:
+                server_gap = max(0.0, now_ts - float(self._last_qf_request_ts))
+            except Exception:
+                server_gap = None
+
+        client_gap = None
+        if request_ts is not None and response_ts is not None and response_ts >= request_ts:
+            client_gap = max(0.0, float(response_ts - request_ts))
+
+        gap_source = 'none'
+        gap_raw = None
+        if client_gap is not None:
+            gap_source = 'client_ts'
+            gap_raw = float(client_gap)
+        elif server_gap is not None:
+            gap_source = 'server_ts'
+            gap_raw = float(server_gap)
+
+        fresh_reason = 'id_match' if fresh else 'id_mismatch'
+        if not fresh:
+            if not response_id:
+                fresh_reason = 'missing_response_id'
+            elif not self._last_qf_request_id:
+                fresh_reason = 'missing_request_id'
+            elif response_id != self._last_qf_request_id:
+                if client_gap is not None:
+                    if client_gap <= float(QF_NO_RESPONSE_FALLBACK_S):
+                        fresh_reason = 'id_mismatch_ts_ok'
+                    else:
+                        fresh_reason = 'stale_response'
+                elif gap_source == 'server_ts':
+                    if (gap_raw or 0.0) <= float(QF_NO_RESPONSE_FALLBACK_S):
+                        fresh_reason = 'id_mismatch_waiting'
+                    else:
+                        fresh_reason = 'stale_response'
+                else:
+                    fresh_reason = 'id_mismatch_no_ts'
+
         return {
             'fresh': fresh,
             'response_id': response_id,
             'status': status,
             'artist': artist,
             'title': title,
+            'request_ts': request_ts,
+            'response_ts': response_ts,
+            'gap_source': gap_source,
+            'gap_raw': gap_raw,
+            'fresh_reason': fresh_reason,
         }
 
     def _is_qf_fallback_exception(self):
@@ -1630,6 +1741,46 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.QF_RESPONSE_META)
         WINDOW.clearProperty(_P.QF_RESPONSE_TS)
 
+    def _is_qf_no_hit_hold_active(self):
+        if not self._qf_no_hit_hold_active:
+            return False
+        age_s = max(0.0, float(time.time() - float(self._qf_no_hit_hold_since_ts or 0.0)))
+        if age_s < float(self._qf_no_hit_hold_s):
+            return True
+        self._qf_no_hit_hold_active = False
+        self._qf_no_hit_hold_since_ts = 0.0
+        self._log_qf_diag('hold_end', {
+            'hold_active': False,
+            'hold_age_s': age_s,
+            'req_id': self._last_qf_request_id or '-',
+            'res_id': self._last_qf_response_id or '-',
+        })
+        return False
+
+    def _start_qf_no_hit_hold(self):
+        if not self._qf_no_hit_hold_active:
+            self._qf_no_hit_hold_active = True
+            self._qf_no_hit_hold_since_ts = time.time()
+            self._log_qf_diag('hold_start', {
+                'hold_active': True,
+                'hold_s': self._qf_no_hit_hold_s,
+                'req_id': self._last_qf_request_id or '-',
+                'res_id': self._last_qf_response_id or '-',
+            })
+
+    def _stop_qf_no_hit_hold(self, reason=''):
+        if not self._qf_no_hit_hold_active:
+            return
+        self._qf_no_hit_hold_active = False
+        self._qf_no_hit_hold_since_ts = 0.0
+        if reason:
+            self._log_qf_diag('hold_reset', {
+                'reason': reason,
+                'hold_active': False,
+                'req_id': self._last_qf_request_id or '-',
+                'res_id': self._last_qf_response_id or '-',
+            })
+
     def _tick_qf_request(self):
         if not self._qf_enabled or not self.is_playing:
             return
@@ -1685,6 +1836,7 @@ class RadioMonitor(xbmc.Monitor):
         """
         if not self._qf_enabled or not self.is_playing:
             self._last_qf_result = ''
+            self._stop_qf_no_hit_hold(reason='qf_disabled_or_not_playing')
             if not self.is_playing:
                 self._clear_qf_response_properties()
             WINDOW.clearProperty(_P.QF_RESULT)
@@ -1692,21 +1844,63 @@ class RadioMonitor(xbmc.Monitor):
 
         if not self._last_qf_request_id:
             self._last_qf_result = ''
+            self._stop_qf_no_hit_hold(reason='no_request_id')
             WINDOW.clearProperty(_P.QF_RESULT)
             return
 
         snapshot = self._qf_response_snapshot()
         qf_authoritative = self._is_qf_authoritative()
         if not snapshot.get('fresh'):
+            response_id = snapshot.get('response_id') or '-'
+            gap_source = snapshot.get('gap_source') or 'none'
+            gap_raw = snapshot.get('gap_raw')
+            gap_text = f"{float(gap_raw):.2f}s" if isinstance(gap_raw, (int, float)) else '-'
+            diag = (
+                f"req={self._last_qf_request_id or '-'}|res={response_id}|"
+                f"reason={snapshot.get('fresh_reason') or 'id_mismatch'}|"
+                f"gap_source={gap_source}|gap_raw={gap_text}"
+            )
+            if diag != self._last_qf_nonfresh_diag:
+                self._last_qf_nonfresh_diag = diag
+                self._log_qf_diag('non_fresh', {
+                    'req_id': self._last_qf_request_id or '-',
+                    'res_id': response_id,
+                    'status': snapshot.get('status') or '-',
+                    'fresh': False,
+                    'fresh_reason': snapshot.get('fresh_reason') or 'id_mismatch',
+                    'gap_source': gap_source,
+                    'gap_s': gap_text,
+                    'authoritative': qf_authoritative,
+                    'hold_active': self._is_qf_no_hit_hold_active(),
+                })
             return
+        self._last_qf_nonfresh_diag = ''
         response_id = snapshot.get('response_id') or ''
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
             self._last_qf_response_match_ts = time.time()
 
         if snapshot.get('status') != 'hit':
+            has_visible_song = bool(
+                (WINDOW.getProperty(_P.ARTIST) or '').strip()
+                or (WINDOW.getProperty(_P.TITLE) or '').strip()
+                or self._last_qf_result
+            )
+            if qf_authoritative and has_visible_song:
+                self._start_qf_no_hit_hold()
+                age_s = max(0.0, float(time.time() - float(self._qf_no_hit_hold_since_ts or 0.0)))
+                if self._is_qf_no_hit_hold_active():
+                    self._log_qf_diag('hold_suppress_no_hit', {
+                        'status': snapshot.get('status') or '-',
+                        'hold_active': True,
+                        'hold_age_s': age_s,
+                        'req_id': self._last_qf_request_id or '-',
+                        'res_id': snapshot.get('response_id') or '-',
+                    })
+                    return
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
+            self._stop_qf_no_hit_hold(reason='status_not_hit')
             # QF bleibt in diesem Zustand autoritativ (z.B. "kein Song"):
             # Song-Labels aktiv leeren, damit kein alter Song stehen bleibt.
             if qf_authoritative:
@@ -1717,8 +1911,25 @@ class RadioMonitor(xbmc.Monitor):
         artist = str(snapshot.get('artist') or '').strip()
         title = str(snapshot.get('title') or '').strip()
         if not (artist and title):
+            has_visible_song = bool(
+                (WINDOW.getProperty(_P.ARTIST) or '').strip()
+                or (WINDOW.getProperty(_P.TITLE) or '').strip()
+                or self._last_qf_result
+            )
+            if qf_authoritative and has_visible_song:
+                self._start_qf_no_hit_hold()
+                age_s = max(0.0, float(time.time() - float(self._qf_no_hit_hold_since_ts or 0.0)))
+                if self._is_qf_no_hit_hold_active():
+                    self._log_qf_diag('hold_suppress_empty_hit_pair', {
+                        'hold_active': True,
+                        'hold_age_s': age_s,
+                        'req_id': self._last_qf_request_id or '-',
+                        'res_id': snapshot.get('response_id') or '-',
+                    })
+                    return
             self._last_qf_result = ''
             WINDOW.clearProperty(_P.QF_RESULT)
+            self._stop_qf_no_hit_hold(reason='empty_hit_pair')
             if qf_authoritative:
                 WINDOW.clearProperty(_P.ARTIST)
                 WINDOW.clearProperty(_P.ARTIST_DISPLAY)
@@ -1734,6 +1945,8 @@ class RadioMonitor(xbmc.Monitor):
                 WINDOW.clearProperty(_P.ARTIST_DISPLAY)
                 WINDOW.clearProperty(_P.TITLE)
             return
+
+        self._stop_qf_no_hit_hold(reason='fresh_hit')
 
         if label != self._last_qf_result:
             self._last_qf_result = label
@@ -3925,6 +4138,23 @@ class RadioMonitor(xbmc.Monitor):
                             source_changed_trigger = False
                             initial_source_pending = False
 
+                        qf_no_hit_hold_active = self._is_qf_no_hit_hold_active()
+                        if (
+                            source_changed_trigger
+                            and trigger_reason == self.TRIGGER_QF_CHANGE
+                            and qf_no_hit_hold_active
+                            and str(last_winner_source or '').startswith('asm-qf')
+                            and not (current_qf_pair[0] and current_qf_pair[1])
+                        ):
+                            self._log_qf_diag('hold_park_trigger', {
+                                'trigger_reason': trigger_reason,
+                                'winner_source': last_winner_source or '-',
+                                'hold_active': True,
+                                'req_id': self._last_qf_request_id or '-',
+                            })
+                            source_changed_trigger = False
+                            initial_source_pending = False
+
                         initial_program_block = (
                             not last_winner_source
                             and (
@@ -4024,6 +4254,30 @@ class RadioMonitor(xbmc.Monitor):
 
                             # Wenn beide None sind (z.B. bei Zahlen-IDs ohne API-Daten), überspringe diesen Titel
                             if artist is None and title is None:
+                                if (
+                                    self._is_qf_no_hit_hold_active()
+                                    and str(last_winner_source or '').startswith('asm-qf')
+                                ):
+                                    self._log_qf_diag('hold_skip_no_usable_clear', {
+                                        'trigger_reason': trigger_reason,
+                                        'winner_source': last_winner_source or '-',
+                                        'hold_active': True,
+                                        'req_id': self._last_qf_request_id or '-',
+                                    })
+                                    self._emit_analysis_event(
+                                        station_name=station_name,
+                                        stream_title=stream_title,
+                                        trigger_reason=trigger_reason,
+                                        decision_source=last_winner_source,
+                                        decision_pair=last_winner_pair,
+                                        current_api_pair=current_api_pair,
+                                        current_icy_pair=current_icy_pair,
+                                        current_mp_pair=current_mp_pair,
+                                        source_changed=False,
+                                        note='qf_no_hit_hold_skip_clear'
+                                    )
+                                    initial_source_pending = False
+                                    continue
                                 log_debug(f"Keine verwertbaren Metadaten fuer '{stream_title}' - RadioMonitor Properties bleiben leer")
                                 # Bei klar fehlenden Songdaten: nur Song-Properties löschen,
                                 # Station + StreamTitle bleiben gesetzt.

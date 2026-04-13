@@ -193,6 +193,18 @@ Im Loop:
 - `_sync_qf_result_property()` setzt bei QF-`hit` sowohl `RadioMonitor.Artist` als auch `RadioMonitor.ArtistDisplay`.
 - Hintergrund: einige Skins rendern `ArtistDisplay` statt `Artist`; beide Felder werden daher im QF-Prefill konsistent befuellt.
 
+8. ASM-QF no-hit-hold / Trigger-Parking
+- Bei autoritativem QF und sichtbar gesetztem Song puffert ASM transientes QF-`no_hit` kurz (`QF_NO_HIT_HOLD_S=8.0`).
+- Waerend des Holds werden sofortige Song-Clears unterdrueckt; betroffen sind u. a. no-hit/leere hit-pair Rueckgaben aus `_sync_qf_result_property()`.
+- Im Metadata-Loop werden bei aktivem Hold Trigger/Clears defensiv geparkt (`hold_park_trigger`, `hold_skip_no_usable_clear`).
+- Song-Ende bleibt unveraendert ueber `SongEndDetector` und `_handle_song_timeout_expiry(...)` moeglich.
+
+9. Zentrale QF-Diagnose
+- QF-Diagnose-Logs laufen zentral ueber `_log_qf_diag(...)` im Format `ASM-QF DIAG key=value`.
+- Wichtige Events: `non_fresh`, `hold_start`, `hold_end`, `hold_reset`, `hold_suppress_no_hit`, `hold_suppress_empty_hit_pair`, `hold_park_trigger`, `hold_skip_no_usable_clear`.
+- `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
+- Snapshot-Felder: `fresh_reason`, `gap_source` (`client_ts`/`server_ts`), `gap_s`.
+
 ### 6.3 API-Fallback-Worker
 
 `api_metadata_worker()` (Intervall 10s):
@@ -421,6 +433,7 @@ Nicht verletzen ohne expliziten Grund:
 - alle DB- und JSON-Schreibzugriffe pruefen `self._persist_data` (Setting `persist_data`); Lesezugriffe sind davon unabhaengig
 - Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
 - Song-Recounts innerhalb `SONG_RECOUNT_WINDOW_S` nicht erneut zaehlen
+- QF-Diagnose nur zentral ueber `_log_qf_diag(...)` schreiben (Marker `ASM-QF DIAG`), keine unstrukturierten Parallel-Logs fuer dieselben Entscheidungen
 
 ## 11) Debugging-Playbook
 
@@ -437,6 +450,8 @@ Nicht verletzen ohne expliziten Grund:
    - `Song DB ... fehlgeschlagen` (open/exec/commit/write/touch)
    - `MusicBrainz Entscheidung`
    - `Song-Timeout abgelaufen`
+   - `ASM-QF DIAG event=non_fresh` (mit `fresh_reason`, `gap_source`, `gap_s`)
+   - `ASM-QF DIAG event=hold_*` (Hold-Lifecycle und Hold-Entscheidungen)
 
 Skin-Debug-Anzeige:
 ```xml

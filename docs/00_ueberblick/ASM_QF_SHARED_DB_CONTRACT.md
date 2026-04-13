@@ -1,6 +1,6 @@
 # ASM <-> ASM-QF Shared DB Contract
 
-Stand: 2026-04-11
+Stand: 2026-04-13
 
 ## Ziel
 
@@ -82,3 +82,9 @@ Minimaler Upsert pro verifizierter Quelle:
 
 - SQLite in WAL-Mode ist aktiv.
 - Leser und Schreiber koennen parallel arbeiten.
+
+## Nicht-Ziele dieses Vertrags
+
+- QF-Request/Response-Properties (`RadioMonitor.QF.*`) sind Teil des Runtime-Window-Property-Protokolls, nicht Teil dieses DB-Vertrags.
+- Neue Diagnose-/Hold-Logs (`ASM-QF DIAG event=...`, `hold_*`, `non_fresh`) aendern das DB-Schema nicht.
+
