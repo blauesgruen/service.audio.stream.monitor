@@ -21,6 +21,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Klammern-Bereinigung im Titel vor MB-Suche: Metadaten-Tags wie "(Radio Edit)" oder "(Remastered 2011)" werden iterativ entfernt, inhaltliche Klammern wie "(Love theme)" bleiben erhalten
 - ✅ radio.de- und TuneIn-Now-Playing API als priorisierte Metadaten-Quelle (vor ICY), jedoch nur fuer whitelisted Addons; TuneIn-Abfrage ueber `Describe.ashx` mit Partner-ID (korrekte `has_song`/Now-Playing-Antworten)
 - ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`asm-qf`/`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen; ICY-Songwechsel werden sofort erkannt (kein Multi-Poll-Confirm, da ICY-Metadaten nur einmal pro Songwechsel ankommen)
+- ✅ Aktiver ASM-QF-Lock ist strikt: bei `last_winner_source=asm-qf` beeinflusst ein reiner ICY-`StreamTitle`-Wechsel die Trigger-Entscheidung nicht
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
 - ✅ MusicPlayer als eigenstaendige Entscheidungsquelle ist per Feature-Flag vorhanden, aktuell aber standardmaessig deaktiviert (`MP_DECISION_ENABLED=false`); der MusicPlayer-Fallback ohne ICY/API bleibt aktiv
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
@@ -43,6 +44,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
 - ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
 - ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den bereinigten Sendernamen (`RadioMonitor.QF.Request.Station`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
+- ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
+- ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt (nicht strikt an `fresh`-Request-ID-Match gebunden)
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties

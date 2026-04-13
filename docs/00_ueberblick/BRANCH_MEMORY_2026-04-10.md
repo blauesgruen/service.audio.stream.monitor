@@ -20,10 +20,12 @@ Zweck: dauerhafte Notizen aus dem bisherigen Feature-Branch, damit beim Neustart
    - normalisierter Stationsnamen-Abgleich gegen Kandidaten
    - Beispiele: `MDR JUMP POP - Die Abendshow`, `NDR 90,3 - Wir sind Hamburg`
 4. QF-Hits duerfen schnelle Labels setzen (Sofort-Feedback), MB-Anreicherung bleibt nachgelagert.
+4a. Skin-Kompatibilitaet: QF-Prefill muss `RadioMonitor.Artist` und `RadioMonitor.ArtistDisplay` synchron setzen.
 5. Analyse-Labels muessen den **aktuellen** Entscheidungsstand spiegeln (kein stale Source-State).
 6. Source-Policy und Senderprofile bleiben sinnvoll:
    - stabilisieren Quellenwechsel
    - reduzieren Flattern in Programm-/Jingle-Phasen
+6a. Bei `last_winner_source=asm-qf` darf ein reiner ICY-`StreamTitle`-Wechsel keinen Songwechsel triggern.
 7. MB bleibt wichtig fuer Qualitaet/Anreicherung, aber Live-Erkennung darf nicht an MB-Latenz haengen.
 
 ## Was sich in diesem Branch bewaehrt hat
@@ -46,4 +48,3 @@ Zweck: dauerhafte Notizen aus dem bisherigen Feature-Branch, damit beim Neustart
 4. Trigger-Regel fuer QF-Requests:
    - nur bei aktivem HTTP/HTTPS-Audio-Stream
    - und/oder nur bei expliziter ASM-Anfrage (je nach finalem Modus)
-

@@ -145,6 +145,7 @@ Im Loop:
 
 1. Kandidatenbildung (ASM-QF + API + ICY + optional MusicPlayer)
 - ASM-QF-Kandidaten (bei aktivem QF): Exklusiv-Modus, wenn ein valides QF-Paar vorliegt (andere Kandidaten werden verworfen)
+- Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, damit QF-Songwechsel nicht an Request-Race-Conditions scheitern
 - MusicPlayer-Kandidaten (direkt + swapped)
 - API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
 - ICY-Kandidaten aus `metadata.parse_stream_title_complex()` (direkt + optional swapped)
@@ -184,8 +185,13 @@ Im Loop:
 - API-Konflikte werden nur noch gegen verlaessliche Vergleichsquellen geprueft:
   - Vergleich via MusicPlayer nur wenn nicht `mp_absent`/`mp_noise`
   - Vergleich via ICY nur wenn nicht `icy_structural_generic`
+- Bei `last_winner_source=asm-qf` beeinflusst ein reiner ICY-`StreamTitle`-Wechsel die Trigger-Entscheidung nicht (QF-Lock strikt).
 - Bei gesetzter Gewinnerquelle bleiben Trigger konservativ; Quelle wechselt nur bei bestaetigten, plausiblen Signalen.
 - **ICY-Confirm (required=1):** Der Haupt-Loop laeuft bei ICY-Quellen nur wenn `meta_length>0` (neuer ICY-Block kommt). Multi-Poll-Confirm (required=2) wuerde strukturell nie feuern, weil der Loop bis zum naechsten ICY-Block nicht mehr ausgefuehrt wird. Deshalb gilt fuer ICY-Familie: `required=1` – ein einziger Poll reicht zur Bestaetigung.
+
+7. ASM-QF Prefill / Skin-Kompatibilitaet
+- `_sync_qf_result_property()` setzt bei QF-`hit` sowohl `RadioMonitor.Artist` als auch `RadioMonitor.ArtistDisplay`.
+- Hintergrund: einige Skins rendern `ArtistDisplay` statt `Artist`; beide Felder werden daher im QF-Prefill konsistent befuellt.
 
 ### 6.3 API-Fallback-Worker
 
