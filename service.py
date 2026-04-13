@@ -1728,8 +1728,12 @@ class RadioMonitor(xbmc.Monitor):
         """
         _ = invalid_values
         snapshot = self._qf_response_snapshot()
-        if require_fresh and not snapshot.get('fresh'):
-            if not (allow_recent_nonfresh_hit and self._is_qf_usable_nonfresh_hit(snapshot)):
+        if not snapshot.get('fresh'):
+            usable_nonfresh = self._is_qf_usable_nonfresh_hit(snapshot)
+            if require_fresh:
+                if not (allow_recent_nonfresh_hit and usable_nonfresh):
+                    return ('', '')
+            elif not usable_nonfresh:
                 return ('', '')
         if snapshot.get('status') != 'hit':
             return ('', '')

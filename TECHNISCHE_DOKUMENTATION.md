@@ -145,7 +145,8 @@ Im Loop:
 
 1. Kandidatenbildung (ASM-QF + API + ICY + optional MusicPlayer)
 - ASM-QF-Kandidaten (bei aktivem QF): Exklusiv-Modus, wenn ein valides QF-Paar vorliegt (andere Kandidaten werden verworfen)
-- Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, damit QF-Songwechsel nicht an Request-Race-Conditions scheitern
+- Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, aber nur fuer plausible Kurzzeit-Races: `status=hit`, valides Paar, `fresh_reason` in (`id_mismatch_waiting`, `id_mismatch_ts_ok`) und `gap_s <= QF_HIT_MISMATCH_GRACE_S`.
+- Nicht-plausible non-fresh Hits (z. B. alte mismatches mit grossem `gap_s`) werden auch im Lock verworfen, um stale QF-Hits und Fehltrigger in Moderationsphasen zu vermeiden.
 - MusicPlayer-Kandidaten (direkt + swapped)
 - API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
 - ICY-Kandidaten aus `metadata.parse_stream_title_complex()` (direkt + optional swapped)
@@ -204,6 +205,7 @@ Im Loop:
 - Wichtige Events: `non_fresh`, `hold_start`, `hold_end`, `hold_reset`, `hold_suppress_no_hit`, `hold_suppress_empty_hit_pair`, `hold_park_trigger`, `hold_skip_no_usable_clear`.
 - `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
 - Snapshot-Felder: `fresh_reason`, `gap_source` (`client_ts`/`server_ts`), `gap_s`.
+- `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
 
 ### 6.3 API-Fallback-Worker
 
