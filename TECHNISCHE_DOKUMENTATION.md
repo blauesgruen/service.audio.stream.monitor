@@ -145,7 +145,7 @@ Im Loop:
 
 1. Kandidatenbildung (ASM-QF + API + ICY + optional MusicPlayer)
 - ASM-QF-Kandidaten (bei aktivem QF): Exklusiv-Modus, wenn ein valides QF-Paar vorliegt (andere Kandidaten werden verworfen)
-- Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, aber nur fuer plausible Kurzzeit-Races: `status=hit`, valides Paar, `fresh_reason` in (`id_mismatch_waiting`, `id_mismatch_ts_ok`) und `gap_s <= QF_HIT_MISMATCH_GRACE_S`.
+- Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, aber nur fuer plausible Kurzzeit-Races: `status=hit`, valides Paar, `fresh_reason=id_mismatch_waiting` und `gap_s <= QF_HIT_MISMATCH_GRACE_S`.
 - Nicht-plausible non-fresh Hits (z. B. alte mismatches mit grossem `gap_s`) werden auch im Lock verworfen, um stale QF-Hits und Fehltrigger in Moderationsphasen zu vermeiden.
 - MusicPlayer-Kandidaten (direkt + swapped)
 - API-Kandidat nur wenn Source whitelisted ist und ein valider API-Titel vorliegt
@@ -153,8 +153,9 @@ Im Loop:
 
 2. MB-Winner
 - jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
-- Kandidaten gelten als valide, wenn sie die Schwellwerte erreichen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`) **oder** aus `asm-qf*` stammen
-- Quell-Prioritaet bei Gleichstand: `asm-qf > musicplayer > icy > api`; bei vorhandenen ASM-QF-Kandidaten greift zusaetzlich eine explizite ASM-QF-Dominanz
+- ASM-QF-Kandidaten werden ohne MB-Score-Gating sofort als Winner uebernommen (Sofortentscheidung)
+- Non-QF-Kandidaten gelten als valide, wenn sie die Schwellwerte erreichen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
+- Quell-Prioritaet bei Gleichstand (Non-QF): `musicplayer > icy > api`
 - MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte
 
 3. Sonderfall alle MB-Scores = 0
@@ -204,10 +205,25 @@ Im Loop:
 - QF-Diagnose-Logs laufen zentral ueber `_log_qf_diag(...)` im Format `ASM-QF DIAG key=value`.
 - Wichtige Events: `non_fresh`, `hold_start`, `hold_end`, `hold_reset`, `hold_suppress_no_hit`, `hold_suppress_empty_hit_pair`, `hold_park_trigger`, `hold_skip_no_usable_clear`.
 - `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
-- Snapshot-Felder: `fresh_reason`, `gap_source` (`client_ts`/`server_ts`), `gap_s`.
+- Snapshot-Felder: `fresh_reason`, `gap_source` (`server_ts`/`none`), `gap_s`.
 - `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
 
-### 6.3 API-Fallback-Worker
+### 6.3 ASM-QF Runtime-Contract (Request/Response)
+
+Verbindlicher Laufzeitvertrag fuer `RadioMonitor.QF.*`:
+
+- Jede von ASM gesetzte `RadioMonitor.QF.Request.Id` MUSS genau eine terminale Response erhalten.
+- Die terminale Response MUSS `RadioMonitor.QF.Response.Id` auf dieselbe Request-ID setzen.
+- Zulaessige terminale Statuswerte: `hit`, `no_hit`, `resolve_error`, `error`, `timeout`, `superseded`, `cancelled`.
+- Mindestfelder pro Response: `Response.Id`, `Response.Status`, `Response.Ts`.
+- Bei `status=hit` sind `Response.Artist` und `Response.Title` verpflichtend.
+- Ein stilles Supersede/Cancel ohne Response ist nicht erlaubt: ASM bleibt sonst bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster.
+
+Diagnose-Hinweis:
+
+- `non_fresh` ist nicht automatisch ein Fehler; entscheidend sind `fresh_reason`, `gap_source`, `gap_s` und das Fallback-Fenster.
+
+### 6.4 API-Fallback-Worker
 
 `api_metadata_worker()` (Intervall 10s):
 - aktiviert nur wenn API-Source whitelisted ist und API-Basis vorhanden ist
@@ -220,7 +236,7 @@ Im Loop:
   - Artist/MBID werden bewusst nicht aggressiv geloescht (stabileres AS-Verhalten)
 - `RadioMonitor.ApiNowPlaying` zeigt nur echte API-Titel (radio.de/TuneIn), nicht MusicPlayer-Fallback
 
-### 6.4 MusicPlayer-Fallback-Worker
+### 6.5 MusicPlayer-Fallback-Worker
 
 `_musicplayer_metadata_fallback()` (Intervall 5s):
 - fuer Streams ohne ICY und ohne API-Basis
@@ -231,7 +247,7 @@ Im Loop:
   - aktualisiert Logo optional aus `Player.Icon` (z.B. AzuraCast per-song Cover)
 - wenn keine verwertbaren Artist/Title-Daten mehr vorhanden: deaktiviert `Playing`
 
-### 6.5 Senderprofile und adaptive Policy
+### 6.6 Senderprofile und adaptive Policy
 
 `StationProfileStore` sammelt pro Station Session-Metriken und speichert sie in `profile_store/*.json`.
 
@@ -259,7 +275,7 @@ API-only Startup-Heuristik:
   - in der Session wurde noch kein valider ICY-Song gesehen
 - Alternativ kann ein bestehendes Stationsprofil den API-only-Fall direkt freigeben (`confidence >= 0.20` plus Rollen-Flags).
 
-### 6.6 SQLite-Datenbank (`song_data.db`)
+### 6.7 SQLite-Datenbank (`song_data.db`)
 
 `SongDB` verwaltet drei Tabellen:
 
@@ -290,7 +306,7 @@ Migration:
 - `_migrate()` erkennt altes Generic-Schema (`seen_generic`/`seen_song`) und baut `generic_strings` neu auf
 - `_migrate()` ergaenzt bei bestehenden Installationen die Spalte `last_seen_ts` in `songs`
 
-### 6.7 TuneIn-Integration
+### 6.8 TuneIn-Integration
 
 **Station-ID-Ermittlung (4 Quellen, first-wins):**
 1. Plugin-URL bei `onPlayBackStarted`: wenn `plugin.audio.tunein2017` in URL → `extract_station_id(playing_file)`
@@ -436,6 +452,7 @@ Nicht verletzen ohne expliziten Grund:
 - Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)
 - Song-Recounts innerhalb `SONG_RECOUNT_WINDOW_S` nicht erneut zaehlen
 - QF-Diagnose nur zentral ueber `_log_qf_diag(...)` schreiben (Marker `ASM-QF DIAG`), keine unstrukturierten Parallel-Logs fuer dieselben Entscheidungen
+- Keine QF-Request-ID ohne terminale QF-Response-ID hinterlassen (auch bei `superseded`/`cancelled`/`error`/`no_hit`); sonst droht no-response-Warten bis `QF_NO_RESPONSE_FALLBACK_S`
 
 ## 11) Debugging-Playbook
 
