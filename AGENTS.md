@@ -20,12 +20,14 @@
 - `self._persist_data` gate't DB/Profile-Schreibzugriffe (u. a. `song_data.db`, `station_profiles`); Analyse-Events (`analysis_events.jsonl`) sind davon nicht betroffen.
 - ASM-QF `no_hit` ist im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S` in `service.py`): transientes `no_hit` darf Artist/Title nicht sofort leeren.
 - QF-Diagnose-Logs laufen zentral ueber `ASM-QF DIAG event=...` (key=value); neue QF-Logs nicht als freie Textlogs duplizieren.
+- QF-Request/Response-Vertrag einhalten: jede `RadioMonitor.QF.Request.Id` braucht genau eine terminale `RadioMonitor.QF.Response.Id` (auch `superseded`/`cancelled`/`error`/`no_hit`). Kein stilles Verwerfen.
 
 ## Datenfluss und Fallbacks (entscheidend)
 - Primaer ICY (`metadata_worker`) -> MB-Winner + `SourcePolicy.decide_trigger(...)`.
 - Wenn kein `icy-metaint`: API-Fallback nur fuer whitelisted Quellen (`api_metadata_worker`).
 - Wenn weder ICY noch API-Basis: MusicPlayer-Fallback (`_musicplayer_metadata_fallback`).
 - Optionaler externer QF-Pfad: Request/Response via Window-Properties `RadioMonitor.QF.*`; QF kann im Lock autoritativ sein.
+- Supersede-Regel: wird ein laufender QF-Request intern ueberholt, muss die alte Request-ID explizit mit terminalem Status beantwortet werden, sonst bleibt ASM bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster.
 - Aktiver ASM-QF-Lock: reiner ICY-`StreamTitle`-Wechsel triggert keinen Quellenwechsel; QF-Paarwechsel darf im Lock auch ohne strikten `fresh`-Request-ID-Match erkannt werden.
 - QF-Prefill fuer Skin-Kompatibilitaet: bei QF-`hit` werden `RadioMonitor.Artist` und `RadioMonitor.ArtistDisplay` synchron gesetzt.
 - Bei aktivem QF-no-hit-hold werden Trigger/Clears defensiv geparkt (`hold_park_trigger`, `hold_skip_no_usable_clear`), Song-Ende-Signale (Detektor/Timeout) bleiben davon unberuehrt.

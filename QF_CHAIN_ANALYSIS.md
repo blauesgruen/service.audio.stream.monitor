@@ -1,5 +1,14 @@
 # QF-Kette (ASM-QF) - Umfassende Analyse
 
+> Statushinweis (2026-04-14): Dieses Dokument ist eine historische Fehleranalyse.
+> Es ist **nicht** die autoritative Vertragsquelle fuer den aktuellen Runtime-Vertrag.
+> Verbindlich sind:
+> - `TECHNISCHE_DOKUMENTATION.md` (Abschnitt `6.3 ASM-QF Runtime-Contract`)
+> - `docs/00_ueberblick/ASM_QF_SHARED_DB_CONTRACT.md` (Ergaenzender Runtime-Property-Vertrag)
+>
+> Insbesondere gilt aktuell: Jede `RadioMonitor.QF.Request.Id` muss genau eine terminale Response erhalten
+> (`hit`, `no_hit`, `resolve_error`, `error`, `timeout`, `superseded`, `cancelled`).
+
 ## 1. Übersicht der QF-Logik-Kette
 
 Die QF-Integration im Audio Stream Monitor hat mehrere kritische Pfade:

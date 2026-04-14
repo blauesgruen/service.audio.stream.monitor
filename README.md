@@ -44,6 +44,8 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
 - ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
 - ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den bereinigten Sendernamen (`RadioMonitor.QF.Request.Station`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
+- ✅ Verbindlicher ASM↔ASM-QF Laufzeitvertrag: jede `RadioMonitor.QF.Request.Id` wird mit genau einer terminalen Response abgeschlossen (`hit`/`no_hit`/`resolve_error`/`error`/`timeout`/`superseded`/`cancelled`)
+- ✅ Supersede ohne Response ist unzulaessig: auch ueberholte Requests muessen als `superseded` oder `cancelled` beantwortet werden, damit ASM nicht bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster bleibt
 - ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
 - ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt (nicht strikt an `fresh`-Request-ID-Match gebunden)
 - ✅ QF-`no_hit` wird im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S=8s`), damit transiente Responses keine kurzen Label-Leerungen verursachen
@@ -168,6 +170,13 @@ Parsing-Regeln:
 - Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
 - Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
 - Shared-DB fuer verifizierte Senderquellen: Tabelle `verified_station_sources` in `song_data.db` (unter `~userdata/addon_data/service.audio.stream.monitor/`). ASM nutzt URL-Matches als Stations-Hint; ASM-QF kann in dieselbe Tabelle schreiben.
+
+### ASM-QF Runtime-Contract (Request/Response)
+
+- Jede von ASM gesetzte `RadioMonitor.QF.Request.Id` muss genau eine terminale Response mit derselben `RadioMonitor.QF.Response.Id` erhalten.
+- Zulassige terminale Statuswerte: `hit`, `no_hit`, `resolve_error`, `error`, `timeout`, `superseded`, `cancelled`.
+- Pflichtfelder pro Response: `Response.Id`, `Response.Status`, `Response.Ts`; bei `status=hit` zusaetzlich `Response.Artist`, `Response.Title`.
+- `non_fresh` ist nicht automatisch ein Fehler; fuer Diagnose `ASM-QF DIAG event=non_fresh` mit `fresh_reason`, `gap_source`, `gap_s` verwenden.
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.

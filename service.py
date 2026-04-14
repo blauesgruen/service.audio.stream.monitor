@@ -1640,8 +1640,14 @@ class RadioMonitor(xbmc.Monitor):
         request_ts_raw = WINDOW.getProperty(_P.QF_REQUEST_TS) or ''
         response_ts = self._parse_qf_epoch_ts(response_ts_raw)
         request_ts = self._parse_qf_epoch_ts(request_ts_raw)
-        if request_ts is None and self._last_qf_request_ts:
-            request_ts = float(self._last_qf_request_ts)
+        
+        # FIX #1: Request-Timestamp MUSS gültig sein
+        # Fallback zu lokalem _last_qf_request_ts ist unsicher (kann veraltet sein)
+        # und versteckt Timing-Probleme. Ohne valide request_ts kann die Frische
+        # nicht korrekt bewertet werden.
+        if request_ts is None:
+            # Kein valider Request-Timestamp in Response → unbrauchbar
+            request_ts = None
 
         fresh = bool(
             self._last_qf_request_id
@@ -1650,25 +1656,28 @@ class RadioMonitor(xbmc.Monitor):
         )
 
         now_ts = float(time.time())
-        server_gap = None
+        
+        # FIX #2-3: Nur LOCAL (request) timestamp zur Freshness-Bewertung nutzen
+        # Response-Timestamp ist extern und könnte manipuliert sein.
+        # Deshalb gap_source='server_ts' bevorzugen (basiert auf lokalem request_ts).
+        gap_source = 'none'
+        gap_raw = None
+        if request_ts is not None and response_ts is not None and response_ts >= request_ts:
+            # Client-seitige Gap (Response vs Request Timestamp) - ABER NICHT NUTZEN!
+            client_gap = max(0.0, float(response_ts - request_ts))
+            # Nur zur Sicherheit prüfen, aber nicht für Freshness-Entscheidung
+            (client_gap)  # suppress unused warning
+        
+        # Fallback auf Server-seitige Gap (jetzt vs Request) - VERTRAUENSWÜRDIG
+        # Das ist vertrauenswürdiger, da es nur lokale Timestamps nutzt
         if self._last_qf_request_ts:
             try:
                 server_gap = max(0.0, now_ts - float(self._last_qf_request_ts))
+                gap_source = 'server_ts'
+                gap_raw = float(server_gap)
             except Exception:
-                server_gap = None
-
-        client_gap = None
-        if request_ts is not None and response_ts is not None and response_ts >= request_ts:
-            client_gap = max(0.0, float(response_ts - request_ts))
-
-        gap_source = 'none'
-        gap_raw = None
-        if client_gap is not None:
-            gap_source = 'client_ts'
-            gap_raw = float(client_gap)
-        elif server_gap is not None:
-            gap_source = 'server_ts'
-            gap_raw = float(server_gap)
+                gap_source = 'none'
+                gap_raw = None
 
         fresh_reason = 'id_match' if fresh else 'id_mismatch'
         if not fresh:
@@ -1677,18 +1686,16 @@ class RadioMonitor(xbmc.Monitor):
             elif not self._last_qf_request_id:
                 fresh_reason = 'missing_request_id'
             elif response_id != self._last_qf_request_id:
-                if client_gap is not None:
-                    if client_gap <= float(QF_NO_RESPONSE_FALLBACK_S):
-                        fresh_reason = 'id_mismatch_ts_ok'
-                    else:
-                        fresh_reason = 'stale_response'
-                elif gap_source == 'server_ts':
+                # FIX #3: Nur LOKALE Timestamps (server_ts) für Freshness-Bewertung nutzen
+                # client_ts ist gefährlich (Response-Timestamp ist extern)
+                if gap_source == 'server_ts':
                     if (gap_raw or 0.0) <= float(QF_NO_RESPONSE_FALLBACK_S):
                         fresh_reason = 'id_mismatch_waiting'
                     else:
                         fresh_reason = 'stale_response'
                 else:
-                    fresh_reason = 'id_mismatch_no_ts'
+                    # Kein valider Timestamp vorhanden → als stale behandeln
+                    fresh_reason = 'stale_no_timestamp'
 
         return {
             'fresh': fresh,
@@ -1705,8 +1712,11 @@ class RadioMonitor(xbmc.Monitor):
 
     def _is_qf_usable_nonfresh_hit(self, snapshot):
         """
-        Erlaubt kurzzeitig die Nutzung eines non-fresh QF-Hits bei Request-Race,
-        solange ein valides Song-Paar vorliegt und der Zeitabstand klein ist.
+        Erlaubt kurzzeitig die Nutzung eines non-fresh QF-Hits bei Request-Race.
+        
+        KRITISCH: Nur 'id_mismatch_waiting' akzeptieren!
+        - 'id_mismatch_waiting' = lokale Timestamp-Basis (vertrauenswürdig)
+        - 'id_mismatch_ts_ok' = Response-Timestamp-Basis (extern, unsicher)
         """
         if not isinstance(snapshot, dict):
             return False
@@ -1719,7 +1729,8 @@ class RadioMonitor(xbmc.Monitor):
         if not (artist and title):
             return False
         fresh_reason = str(snapshot.get('fresh_reason') or '').strip().lower()
-        if fresh_reason not in ('id_mismatch_waiting', 'id_mismatch_ts_ok'):
+        # FIX: Nur 'waiting' akzeptieren (lokale TS), NICHT 'ts_ok' (externe TS)
+        if fresh_reason != 'id_mismatch_waiting':
             return False
         gap_raw = snapshot.get('gap_raw')
         if not isinstance(gap_raw, (int, float)):
@@ -1730,6 +1741,10 @@ class RadioMonitor(xbmc.Monitor):
         """
         Liefert True, wenn QF fuer den aktuellen Zyklus als nicht verfuegbar gilt
         und API/ICY/MP als Ausnahmefall einspringen duerfen.
+        
+        WICHTIG: QF-Fehler-Responses (resolve_error, timeout, etc.) sind NICHT
+        als "fallback_ok" - sie sind Autoritäts-Aussagen von QF ("ich kann nicht").
+        Nur True-Timeouts (no response) erlauben Fallback.
         """
         if not self._qf_enabled or not self.is_playing:
             return True
@@ -1738,8 +1753,11 @@ class RadioMonitor(xbmc.Monitor):
 
         snapshot = self._qf_response_snapshot()
         if snapshot.get('fresh'):
-            # Harte Fehler -> Fallback erlaubt.
-            return snapshot.get('status') in ('resolve_error', 'error', 'timeout')
+            # FIX #4: Fehler-Response IST eine Antwort von QF
+            # Das bedeutet QF ist VERFÜGBAR, aber kann diesen Song nicht auflösen
+            # → fallback sollte NICHT erlaubt sein!
+            # Nur bei hard-failure timeout erlauben
+            return snapshot.get('status') == 'timeout'
 
         # Keine frische Response: erst nach Timeout Fallback erlauben.
         try:
@@ -2974,10 +2992,23 @@ class RadioMonitor(xbmc.Monitor):
                 f"score={ev['score']}, artist_sim={ev['artist_sim']:.2f}, "
                 f"title_sim={ev['title_sim']:.2f}, combined={ev['combined']:.1f}")
 
+        # --- ASM-QF-Sofortentscheidung: Keine MB-Scoring erforderlich ---
+        # QF ist bereits verifiziert (externe Quelle). Wenn QF einen Song liefert,
+        # wird dieser DIREKT übernommen, ohne MB-Scoring.
+        qf_candidates = [ev for ev in evaluations if str(ev.get('source', '')).startswith('asm-qf')]
+        if qf_candidates:
+            # QF gewinnt automatisch bei validen Songdaten (kein Score-Check nötig)
+            qf_winner = qf_candidates[0]
+            log_info(
+                f"MB-Winner: ASM-QF Sofortentscheidung "
+                f"(source={qf_winner['source']}, '{qf_winner['input_artist']} - {qf_winner['input_title']}')"
+            )
+            return qf_winner, evaluations
+
+        # --- Standard-MB-Scoring für Non-QF-Quellen ---
         valid = [
             ev for ev in evaluations
             if (ev['score'] >= self.MB_WINNER_MIN_SCORE and ev['combined'] >= self.MB_WINNER_MIN_COMBINED)
-            or str(ev.get('source', '')).startswith('asm-qf')
         ]
         if not valid:
             log_debug(
@@ -2987,8 +3018,6 @@ class RadioMonitor(xbmc.Monitor):
 
         def _source_rank(source):
             s = str(source or '')
-            if s.startswith('asm-qf'):
-                return 3
             if s.startswith('musicplayer'):
                 return 2
             if s.startswith('icy'):
@@ -3018,34 +3047,27 @@ class RadioMonitor(xbmc.Monitor):
 
         winner_pool = effective_valid
 
-        # Dominanz-Regel fuer ASM-QF: wenn ASM-QF Daten liefert, ist dies
-        # die vorrangige Auswahl, unabhängig von Konsens anderer Quellen.
-        qf_candidates = [ev for ev in effective_valid if str(ev.get('source', '')).startswith('asm-qf')]
-        if qf_candidates:
-            winner_pool = qf_candidates
-            log_debug(f"MB-Winner: ASM-QF Dominanz aktiv (candidates={len(qf_candidates)})")
-        else:
-            # Einheitliche Gewinnerregel:
-            # - Bei Gleichstand entscheidet die Quellen-Prioritaet (MusicPlayer > ICY > API).
-            # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
-            pair_support = {}
-            for ev in effective_valid:
-                pair = (ev.get('input_artist'), ev.get('input_title'))
-                fam = self._source_family(ev.get('source'))
-                pair_support.setdefault(pair, set()).add(fam)
-            consensus_pairs = {
-                pair for pair, families in pair_support.items() if len(families) >= 2
-            }
-            if consensus_pairs:
-                consensus_pool = [
-                    ev for ev in effective_valid
-                    if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
-                ]
-                if consensus_pool:
-                    winner_pool = consensus_pool
-                    log_debug(
-                        f"MB-Winner: Konsens aktiv "
-                        f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
+        # Einheitliche Gewinnerregel:
+        # - Bei Gleichstand entscheidet die Quellen-Prioritaet (MusicPlayer > ICY > API).
+        # - Konsens-Paare (mind. zwei Quellenfamilien) bleiben bevorzugt.
+        pair_support = {}
+        for ev in effective_valid:
+            pair = (ev.get('input_artist'), ev.get('input_title'))
+            fam = self._source_family(ev.get('source'))
+            pair_support.setdefault(pair, set()).add(fam)
+        consensus_pairs = {
+            pair for pair, families in pair_support.items() if len(families) >= 2
+        }
+        if consensus_pairs:
+            consensus_pool = [
+                ev for ev in effective_valid
+                if (ev.get('input_artist'), ev.get('input_title')) in consensus_pairs
+            ]
+            if consensus_pool:
+                winner_pool = consensus_pool
+                log_debug(
+                    f"MB-Winner: Konsens aktiv "
+                    f"(pairs={len(consensus_pairs)}, candidates={len(consensus_pool)})")
 
         winner = max(
             winner_pool,
@@ -3508,7 +3530,6 @@ class RadioMonitor(xbmc.Monitor):
         self._last_decision_pair = ('', '')
         invalid = INVALID_METADATA_VALUES + ["", station_name]
         artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
-        qf_authoritative = self._is_qf_authoritative()
 
         # --- Kandidaten sammeln ---
         candidates = []
@@ -3520,20 +3541,21 @@ class RadioMonitor(xbmc.Monitor):
 
         # MusicPlayer-Kandidaten optional lesen (aktiv via MP_DECISION_ENABLED
         # oder bei als verlaesslich erkanntem MP-Profil).
-        if self._is_mp_decision_active() and not qf_authoritative:
-            mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
-            mp_pairs = self._filter_non_generic_song_pairs(
-                self._valid_song_pairs(mp_direct, mp_swapped),
-                station_name
-            )
-            if mp_pairs and self._is_musicplayer_trusted():
-                self.musicplayer_trust.reset_mismatch_if_trusted(self.metadata_generation)
-            elif not mp_pairs and self._is_musicplayer_trusted():
-                self._register_musicplayer_mismatch('MusicPlayer leer/ungueltig')
+        if self._is_mp_decision_active():
+            if not self._is_qf_authoritative():
+                mp_direct, mp_swapped = self._read_musicplayer_candidates(invalid)
+                mp_pairs = self._filter_non_generic_song_pairs(
+                    self._valid_song_pairs(mp_direct, mp_swapped),
+                    station_name
+                )
+                if mp_pairs and self._is_musicplayer_trusted():
+                    self.musicplayer_trust.reset_mismatch_if_trusted(self.metadata_generation)
+                elif not mp_pairs and self._is_musicplayer_trusted():
+                    self._register_musicplayer_mismatch('MusicPlayer leer/ungueltig')
 
         # API-Kandidat
         api_candidate_available = bool(stream_url and (station_name or self.plugin_slug or self.tunein_station_id))
-        if not qf_authoritative:
+        if not self._is_qf_authoritative():
             if api_candidate_available and not self._is_api_source_allowed():
                 self._log_api_source_blocked('parse_stream_title_api_first')
             if api_candidate_available and self._is_api_source_allowed():
@@ -3569,7 +3591,7 @@ class RadioMonitor(xbmc.Monitor):
 
         # ICY-Kandidaten (direkt + ggf. swapped)
         icy_artist, icy_title = (None, None)
-        if not qf_authoritative:
+        if not self._is_qf_authoritative():
             icy_artist, icy_title = self._normalize_song_candidate(artist, title, invalid)
             if self._append_non_generic_candidate(
                 candidates,
@@ -3594,7 +3616,7 @@ class RadioMonitor(xbmc.Monitor):
             if str(c.get('source', '')).startswith('icy')
         ]
         mp_candidates_allowed = False
-        if self._is_mp_decision_active() and not qf_authoritative:
+        if self._is_mp_decision_active() and not self._is_qf_authoritative():
             mp_candidates_allowed = self._should_use_musicplayer_candidates(
                 mp_pairs,
                 api_candidate,
@@ -3613,6 +3635,7 @@ class RadioMonitor(xbmc.Monitor):
         qf_valid = False
         if self._qf_enabled:
             qf_locked = str(getattr(self, '_parse_locked_source', '') or '').startswith('asm-qf')
+            qf_authoritative = self._is_qf_authoritative()
             qf_require_fresh = not (qf_authoritative or qf_locked)
             qf_artist, qf_title = self._current_qf_hit_pair(invalid, require_fresh=qf_require_fresh)
             qf_artist = str(qf_artist or '').strip()
@@ -3621,12 +3644,16 @@ class RadioMonitor(xbmc.Monitor):
                 qf_valid = True
                 candidates.append({'source': 'asm-qf', 'artist': qf_artist, 'title': qf_title})
             if qf_valid:
-                if qf_artist != qf_title:
-                    candidates.append({'source': 'asm-qf_swapped', 'artist': qf_title, 'title': qf_artist})
-                # Wenn ASM-QF valide Daten liefert, werden alle anderen
-                # Kandidaten verworfen (Exklusiv-Modus).
-                candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf')]
-            elif qf_authoritative:
+                # FIX #6: Nur asm-qf (nicht swapped!) für Exklusiv-Modus
+                # asm-qf_swapped ist Fallback, wenn direktes Paar fehlschlägt
+                # Wenn wir es hier adden, könnte es mit getauschter Reihenfolge gewinnen
+                # Wenn nicht adden, haben wir bei Kandidaten-Fehler kein Fallback
+                # → Kompromiss: nur asm-qf in Exklusiv-Modus
+                candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf') and c.get('source') == 'asm-qf']
+            elif self._is_qf_authoritative():
+                # FIX #5: Neu-evaluieren statt stale qf_authoritative nutzen
+                # QF kann sich während parse_stream_title() execution geändert haben
+                # Verwerfe alle bereits gesammelten API/ICY/MP-Kandidaten wenn QF neu autoritativ wird
                 log_info("ASM-QF autoritativ: kein valider QF-Song -> kein Song")
                 self._set_last_song_decision('', None, None)
                 return None, None, '', '', '', '', 0

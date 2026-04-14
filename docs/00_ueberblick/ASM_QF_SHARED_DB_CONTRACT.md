@@ -1,6 +1,6 @@
 # ASM <-> ASM-QF Shared DB Contract
 
-Stand: 2026-04-13
+Stand: 2026-04-14
 
 ## Ziel
 
@@ -87,4 +87,40 @@ Minimaler Upsert pro verifizierter Quelle:
 
 - QF-Request/Response-Properties (`RadioMonitor.QF.*`) sind Teil des Runtime-Window-Property-Protokolls, nicht Teil dieses DB-Vertrags.
 - Neue Diagnose-/Hold-Logs (`ASM-QF DIAG event=...`, `hold_*`, `non_fresh`) aendern das DB-Schema nicht.
+
+## Ergaenzender Runtime-Property-Vertrag (ASM <-> ASM-QF)
+
+Dieser Abschnitt beschreibt den Laufzeitvertrag fuer `RadioMonitor.QF.*` zusaetzlich zum DB-Vertrag.
+Er aendert kein DB-Schema, ist aber fuer stabile Source-Entscheidungen verpflichtend.
+
+### Request -> genau eine terminale Response
+
+- Jede von ASM gesetzte `RadioMonitor.QF.Request.Id` MUSS in endlicher Zeit genau eine terminale Response erzeugen.
+- Die terminale Response MUSS `RadioMonitor.QF.Response.Id` auf die betroffene Request-ID setzen.
+- Zulaessige terminale Statuswerte:
+  - `hit`
+  - `no_hit`
+  - `resolve_error`
+  - `error`
+  - `timeout`
+  - `superseded`
+  - `cancelled`
+
+### Mindestfelder pro Response
+
+- `RadioMonitor.QF.Response.Id`
+- `RadioMonitor.QF.Response.Status`
+- `RadioMonitor.QF.Response.Ts`
+- Bei `status=hit` zusaetzlich: `RadioMonitor.QF.Response.Artist`, `RadioMonitor.QF.Response.Title`
+
+### Supersede/Cancellation-Regel
+
+- Wenn eine laufende Anfrage intern durch eine neuere Anfrage abgeloest wird, MUSS die alte Anfrage explizit abgeschlossen werden (`status=superseded` oder `status=cancelled`).
+- Ein stilles Verwerfen ohne Response ist nicht erlaubt, weil ASM sonst bis zum Fallback-Fenster (`QF_NO_RESPONSE_FALLBACK_S`) in einem no-response-Wartezustand bleibt.
+
+### Freshness/Diagnose (ASM-Seite)
+
+- ASM bewertet Freshness primaer ueber Request-ID-Match; non-fresh ist nicht automatisch ein Fehler.
+- Fuer Diagnosen sind zentral die Felder `fresh_reason`, `gap_source`, `gap_s` aus `ASM-QF DIAG event=non_fresh` massgeblich.
+- Autoritative no-hit-Phasen koennen kurz gepuffert sein (`QF_NO_HIT_HOLD_S`), damit transiente no-hit-Responses Labels nicht sofort leeren.
 
