@@ -725,6 +725,42 @@ class RadioMonitor(xbmc.Monitor):
             reject_obvious_text=False,
         )
 
+    def _should_clear_song_state_for_status_transition(
+        self,
+        stream_title,
+        station_name,
+        current_mp_pair=('', ''),
+        current_api_pair=('', ''),
+        current_icy_pair=('', ''),
+        current_qf_pair=('', ''),
+        qf_authoritative=False,
+        qf_no_hit_hold_active=False,
+    ):
+        """
+        Erkennt Status-/Non-Song-Transitions, bei denen alte Song-Properties
+        sicher entfernt werden sollten.
+
+        Die Prüfung bleibt bewusst defensiv: Solange eine aktive Song-Quelle
+        (API/ICY/MP/QF) ein valides Paar liefert oder ein QF-no-hit-Hold aktiv ist,
+        wird nicht vorzeitig geleert.
+        """
+        if qf_authoritative and qf_no_hit_hold_active:
+            return False
+
+        if any(
+            self._is_song_pair(pair)
+            for pair in (current_mp_pair, current_api_pair, current_icy_pair, current_qf_pair)
+        ):
+            return False
+
+        return bool(
+            stream_title
+            and (
+                self._is_generic_stream_title(stream_title, station_name)
+                or self._is_obvious_non_song_text(stream_title, station_name)
+            )
+        )
+
     def _append_non_generic_candidate(self, candidates, source, artist, title, station_name=''):
         pair = self._sanitize_pre_mb_pair(
             (artist, title),
@@ -3957,6 +3993,12 @@ class RadioMonitor(xbmc.Monitor):
                 and generation == self.metadata_generation
             ):
                 try:
+                    # Pro Poll-Zyklus explizit zuruecksetzen, damit alte Trigger-Flags
+                    # nicht in Iterationen ohne neuen ICY-Block weiterwirken.
+                    stream_title_changed = False
+                    source_changed_trigger = False
+                    trigger_reason = ''
+
                     audio_data = response.raw.read(metaint)
                     if not audio_data:
                         break
@@ -4677,6 +4719,48 @@ class RadioMonitor(xbmc.Monitor):
                         last_song_key=last_song_key,
                         enable_api_block=True
                     )  # Verhindert wiederholtes Loeschen
+
+                    if (
+                        stream_title_changed
+                        and not source_changed_trigger
+                        and self._should_clear_song_state_for_status_transition(
+                            stream_title,
+                            station_name,
+                            current_mp_pair=current_mp_pair,
+                            current_api_pair=current_api_pair,
+                            current_icy_pair=current_icy_pair,
+                            current_qf_pair=current_qf_pair,
+                            qf_authoritative=qf_authoritative,
+                            qf_no_hit_hold_active=self._is_qf_no_hit_hold_active(),
+                        )
+                    ):
+                        log_debug(
+                            f"StreamTitle-Wechsel als Status erkannt -> Song-Properties geloescht "
+                            f"(station='{station_name}', stream_title='{stream_title}')"
+                        )
+                        self._clear_song_properties(
+                            reason_text=(
+                                f"StreamTitle-Wechsel als Status/Nicht-Song erkannt: "
+                                f"'{stream_title}'"
+                            ),
+                            last_song_key=last_song_key,
+                            enable_api_block=True
+                        )
+                        self._emit_analysis_event(
+                            station_name=station_name,
+                            stream_title=stream_title,
+                            trigger_reason=trigger_reason,
+                            decision_source=last_winner_source,
+                            decision_pair=last_winner_pair,
+                            current_api_pair=current_api_pair,
+                            current_icy_pair=current_icy_pair,
+                            current_mp_pair=current_mp_pair,
+                            source_changed=False,
+                            note='status_transition_clear'
+                        )
+                        last_winner_source = ''
+                        last_winner_pair = ('', '')
+                        initial_source_pending = False
 
                 except Exception as e:
                     log_error(f"Fehler im Metadata-Loop (Thread laeuft weiter): {str(e)}")
