@@ -118,6 +118,7 @@ class PlayerMonitor(xbmc.Player):
                 )
             if 'plugin.audio.radio_de_light' in playing_file:
                 self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_RADIODE)
+                self.radio_monitor._set_api_source_proof(self.radio_monitor.API_SOURCE_RADIODE, 'onPlayBackStarted.plugin')
                 parsed = urlparse(playing_file)
                 params = parse_qs(parsed.query)
                 iconimage_list = params.get('iconimage', [])
@@ -132,9 +133,11 @@ class PlayerMonitor(xbmc.Player):
                         log_info(f"Plugin-Slug aus iconimage: '{slug}'")
             elif 'plugin.audio.radiode' in playing_file:
                 self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_RADIODE)
+                self.radio_monitor._set_api_source_proof(self.radio_monitor.API_SOURCE_RADIODE, 'onPlayBackStarted.plugin')
                 log_debug("radio.de Addon erkannt (plugin.audio.radiode)")
             elif 'plugin.audio.tunein2017' in playing_file:
                 self.radio_monitor._set_api_source(self.radio_monitor.API_SOURCE_TUNEIN)
+                self.radio_monitor._set_api_source_proof(self.radio_monitor.API_SOURCE_TUNEIN, 'onPlayBackStarted.plugin')
                 tunein_id = _tunein_extract_station_id(playing_file)
                 if tunein_id:
                     self.radio_monitor.tunein_station_id = tunein_id
@@ -239,6 +242,7 @@ class RadioMonitor(xbmc.Monitor):
         self.plugin_slug = None   # Sender-Slug aus radio.de light Plugin-URL (iconimage)
         self.tunein_station_id = None  # TuneIn Station-ID (z.B. s12345)
         self.api_source = self.API_SOURCE_NONE  # zentrale API-Quellsteuerung (radiode/tunein/none)
+        self._api_source_proof = self.API_SOURCE_NONE  # nur durch echtes Plugin-Playback gesetzt
         self._last_api_skip_log = None  # dedupliziert wiederholte "API uebersprungen"-Logs
         self.use_api_fallback = False  # Flag für API-Fallback
         # Zentrale Song-Timeout-Status (wird von Metadata-Workern geteilt)
@@ -269,6 +273,7 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_request_seq = 0
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
+        self._qf_station_anchor = ''  # stabile QF-Station pro Stream-Session
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
@@ -319,8 +324,34 @@ class RadioMonitor(xbmc.Monitor):
         self.station_slug = None
         self.tunein_station_id = None
         self.api_source = self.API_SOURCE_NONE
+        self._api_source_proof = self.API_SOURCE_NONE
         self._last_api_skip_log = None
         self.use_api_fallback = False
+
+    def _set_api_source_proof(self, source, context=''):
+        """
+        Markiert die API-Quelle als durch echten Addon-Playback-Start verifiziert.
+        Heuristiken (URL/Logo) duerfen dieses Proof-Flag bewusst NICHT setzen.
+        """
+        if source in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+            if self._api_source_proof != source:
+                self._api_source_proof = source
+                log_info(
+                    f"API-Source Proof gesetzt "
+                    f"(context={context or 'unknown'}, source={source})"
+                )
+
+    def _can_promote_station_name(self, source=''):
+        """
+        Autoritative Stationsnamen aus Providerdaten nur erlauben,
+        wenn derselbe Provider fuer diese Session per Plugin-Start verifiziert wurde.
+        """
+        target = str(source or self.api_source or '').strip().lower()
+        if target not in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+            return False
+        if str(self.api_source or '').strip().lower() != target:
+            return False
+        return str(self._api_source_proof or '').strip().lower() == target
 
     def _set_api_source(self, source):
         """Setzt die erlaubte API-Quelle zentral."""
@@ -1316,6 +1347,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_result = ''
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
+        self._qf_station_anchor = ''
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
@@ -1875,9 +1907,20 @@ class RadioMonitor(xbmc.Monitor):
             self._ensure_qf_addon_installed()
             return
 
-        station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
+        live_station_name = self._sanitize_station_text(WINDOW.getProperty(_P.STATION) or '')
+        if not self._qf_station_anchor and live_station_name:
+            self._qf_station_anchor = live_station_name
+            log_debug(f"ASM-QF Station-Anchor gesetzt: '{self._qf_station_anchor}'")
+
+        station_name = self._qf_station_anchor or live_station_name
         if not station_name:
             return
+
+        if self._qf_station_anchor and live_station_name and live_station_name != self._qf_station_anchor:
+            log_debug(
+                f"ASM-QF Station-Drift blockiert: live='{live_station_name}' "
+                f"anchor='{self._qf_station_anchor}'"
+            )
 
         now_ts = time.time()
         station_changed = station_name.strip().lower() != self._last_qf_request_station.strip().lower()
@@ -2281,8 +2324,14 @@ class RadioMonitor(xbmc.Monitor):
                     station_name = station_name.replace('Brf ', 'Berliner Rundfunk ')
                     station_name = station_name.replace('100prozent', '100%')
 
-                    self.set_property_safe(_P.STATION, station_name)
-                    log_debug(f"Station aus URL erkannt: {station_name}")
+                    if self._can_promote_station_name(self.API_SOURCE_RADIODE):
+                        self.set_property_safe(_P.STATION, station_name)
+                        log_debug(f"Station aus URL erkannt: {station_name}")
+                    else:
+                        log_debug(
+                            "Station aus URL nicht autoritativ gesetzt "
+                            "(fehlender radio.de Source-Proof)"
+                        )
 
                     self.station_slug = station_slug
                     self._record_verified_station_source(
@@ -3094,12 +3143,18 @@ class RadioMonitor(xbmc.Monitor):
             debug_log=self._debug_log_api_raw
         )
         if resolved_name:
-            self.set_property_safe(_P.STATION, resolved_name)
-            self._record_verified_station_source(
-                station_name=resolved_name,
-                source_kind='radiode_api',
-                confidence=0.95,
-            )
+            if self._can_promote_station_name(self.API_SOURCE_RADIODE):
+                self.set_property_safe(_P.STATION, resolved_name)
+                self._record_verified_station_source(
+                    station_name=resolved_name,
+                    source_kind='radiode_api',
+                    confidence=0.95,
+                )
+            else:
+                log_debug(
+                    "radio.de resolved_name nicht als Station gesetzt "
+                    "(fehlender Source-Proof)"
+                )
         # Suche-Logo hat Vorrang (immer ueberschreiben), Details-Logo nur wenn noch keins vorhanden
         if search_logo:
             self.station_logo = search_logo
