@@ -77,7 +77,9 @@ Wichtige Runtime-Felder in `RadioMonitor`:
 - `metadata_thread`, `stop_thread`
 - `metadata_generation` (stale worker invalidation)
 - `api_source`, `use_api_fallback`, `station_slug`, `plugin_slug`, `tunein_station_id`, `station_logo`
+- `_api_source_proof` (autoritative API-Quellverifikation aus echtem Plugin-Start)
 - `_last_song_time`, `_song_timeout` (song timeout management)
+- `_qf_station_anchor` (stabile `QF.Request.Station` pro Stream-Session)
 - `source_policy`, `_last_policy_context`, `_policy_preferred_source`
 - `_profile_store`, `_station_profile_session`, `_active_policy_profile`, `_station_profile_policy_enabled`
 - `_session_icy_song_seen`, `_session_api_stable_pair`, `_session_api_stable_polls` (API-only Startup-Heuristik)
@@ -131,6 +133,12 @@ Bei Streamwechsel:
 - wenn `icy-metaint` fehlt:
   - `_setup_api_fallback_from_url(url)`
   - kein ICY-Worker, stattdessen Fallback-Worker
+
+Source-Proof fuer API-Stationsnamen:
+- API-Nutzung bleibt whitelisted, aber autoritative Stationsnamen aus Providerdaten werden zusaetzlich ueber Source-Proof gegated.
+- Source-Proof wird ausschliesslich bei verifiziertem Plugin-Start gesetzt (`PlayerMonitor.onPlayBackStarted()` -> `_set_api_source_proof(...)`).
+- Reine URL/Logo-Heuristiken setzen keinen Source-Proof.
+- Das Setzen von Stationsnamen aus Providerdaten laeuft zentral ueber `_can_promote_station_name(...)`.
 
 Im Loop:
 - liest Audio-Bytes bis `metaint`, dann Metadatenblocklaenge und Metadatenblock
@@ -207,6 +215,7 @@ Im Loop:
 - `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
 - Snapshot-Felder: `fresh_reason`, `gap_source` (`server_ts`/`none`), `gap_s`.
 - `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
+- Skin-Hinweis: ASM setzt kein eigenes Property `RadioMonitor.QF.Response.StationUsed`; uebliche Skin-Bindings mappen auf `RadioMonitor.QF.Response.Source`/`Meta`.
 
 ### 6.3 ASM-QF Runtime-Contract (Request/Response)
 
@@ -219,9 +228,15 @@ Verbindlicher Laufzeitvertrag fuer `RadioMonitor.QF.*`:
 - Bei `status=hit` sind `Response.Artist` und `Response.Title` verpflichtend.
 - Ein stilles Supersede/Cancel ohne Response ist nicht erlaubt: ASM bleibt sonst bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster.
 
+QF-Station-Stabilisierung:
+- `_tick_qf_request()` setzt bei erster validen Station einen Session-Anchor (`_qf_station_anchor`).
+- Solange kein echter Streamwechsel/Stop passiert, wird fuer `RadioMonitor.QF.Request.Station` der Anchor verwendet.
+- Sichtbarer Stationsname-Drift waehrend derselben Session wird fuer QF-Requests blockiert (nur Diagnose-Log).
+
 Diagnose-Hinweis:
 
 - `non_fresh` ist nicht automatisch ein Fehler; entscheidend sind `fresh_reason`, `gap_source`, `gap_s` und das Fallback-Fenster.
+- Bei langen terminalen QF-Entscheidungen kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `fresh_reason=stale_response` auftreten.
 
 ### 6.4 API-Fallback-Worker
 

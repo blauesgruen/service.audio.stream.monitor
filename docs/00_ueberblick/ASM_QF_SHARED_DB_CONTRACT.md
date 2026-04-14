@@ -113,6 +113,10 @@ Er aendert kein DB-Schema, ist aber fuer stabile Source-Entscheidungen verpflich
 - `RadioMonitor.QF.Response.Ts`
 - Bei `status=hit` zusaetzlich: `RadioMonitor.QF.Response.Artist`, `RadioMonitor.QF.Response.Title`
 
+Hinweis fuer Skin-Labels:
+- ASM setzt kein eigenes `RadioMonitor.QF.Response.StationUsed`.
+- Uebliche `stationused`-Labels mappen auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
+
 ### Supersede/Cancellation-Regel
 
 - Wenn eine laufende Anfrage intern durch eine neuere Anfrage abgeloest wird, MUSS die alte Anfrage explizit abgeschlossen werden (`status=superseded` oder `status=cancelled`).
@@ -123,4 +127,11 @@ Er aendert kein DB-Schema, ist aber fuer stabile Source-Entscheidungen verpflich
 - ASM bewertet Freshness primaer ueber Request-ID-Match; non-fresh ist nicht automatisch ein Fehler.
 - Fuer Diagnosen sind zentral die Felder `fresh_reason`, `gap_source`, `gap_s` aus `ASM-QF DIAG event=non_fresh` massgeblich.
 - Autoritative no-hit-Phasen koennen kurz gepuffert sein (`QF_NO_HIT_HOLD_S`), damit transiente no-hit-Responses Labels nicht sofort leeren.
+- Bei langen terminalen QF-Entscheidungen kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `fresh_reason=stale_response` auftreten; das ist ein Timing-Indikator fuer die QF-Kette.
+
+### Stabile Request-Station (ASM-Seite)
+
+- ASM verwendet pro Stream-Session einen stabilen Request-Anchor fuer `RadioMonitor.QF.Request.Station`.
+- Der Anchor wird bei erster valider Station gesetzt und erst bei echtem Streamwechsel/Stop zurueckgesetzt.
+- Dadurch fuehren spaetere sichtbare Stationsnamen-Varianten nicht zu wechselnden QF-Request-Stationen.
 

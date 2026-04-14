@@ -18,9 +18,11 @@
 - MB-Korrektur nur bei hoher Aehnlichkeit (`MB_LABEL_CORRECTION_MIN_SIM`), sonst Quellwerte behalten.
 - Numerische ICY-Paare (z. B. `123 - 456`) als Nicht-Song behandeln (`NUMERIC_ID_PATTERN`).
 - `self._persist_data` gate't DB/Profile-Schreibzugriffe (u. a. `song_data.db`, `station_profiles`); Analyse-Events (`analysis_events.jsonl`) sind davon nicht betroffen.
+- API-Stationsnamen (radio.de/TuneIn) nur autoritativ setzen, wenn Source-Proof aus verifiziertem Plugin-Start vorliegt; URL/Logo-Heuristiken allein duerfen keinen Source-Proof erzeugen.
 - ASM-QF `no_hit` ist im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S` in `service.py`): transientes `no_hit` darf Artist/Title nicht sofort leeren.
 - QF-Diagnose-Logs laufen zentral ueber `ASM-QF DIAG event=...` (key=value); neue QF-Logs nicht als freie Textlogs duplizieren.
 - QF-Request/Response-Vertrag einhalten: jede `RadioMonitor.QF.Request.Id` braucht genau eine terminale `RadioMonitor.QF.Response.Id` (auch `superseded`/`cancelled`/`error`/`no_hit`). Kein stilles Verwerfen.
+- `RadioMonitor.QF.Request.Station` innerhalb derselben Stream-Session stabil halten (Session-Anchor); Namensvarianten ohne echten Streamwechsel duerfen keinen QF-Request-Stationwechsel ausloesen.
 
 ## Datenfluss und Fallbacks (entscheidend)
 - Primaer ICY (`metadata_worker`) -> MB-Winner + `SourcePolicy.decide_trigger(...)`.

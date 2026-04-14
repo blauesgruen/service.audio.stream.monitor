@@ -44,12 +44,15 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Addon-Settings: Bullet-Punkt (an/aus + Farbe aus Skin-Farbpalette) und optionale Deaktivierung der DB/JSON-Persistenz
 - ✅ Addon-Setting fuer ASM-QF Integration (default aus): bei Aktivierung wird `service.audio.stream.monitor.qf` bei Bedarf automatisch per `InstallAddon(...)` angefordert
 - ✅ ASM↔ASM-QF Request/Response-Pfad: ASM sendet zyklisch den bereinigten Sendernamen (`RadioMonitor.QF.Request.Station`) und verarbeitet die Antwort (`RadioMonitor.QF.Response.*`) als Skin-Label `RadioMonitor.QF.Result`
+- ✅ Source-Proof fuer API-Stationsnamen: radio.de/TuneIn-Namen werden nur autoritativ gesetzt, wenn der Addon-Start fuer dieselbe Quelle verifiziert ist (Plugin-Start, keine reine URL/Logo-Heuristik)
+- ✅ Stabile QF-Request-Station pro Stream-Session: erste valide Station wird als Anchor gehalten; spaeterer Name-Drift wird fuer QF-Requests blockiert bis zum echten Streamwechsel
 - ✅ Verbindlicher ASM↔ASM-QF Laufzeitvertrag: jede `RadioMonitor.QF.Request.Id` wird mit genau einer terminalen Response abgeschlossen (`hit`/`no_hit`/`resolve_error`/`error`/`timeout`/`superseded`/`cancelled`)
 - ✅ Supersede ohne Response ist unzulaessig: auch ueberholte Requests muessen als `superseded` oder `cancelled` beantwortet werden, damit ASM nicht bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster bleibt
 - ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
 - ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt (nicht strikt an `fresh`-Request-ID-Match gebunden)
 - ✅ QF-`no_hit` wird im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S=8s`), damit transiente Responses keine kurzen Label-Leerungen verursachen
 - ✅ Zentrales QF-Diagnose-Logging: `ASM-QF DIAG event=...` mit stabilen Feldern (`fresh_reason`, `gap_source`, `gap_s`, `hold_*`) zur Flapping-/Race-Analyse
+- ✅ Bekannter Timing-Effekt im Diagnosemodus: bei langsam terminalen QF-Responses kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `stale_response` auftreten; siehe `ASM-QF DIAG event=non_fresh`
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
@@ -80,6 +83,10 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.VerifiedSourceBy` | Verifizierender Addon-Owner der Quelle | "service.audio.stream.monitor.qf" |
 | `RadioMonitor.VerifiedSourceConfidence` | Confidence der verifizierten Quelle (0..1) | "0.950" |
 | `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
+
+Hinweis fuer Skin-Mapping:
+- In ASM existiert **kein** eigenes Property `RadioMonitor.QF.Response.StationUsed`.
+- Uebliche `stationused`-Skins binden auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
 
 ## Verwendung in Skins
 
@@ -177,6 +184,7 @@ Parsing-Regeln:
 - Zulassige terminale Statuswerte: `hit`, `no_hit`, `resolve_error`, `error`, `timeout`, `superseded`, `cancelled`.
 - Pflichtfelder pro Response: `Response.Id`, `Response.Status`, `Response.Ts`; bei `status=hit` zusaetzlich `Response.Artist`, `Response.Title`.
 - `non_fresh` ist nicht automatisch ein Fehler; fuer Diagnose `ASM-QF DIAG event=non_fresh` mit `fresh_reason`, `gap_source`, `gap_s` verwenden.
+- Bei langen QF-Entscheidungen kann um das no-response-Fenster (`QF_NO_RESPONSE_FALLBACK_S`) kurz `fresh_reason=stale_response` auftreten; das ist ein Timing-Signal fuer die QF-Kette und kein DB-Vertragsbruch.
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
