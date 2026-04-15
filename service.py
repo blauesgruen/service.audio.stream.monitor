@@ -1641,6 +1641,52 @@ class RadioMonitor(xbmc.Monitor):
         )
         return result
 
+    def _resolve_candidate_pair_via_mb(self, source, artist, title):
+        """
+        Zentraler MB-Resolver fuer Kandidatenpaare.
+        - Fuer asm-qf: nutzt die vorhandene MB-Identifikationslogik inkl. Swap.
+        - Fuer andere Quellen: laesst das Paar unveraendert (Resolver bleibt zentral verfuegbar).
+        """
+        source_name = str(source or '')
+        input_artist = str(artist or '').strip()
+        input_title = str(title or '').strip()
+        resolved = {
+            'artist': input_artist,
+            'title': input_title,
+            'confident': False,
+            'mode': 'passthrough',
+        }
+        if not (input_artist and input_title):
+            return resolved
+
+        if not source_name.startswith('asm-qf'):
+            return resolved
+
+        mb_artist, mb_title, _, _, _, _, uncertain, _ = self._mb_identify_timed(
+            input_artist,
+            input_title,
+            context=f'candidate:{source_name}:identify',
+        )
+        mb_artist = str(mb_artist or '').strip()
+        mb_title = str(mb_title or '').strip()
+        if uncertain or not (mb_artist and mb_title):
+            log_debug(
+                f"ASM-MB DIAG event=qf_postcheck_keep_raw source='{source_name}' "
+                f"artist='{input_artist}' title='{input_title}'"
+            )
+            return resolved
+
+        resolved['artist'] = mb_artist
+        resolved['title'] = mb_title
+        resolved['confident'] = True
+        resolved['mode'] = 'identify'
+        if (mb_artist, mb_title) != (input_artist, input_title):
+            log_info(
+                f"ASM-MB DIAG event=qf_postcheck_swap_applied source='{source_name}' "
+                f"raw='{input_artist} - {input_title}' resolved='{mb_artist} - {mb_title}'"
+            )
+        return resolved
+
     def _sanitize_station_text(self, value):
         """
         Entfernt Kodi-Markup (z.B. [COLOR ...][/COLOR]) und Bullet-Zeichen
@@ -1933,6 +1979,17 @@ class RadioMonitor(xbmc.Monitor):
         Das gilt auch dann, wenn QF aktuell "kein Song" liefert.
         """
         return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
+
+    def _should_force_qf_apply_on_pair_change(self, last_winner_pair, current_qf_pair, qf_authoritative):
+        if not (self._qf_enabled and qf_authoritative):
+            return False
+        if not (current_qf_pair and current_qf_pair[0] and current_qf_pair[1]):
+            return False
+        prev_artist = str((last_winner_pair or ('', ''))[0] or '').strip()
+        prev_title = str((last_winner_pair or ('', ''))[1] or '').strip()
+        curr_artist = str(current_qf_pair[0] or '').strip()
+        curr_title = str(current_qf_pair[1] or '').strip()
+        return (curr_artist, curr_title) != (prev_artist, prev_title)
 
     def _current_qf_hit_pair(self, invalid_values, require_fresh=True, allow_recent_nonfresh_hit=False):
         """
@@ -3104,16 +3161,29 @@ class RadioMonitor(xbmc.Monitor):
                 'dot_conflict': False,
             }
 
+        pair_resolution = self._resolve_candidate_pair_via_mb(source, artist, title)
+        resolved_artist = str(pair_resolution.get('artist') or artist or '').strip()
+        resolved_title = str(pair_resolution.get('title') or title or '').strip()
+        resolver_confident = bool(pair_resolution.get('confident'))
+        resolver_mode = str(pair_resolution.get('mode') or 'passthrough')
+        resolved_source = str(source or '')
+        if (
+            resolved_source.startswith('asm-qf')
+            and resolver_confident
+            and (resolved_artist, resolved_title) != (str(artist or '').strip(), str(title or '').strip())
+        ):
+            resolved_source = 'asm-qf_swapped'
+
         score, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, mb_duration_ms = \
-            self._mb_query_recording_timed(title, artist, context=f'candidate:{source}')
-        artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
-        title_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
+            self._mb_query_recording_timed(resolved_title, resolved_artist, context=f'candidate:{source}')
+        artist_sim = _mb_similarity(resolved_artist, mb_artist) if mb_artist else 0.0
+        title_sim = _mb_similarity(resolved_title, mb_title) if mb_title else 0.0
         combined = float(score) * ((artist_sim + title_sim) / 2.0)
-        dot_conflict = self._is_dot_sensitive_artist_conflict(artist, mb_artist)
+        dot_conflict = self._is_dot_sensitive_artist_conflict(resolved_artist, mb_artist)
         if dot_conflict:
             log_info(
                 f"MB-Kandidat geblockt (Punkt-Konflikt): "
-                f"source={source}, input_artist='{artist}', mb_artist='{mb_artist}'"
+                f"source={source}, input_artist='{resolved_artist}', mb_artist='{mb_artist}'"
             )
             score = 0
             combined = 0.0
@@ -3125,17 +3195,22 @@ class RadioMonitor(xbmc.Monitor):
         # MB-Bereinigung: korrigierten Label nur uebernehmen wenn MB eindeutig
         # denselben Song bestaetigt (hohe Aehnlichkeit zu den Eingabewerten).
         # Verhindert, dass ein komplett anderer MB-Treffer die Labels ueberschreibt.
-        if (mb_artist and mb_title
+        source_text = str(source or '')
+        if source_text.startswith('asm-qf') and resolver_confident and not dot_conflict:
+            corrected_artist = resolved_artist
+            corrected_title = resolved_title
+        elif (mb_artist and mb_title
                 and not dot_conflict
                 and artist_sim >= _MB_LABEL_CORRECTION_MIN_SIM
                 and title_sim >= _MB_LABEL_CORRECTION_MIN_SIM):
             corrected_artist = mb_artist
             corrected_title = mb_title
         else:
-            corrected_artist = artist
-            corrected_title = title
+            corrected_artist = resolved_artist
+            corrected_title = resolved_title
         return {
-            'source': source,
+            'source': resolved_source,
+            'source_raw': str(source or ''),
             'input_artist': artist,
             'input_title': title,
             'corrected_artist': corrected_artist,
@@ -3152,6 +3227,8 @@ class RadioMonitor(xbmc.Monitor):
             'mb_first_release': mb_first_release or '',
             'mb_duration_ms': int(mb_duration_ms or 0),
             'dot_conflict': bool(dot_conflict),
+            'resolver_mode': resolver_mode,
+            'resolver_confident': bool(resolver_confident),
         }
 
     def _select_mb_winner(self, candidates):
@@ -3172,16 +3249,17 @@ class RadioMonitor(xbmc.Monitor):
                 f"score={ev['score']}, artist_sim={ev['artist_sim']:.2f}, "
                 f"title_sim={ev['title_sim']:.2f}, combined={ev['combined']:.1f}")
 
-        # --- ASM-QF-Sofortentscheidung: Keine MB-Scoring erforderlich ---
-        # QF ist bereits verifiziert (externe Quelle). Wenn QF einen Song liefert,
-        # wird dieser DIREKT übernommen, ohne MB-Scoring.
+        # --- ASM-QF-Sofortentscheidung bei MB-Nachlauf ---
+        # QF bleibt Winner-priorisiert. Das Kandidatenpaar wurde zuvor bereits ueber
+        # den zentralen MB-Resolver nachbearbeitet (z. B. Swap-Erkennung).
         qf_candidates = [ev for ev in evaluations if str(ev.get('source', '')).startswith('asm-qf')]
         if qf_candidates:
-            # QF gewinnt automatisch bei validen Songdaten (kein Score-Check nötig)
             qf_winner = qf_candidates[0]
             log_info(
                 f"MB-Winner: ASM-QF Sofortentscheidung "
-                f"(source={qf_winner['source']}, '{qf_winner['input_artist']} - {qf_winner['input_title']}')"
+                f"(source={qf_winner['source']}, raw='{qf_winner['input_artist']} - {qf_winner['input_title']}', "
+                f"resolved='{qf_winner['corrected_artist']} - {qf_winner['corrected_title']}', "
+                f"resolver={qf_winner.get('resolver_mode', 'passthrough')})"
             )
             return qf_winner, evaluations
 
@@ -4460,6 +4538,25 @@ class RadioMonitor(xbmc.Monitor):
                             (initial_source_pending if allow_initial_trigger else False),
                             current_qf_pair=current_qf_pair
                         )
+
+                        if (
+                            not source_changed_trigger
+                            and self._should_force_qf_apply_on_pair_change(
+                                last_winner_pair,
+                                current_qf_pair,
+                                qf_authoritative,
+                            )
+                        ):
+                            source_changed_trigger = True
+                            trigger_reason = self.TRIGGER_QF_CHANGE
+                            self._log_qf_diag('force_apply_fresh_hit_changed_pair', {
+                                'winner_source': last_winner_source or '-',
+                                'prev_pair': self._label_from_pair(last_winner_pair) or '-',
+                                'qf_pair': self._label_from_pair(current_qf_pair) or '-',
+                                'req_id': self._last_qf_request_id or '-',
+                                'res_id': self._last_qf_response_id or '-',
+                                'authoritative': qf_authoritative,
+                            })
 
                         mp_generic_hold_active = False
                         if self._is_mp_decision_active():

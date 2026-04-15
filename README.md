@@ -88,6 +88,9 @@ Hinweis fuer Skin-Mapping:
 - ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response).
 - Fallback fuer aeltere Integrationen bleibt moeglich ueber `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
 
+Persistenz-Hinweis:
+- Die zentrale SQLite `song_data.db` enthaelt neben Song-/Keyword-Daten auch senderbezogene Quellgruppen-Statistik fuer `api`/`icy`/`musicplayer` (ohne `asm-qf`) zur schnelleren Frueh-Priorisierung.
+
 ## Verwendung in Skins
 
 ### Beispiel 1: Title anzeigen

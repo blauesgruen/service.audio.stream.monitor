@@ -161,7 +161,8 @@ Im Loop:
 
 2. MB-Winner
 - jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
-- ASM-QF-Kandidaten werden ohne MB-Score-Gating sofort als Winner uebernommen (Sofortentscheidung)
+- ASM-QF-Kandidaten bleiben Winner-priorisiert, laufen aber vor der Winner-Auswahl durch den zentralen MB-Resolver (Swap-/Identifikationslogik)
+- Ergebnis fuer ASM-QF ist damit zweiphasig: sofortiger QF-Prefill (Rohdaten), danach MB-Postcheck im Parse-Flow
 - Non-QF-Kandidaten gelten als valide, wenn sie die Schwellwerte erreichen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
 - Quell-Prioritaet bei Gleichstand (Non-QF): `musicplayer > icy > api`
 - MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte
@@ -197,11 +198,13 @@ Im Loop:
   - Vergleich via ICY nur wenn nicht `icy_structural_generic`
 - Bei `last_winner_source=asm-qf` beeinflusst ein reiner ICY-`StreamTitle`-Wechsel die Trigger-Entscheidung nicht (QF-Lock strikt).
 - Bei gesetzter Gewinnerquelle bleiben Trigger konservativ; Quelle wechselt nur bei bestaetigten, plausiblen Signalen.
+- QF-Override fuer Songwechsel: wenn QF autoritativ ist und ein valides QF-Paar gegenueber dem zuletzt angewendeten Winner-Paar wechselt, wird der Apply-Pfad auch dann erzwungen, wenn die Source-Policy in diesem Poll `trigger='none'` liefern wuerde.
 - **ICY-Confirm (required=1):** Der Haupt-Loop laeuft bei ICY-Quellen nur wenn `meta_length>0` (neuer ICY-Block kommt). Multi-Poll-Confirm (required=2) wuerde strukturell nie feuern, weil der Loop bis zum naechsten ICY-Block nicht mehr ausgefuehrt wird. Deshalb gilt fuer ICY-Familie: `required=1` – ein einziger Poll reicht zur Bestaetigung.
 
 7. ASM-QF Prefill / Skin-Kompatibilitaet
 - `_sync_qf_result_property()` setzt bei QF-`hit` sowohl `RadioMonitor.Artist` als auch `RadioMonitor.ArtistDisplay`.
 - Hintergrund: einige Skins rendern `ArtistDisplay` statt `Artist`; beide Felder werden daher im QF-Prefill konsistent befuellt.
+- Der Prefill bleibt bewusst roh/schnell; die spaetere MB-Korrektur (inkl. moeglichem Swap) erfolgt nachgelagert im `parse_stream_title()`-Pfad.
 
 8. ASM-QF no-hit-hold / Trigger-Parking
 - Bei autoritativem QF und sichtbar gesetztem Song puffert ASM transientes QF-`no_hit` kurz (`QF_NO_HIT_HOLD_S=8.0`).
@@ -281,6 +284,11 @@ Policy-Integration:
 - Beim Start einer Stations-Session wird eine Profil-Session geoeffnet.
 - Das Policy-Profil wird erst aktiviert, wenn Startup stabil ist und verwertbare Daten vorliegen (ICY-Song oder API-only-Freigabe).
 - Bei Session-Ende werden Metriken in das Profil zurueckgeschrieben (Confidence/Felder aktualisiert).
+
+Persistente Quellgruppen-Historie (SQLite):
+- In `song_data.db` ergaenzt `station_source_stats` die senderbezogene Winner-Historie fuer Quellengruppe 1 (`api`, `icy`, `musicplayer`).
+- ASM-QF wird bewusst nicht in diese Statistik aufgenommen.
+- Bei ausreichender Stichprobe kann diese Historie frueh als Hint in `get_policy_profile()` einfliessen (bevor starke EMA-Confidence erreicht ist).
 
 API-only Startup-Heuristik:
 - Falls ICY/MP initial nur generisch/leer sind, kann der "Initialer Song-Block" aufgehoben werden.
@@ -485,9 +493,12 @@ Nicht verletzen ohne expliziten Grund:
    - `Song DB persist uebersprungen (kein MB-Verify): 'Artist - Title'`
    - `Song DB ... fehlgeschlagen` (open/exec/commit/write/touch)
    - `MusicBrainz Entscheidung`
+   - `ASM-MB DIAG event=qf_postcheck_swap_applied` / `ASM-MB DIAG event=qf_postcheck_keep_raw`
+   - `ASM-SG DIAG event=db_hint_applied`
    - `MB-TRACE query_recording ... elapsed=...` / `MB-TRACE identify ... elapsed=...`
    - `Song-Timeout abgelaufen`
    - `ASM-QF DIAG event=non_fresh` (mit `fresh_reason`, `gap_source`, `gap_s`)
+   - `ASM-QF DIAG event=force_apply_fresh_hit_changed_pair`
    - `ASM-QF DIAG event=hold_*` (Hold-Lifecycle und Hold-Entscheidungen)
 
 Skin-Debug-Anzeige:
