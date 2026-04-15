@@ -218,7 +218,8 @@ Im Loop:
 - `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
 - Snapshot-Felder: `fresh_reason`, `gap_source` (`server_ts`/`none`), `gap_s`.
 - `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
-- Skin-Hinweis: ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response); Fallback-Bindings bleiben `Source`/`Meta`.
+- Skin-Hinweis: ASM spiegelt `RadioMonitor.QF.Response.StationUsed` 1:1 aus `RadioMonitor.QF.Response.Meta.station_used` (leer/fehlend => Clear); Fallback-Bindings bleiben `Source`/`Meta`.
+- QF-Terminalitaet: pro `RadioMonitor.QF.Request.Id` wird genau ein terminaler Abschluss erfasst. Bei ausbleibender Antwort wird nach `QF_NO_RESPONSE_FALLBACK_S` ein synthetischer terminaler Status `error` mit Reason `no_response_timeout` gesetzt; beim internen Ueberholen einer offenen Request-ID wird `superseded` mit Reason `new_request_sent` gesetzt.
 
 ### 6.3 ASM-QF Runtime-Contract (Request/Response)
 
@@ -286,9 +287,9 @@ Policy-Integration:
 - Bei Session-Ende werden Metriken in das Profil zurueckgeschrieben (Confidence/Felder aktualisiert).
 
 Persistente Quellgruppen-Historie (SQLite):
-- In `song_data.db` ergaenzt `station_source_stats` die senderbezogene Winner-Historie fuer Quellengruppe 1 (`api`, `icy`, `musicplayer`).
-- ASM-QF wird bewusst nicht in diese Statistik aufgenommen.
-- Bei ausreichender Stichprobe kann diese Historie frueh als Hint in `get_policy_profile()` einfliessen (bevor starke EMA-Confidence erreicht ist).
+- In `song_data.db` ergaenzt `station_source_stats` die senderbezogene Winner-Historie pro Einzelquelle (`api`, `icy`, `musicplayer`, `asm-qf`).
+- Pro Sender/Familie wird zusaetzlich eine Swap-Tendenz (`swapped_wins`) gespeichert, um frueh eine Richtung (`swapped` vs. `direkt`) abzuleiten.
+- Bei ausreichender Stichprobe kann diese Historie fuer Quellengruppen-Hints in `get_policy_profile()` genutzt werden (weiterhin fuer `api`/`icy`/`musicplayer`), inkl. `icy_prefer_swapped_early`.
 
 API-only Startup-Heuristik:
 - Falls ICY/MP initial nur generisch/leer sind, kann der "Initialer Song-Block" aufgehoben werden.
@@ -494,7 +495,7 @@ Nicht verletzen ohne expliziten Grund:
    - `Song DB ... fehlgeschlagen` (open/exec/commit/write/touch)
    - `MusicBrainz Entscheidung`
    - `ASM-MB DIAG event=qf_postcheck_swap_applied` / `ASM-MB DIAG event=qf_postcheck_keep_raw`
-   - `ASM-SG DIAG event=db_hint_applied`
+   - `ASM-SG DIAG event=db_hint_applied` / `ASM-SG DIAG event=persist_source_hit`
    - `MB-TRACE query_recording ... elapsed=...` / `MB-TRACE identify ... elapsed=...`
    - `Song-Timeout abgelaufen`
    - `ASM-QF DIAG event=non_fresh` (mit `fresh_reason`, `gap_source`, `gap_s`)

@@ -32,6 +32,8 @@ from constants import (
     SOURCE_GROUP_FAMILIES,
     SOURCE_GROUP_DB_MIN_SAMPLES,
     SOURCE_GROUP_DB_MIN_SHARE,
+    SOURCE_GROUP_DB_SWAP_MIN_SAMPLES,
+    SOURCE_GROUP_DB_SWAP_MIN_SHARE,
 )
 from song_db import SongDatabase
 from metadata import is_song_pair as _valid_pair
@@ -731,12 +733,21 @@ class StationProfileStore:
     def _apply_source_group_db_hints(self, station_key, policy):
         data = dict(policy or {})
         data['source_group_db_hint'] = {'applied': False}
+        data['icy_prefer_swapped_early'] = False
         try:
             family_stats = self._song_db.get_source_family_stats(station_key)
         except Exception:
             family_stats = {}
         if not isinstance(family_stats, dict) or not family_stats:
             return data
+
+        icy_row = family_stats.get('icy') or {}
+        icy_wins = int(icy_row.get('wins', 0) or 0)
+        icy_swapped_wins = int(icy_row.get('swapped_wins', 0) or 0)
+        if icy_wins >= int(SOURCE_GROUP_DB_SWAP_MIN_SAMPLES):
+            icy_swap_share = float(icy_swapped_wins) / float(max(1, icy_wins))
+            if icy_swap_share >= float(SOURCE_GROUP_DB_SWAP_MIN_SHARE):
+                data['icy_prefer_swapped_early'] = True
 
         group_wins = {}
         total_wins = 0
@@ -772,6 +783,7 @@ class StationProfileStore:
                 'family': top_family,
                 'share': round(top_share, 3),
                 'samples': int(total_wins),
+                'icy_swapped_share': round(float(icy_swapped_wins) / float(max(1, icy_wins)), 3) if icy_wins > 0 else 0.0,
             }
         return data
 
@@ -784,8 +796,8 @@ class StationProfileStore:
     def record_confirmed_song(self, station_key, artist, title):
         self._song_db.record_song(station_key, artist, title)
 
-    def record_source_family_hit(self, station_key, source_family):
-        return self._song_db.record_source_family_hit(station_key, source_family)
+    def record_source_family_hit(self, station_key, source_family, swapped=False):
+        return self._song_db.record_source_family_hit(station_key, source_family, swapped=swapped)
 
     def get_known_songs(self, station_key):
         return self._song_db.get_known_songs(station_key)

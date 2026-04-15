@@ -20,7 +20,7 @@ from constants import (
     SONG_CACHE_MAX_PER_STATION,
     SONG_RECOUNT_WINDOW_S,
     STATION_PROFILE_KEYWORD_STATS_MAX,
-    SOURCE_GROUP_FAMILIES,
+    SOURCE_STATS_FAMILIES,
 )
 from logger import log_warning
 
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS station_source_stats (
     station_key   TEXT NOT NULL,
     source_family TEXT NOT NULL,
     wins          INTEGER NOT NULL DEFAULT 0,
+    swapped_wins  INTEGER NOT NULL DEFAULT 0,
     last_seen_ts  INTEGER NOT NULL DEFAULT 0,
     last_seen_utc TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (station_key, source_family)
@@ -223,6 +224,7 @@ class SongDatabase:
             return
 
         additions = (
+            ('swapped_wins', "ALTER TABLE station_source_stats ADD COLUMN swapped_wins INTEGER NOT NULL DEFAULT 0"),
             ('last_seen_ts', "ALTER TABLE station_source_stats ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0"),
             ('last_seen_utc', "ALTER TABLE station_source_stats ADD COLUMN last_seen_utc TEXT NOT NULL DEFAULT ''"),
         )
@@ -579,16 +581,16 @@ class SongDatabase:
             return ()
         return tuple(dict(row) for row in cursor.fetchall())
 
-    # --- Station Source Stats (Quellengruppe 1) ---
+    # --- Station Source Stats (pro Einzelquelle: api/icy/musicplayer/asm-qf) ---
 
     @staticmethod
     def _normalize_source_family(source_family):
         family = str(source_family or '').strip().lower()
-        if family in SOURCE_GROUP_FAMILIES:
+        if family in SOURCE_STATS_FAMILIES:
             return family
         return ''
 
-    def record_source_family_hit(self, station_key, source_family):
+    def record_source_family_hit(self, station_key, source_family, swapped=False):
         key = self._normalize_station_key(station_key)
         family = self._normalize_source_family(source_family)
         if not key or not family:
@@ -596,17 +598,19 @@ class SongDatabase:
 
         now_ts = int(time.time())
         now_utc = _utc_iso()
+        swapped_inc = 1 if bool(swapped) else 0
         cursor = self._exec(
             """
-            INSERT INTO station_source_stats (station_key, source_family, wins, last_seen_ts, last_seen_utc)
-            VALUES (?, ?, 1, ?, ?)
+            INSERT INTO station_source_stats (station_key, source_family, wins, swapped_wins, last_seen_ts, last_seen_utc)
+            VALUES (?, ?, 1, ?, ?, ?)
             ON CONFLICT(station_key, source_family)
             DO UPDATE SET
                 wins = station_source_stats.wins + 1,
+                swapped_wins = station_source_stats.swapped_wins + excluded.swapped_wins,
                 last_seen_ts = excluded.last_seen_ts,
                 last_seen_utc = excluded.last_seen_utc
             """,
-            (key, family, now_ts, now_utc)
+            (key, family, swapped_inc, now_ts, now_utc)
         )
         if cursor is None:
             return False
@@ -619,7 +623,7 @@ class SongDatabase:
             return {}
         cursor = self._exec(
             """
-            SELECT source_family, wins, last_seen_ts, last_seen_utc
+            SELECT source_family, wins, swapped_wins, last_seen_ts, last_seen_utc
             FROM station_source_stats
             WHERE station_key = ?
             """,
@@ -634,6 +638,7 @@ class SongDatabase:
                 continue
             stats[family] = {
                 'wins': int(row['wins'] or 0),
+                'swapped_wins': int(row['swapped_wins'] or 0),
                 'last_seen_ts': int(row['last_seen_ts'] or 0),
                 'last_seen_utc': str(row['last_seen_utc'] or ''),
             }
