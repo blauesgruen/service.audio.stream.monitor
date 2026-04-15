@@ -20,6 +20,7 @@ from constants import (
     SONG_CACHE_MAX_PER_STATION,
     SONG_RECOUNT_WINDOW_S,
     STATION_PROFILE_KEYWORD_STATS_MAX,
+    SOURCE_GROUP_FAMILIES,
 )
 from logger import log_warning
 
@@ -67,6 +68,14 @@ CREATE INDEX IF NOT EXISTS idx_verified_sources_url_norm
 ON verified_station_sources(source_url_norm);
 CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
 ON verified_station_sources(station_name_norm);
+CREATE TABLE IF NOT EXISTS station_source_stats (
+    station_key   TEXT NOT NULL,
+    source_family TEXT NOT NULL,
+    wins          INTEGER NOT NULL DEFAULT 0,
+    last_seen_ts  INTEGER NOT NULL DEFAULT 0,
+    last_seen_utc TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (station_key, source_family)
+);
 """
 
 
@@ -127,6 +136,7 @@ class SongDatabase:
                 self._commit()
 
         self._migrate_verified_sources_table()
+        self._migrate_station_source_stats_table()
 
         cursor = self._exec("PRAGMA table_info(generic_strings)")
         if cursor is None:
@@ -201,6 +211,27 @@ class SongDatabase:
             CREATE INDEX IF NOT EXISTS idx_verified_sources_station_norm
             ON verified_station_sources(station_name_norm)
         """)
+        if changed:
+            self._commit()
+
+    def _migrate_station_source_stats_table(self):
+        cursor = self._exec("PRAGMA table_info(station_source_stats)")
+        if cursor is None:
+            return
+        cols = {row['name'] for row in cursor.fetchall()}
+        if not cols:
+            return
+
+        additions = (
+            ('last_seen_ts', "ALTER TABLE station_source_stats ADD COLUMN last_seen_ts INTEGER NOT NULL DEFAULT 0"),
+            ('last_seen_utc', "ALTER TABLE station_source_stats ADD COLUMN last_seen_utc TEXT NOT NULL DEFAULT ''"),
+        )
+        changed = False
+        for col_name, ddl in additions:
+            if col_name not in cols:
+                self._exec(ddl)
+                changed = True
+
         if changed:
             self._commit()
 
@@ -547,6 +578,66 @@ class SongDatabase:
         if cursor is None:
             return ()
         return tuple(dict(row) for row in cursor.fetchall())
+
+    # --- Station Source Stats (Quellengruppe 1) ---
+
+    @staticmethod
+    def _normalize_source_family(source_family):
+        family = str(source_family or '').strip().lower()
+        if family in SOURCE_GROUP_FAMILIES:
+            return family
+        return ''
+
+    def record_source_family_hit(self, station_key, source_family):
+        key = self._normalize_station_key(station_key)
+        family = self._normalize_source_family(source_family)
+        if not key or not family:
+            return False
+
+        now_ts = int(time.time())
+        now_utc = _utc_iso()
+        cursor = self._exec(
+            """
+            INSERT INTO station_source_stats (station_key, source_family, wins, last_seen_ts, last_seen_utc)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(station_key, source_family)
+            DO UPDATE SET
+                wins = station_source_stats.wins + 1,
+                last_seen_ts = excluded.last_seen_ts,
+                last_seen_utc = excluded.last_seen_utc
+            """,
+            (key, family, now_ts, now_utc)
+        )
+        if cursor is None:
+            return False
+        self._commit()
+        return True
+
+    def get_source_family_stats(self, station_key):
+        key = self._normalize_station_key(station_key)
+        if not key:
+            return {}
+        cursor = self._exec(
+            """
+            SELECT source_family, wins, last_seen_ts, last_seen_utc
+            FROM station_source_stats
+            WHERE station_key = ?
+            """,
+            (key,)
+        )
+        if cursor is None:
+            return {}
+        stats = {}
+        for row in cursor.fetchall():
+            family = self._normalize_source_family(row['source_family'])
+            if not family:
+                continue
+            stats[family] = {
+                'wins': int(row['wins'] or 0),
+                'last_seen_ts': int(row['last_seen_ts'] or 0),
+                'last_seen_utc': str(row['last_seen_utc'] or ''),
+            }
+        return stats
 
     # --- Generic Strings ---
 

@@ -16,7 +16,7 @@ from constants import (
     ADDON, ADDON_ID, QF_SERVICE_ADDON_ID as _QF_SERVICE_ADDON_ID,
     RADIODE_SEARCH_API_URL,
     DEFAULT_HTTP_HEADERS, INVALID_METADATA_VALUES, STATION_NAME_MATCH_MIN_LEN,
-    SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S,
+    SONG_TIMEOUT_FALLBACK_S, SONG_TIMEOUT_EARLY_CLEAR_S, MB_TIMEOUT_MIN_DURATION_MS,
     SONG_END_DETECTOR_ENABLED, SONG_END_MIN_SONG_AGE_S, SONG_END_HOLD_S,
     SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
     SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
@@ -27,6 +27,7 @@ from constants import (
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
     SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
+    SOURCE_GROUP_FAMILIES,
     STARTUP_SOURCE_QUALIFY_WINDOW_S, STARTUP_API_ONLY_STABLE_POLLS,
     STREAM_SOURCE_FAMILIES as _STREAM_SOURCE_FAMILIES,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
@@ -647,6 +648,25 @@ class RadioMonitor(xbmc.Monitor):
         if station_key:
             self._profile_store.record_confirmed_song(station_key, artist, title)
 
+    def _record_source_group_decision_if_allowed(self, station_name, decision_source):
+        """
+        Persistiert Gewinnerquellen nur fuer Quellengruppe 1 (api/icy/musicplayer).
+        ASM-QF wird hier bewusst ausgeschlossen.
+        """
+        if not (self._persist_data and self._profile_store):
+            return False
+        family = self._source_family(decision_source)
+        if family not in SOURCE_GROUP_FAMILIES:
+            return False
+        station_key = self._build_station_profile_key(station_name)
+        if not station_key:
+            return False
+        try:
+            return bool(self._profile_store.record_source_family_hit(station_key, family))
+        except Exception as e:
+            log_debug(f"Source-Statistik Persist fehlgeschlagen: {e}")
+            return False
+
     def _is_song_pair(self, pair):
         return _is_song_pair(pair)
 
@@ -1105,11 +1125,20 @@ class RadioMonitor(xbmc.Monitor):
             self.source_policy.set_known_songs(self._profile_store.get_known_songs(key))
             self._station_profile_policy_enabled = True
             self._active_policy_profile = dict(policy_profile or {})
+            db_hint = (policy_profile or {}).get('source_group_db_hint') or {}
             log_info(
                 f"Station-Profil aktiv: key='{key}', "
                 f"confidence={policy_profile.get('confidence', 0.0):.2f}, "
                 f"preferred='{policy_profile.get('preferred_family', '') or 'none'}'"
             )
+            if bool(db_hint.get('applied')):
+                self._log_source_group_diag('db_hint_applied', {
+                    'station_key': key,
+                    'family': str(db_hint.get('family', '') or '-'),
+                    'share': float(db_hint.get('share', 0.0) or 0.0),
+                    'samples': int(db_hint.get('samples', 0) or 0),
+                    'confidence': float(policy_profile.get('confidence', 0.0) or 0.0),
+                }, level='info')
 
     def _try_enable_station_profile_policy(
         self,
@@ -1232,6 +1261,24 @@ class RadioMonitor(xbmc.Monitor):
         if duration_s > 0:
             return max(0.0, duration_s - SONG_TIMEOUT_EARLY_CLEAR_S)
         return SONG_TIMEOUT_FALLBACK_S
+
+    def _sanitize_mb_duration_for_timeout(self, duration_ms):
+        """
+        Nutzt MB-Dauer nur dann fuer Timeout-Early-Clear, wenn sie plausibel ist.
+        Rueckgabe: (effective_duration_ms, reason)
+        reason in {'ok', 'missing', 'invalid', 'too_short'}
+        """
+        if not duration_ms:
+            return 0, 'missing'
+        try:
+            mb_duration_ms = int(float(duration_ms))
+        except Exception:
+            return 0, 'invalid'
+        if mb_duration_ms <= 0:
+            return 0, 'invalid'
+        if mb_duration_ms < int(MB_TIMEOUT_MIN_DURATION_MS):
+            return 0, 'too_short'
+        return mb_duration_ms, 'ok'
         
     def _start_song_timeout(self, duration_ms, song_key=('', ''), station_name=''):
         """
@@ -1240,18 +1287,20 @@ class RadioMonitor(xbmc.Monitor):
         - RadioMonitor.TimeoutTotal / RadioMonitor.TimeoutRemaining
         """
         self._last_song_time = time.time()
-        self._song_timeout = self._compute_song_timeout(duration_ms)
 
-        mb_duration_ms = 0
+        mb_duration_ms_raw = 0
         try:
             if duration_ms:
-                mb_duration_ms = int(float(duration_ms))
+                mb_duration_ms_raw = int(float(duration_ms))
         except Exception:
-            mb_duration_ms = 0
+            mb_duration_ms_raw = 0
 
-        if mb_duration_ms > 0:
-            WINDOW.setProperty(_P.MB_DUR_MS, str(mb_duration_ms))
-            WINDOW.setProperty(_P.MB_DUR_S, str(int(round(mb_duration_ms / 1000.0))))
+        mb_duration_ms_effective, mb_guard_reason = self._sanitize_mb_duration_for_timeout(mb_duration_ms_raw)
+        self._song_timeout = self._compute_song_timeout(mb_duration_ms_effective)
+
+        if mb_duration_ms_raw > 0:
+            WINDOW.setProperty(_P.MB_DUR_MS, str(mb_duration_ms_raw))
+            WINDOW.setProperty(_P.MB_DUR_S, str(int(round(mb_duration_ms_raw / 1000.0))))
         else:
             WINDOW.clearProperty(_P.MB_DUR_MS)
             WINDOW.clearProperty(_P.MB_DUR_S)
@@ -1259,15 +1308,22 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.setProperty(_P.TMO_TOTAL, str(int(round(self._song_timeout))))
         self._update_timeout_remaining_property()
 
-        if mb_duration_ms > 0:
+        if mb_duration_ms_effective > 0:
             log_debug(
                 f"Song-Timeout: {self._song_timeout:.0f}s "
-                f"(MB-Laenge: {mb_duration_ms}ms, -{SONG_TIMEOUT_EARLY_CLEAR_S}s, fallback={SONG_TIMEOUT_FALLBACK_S}s)"
+                f"(MB-Laenge: {mb_duration_ms_effective}ms, -{SONG_TIMEOUT_EARLY_CLEAR_S}s, fallback={SONG_TIMEOUT_FALLBACK_S}s)"
             )
         else:
+            guard_suffix = ''
+            if mb_duration_ms_raw > 0 and mb_guard_reason == 'too_short':
+                guard_suffix = (
+                    f", guard=too_short(raw={mb_duration_ms_raw}ms,min={int(MB_TIMEOUT_MIN_DURATION_MS)}ms)"
+                )
+            elif mb_duration_ms_raw > 0 and mb_guard_reason in ('invalid', 'missing'):
+                guard_suffix = f", guard={mb_guard_reason}(raw={mb_duration_ms_raw}ms)"
             log_debug(
                 f"Song-Timeout: {self._song_timeout:.0f}s "
-                f"(MB-Laenge: unbekannt, fallback={SONG_TIMEOUT_FALLBACK_S}s)"
+                f"(MB-Laenge: unbekannt, fallback={SONG_TIMEOUT_FALLBACK_S}s{guard_suffix})"
             )
         if self.song_end_detector_enabled:
             self.song_end_detector.on_song_started(song_key=song_key, station_name=station_name)
@@ -1565,6 +1621,26 @@ class RadioMonitor(xbmc.Monitor):
             return f"{a} - {t}"
         return t or a
 
+    def _mb_query_recording_timed(self, title_part, artist_part, context=''):
+        started_at = time.time()
+        result = _musicbrainz_query_recording(title_part, artist_part)
+        elapsed_s = max(0.0, float(time.time() - started_at))
+        log_debug(
+            f"MB-TRACE query_recording ctx='{context or '-'}' elapsed={elapsed_s:.2f}s "
+            f"artist='{artist_part}' title='{title_part}'"
+        )
+        return result
+
+    def _mb_identify_timed(self, part1, part2, context=''):
+        started_at = time.time()
+        result = _identify_artist_title_via_musicbrainz(part1, part2)
+        elapsed_s = max(0.0, float(time.time() - started_at))
+        log_debug(
+            f"MB-TRACE identify ctx='{context or '-'}' elapsed={elapsed_s:.2f}s "
+            f"part1='{part1}' part2='{part2}'"
+        )
+        return result
+
     def _sanitize_station_text(self, value):
         """
         Entfernt Kodi-Markup (z.B. [COLOR ...][/COLOR]) und Bullet-Zeichen
@@ -1629,6 +1705,33 @@ class RadioMonitor(xbmc.Monitor):
             parts.append(f"{k}={v}")
 
         message = "ASM-QF DIAG " + ' '.join(parts)
+        if level == 'info':
+            log_info(message)
+        elif level == 'warning':
+            log_warning(message)
+        else:
+            log_debug(message)
+
+    def _log_source_group_diag(self, event, fields=None, level='debug'):
+        parts = [f"event={str(event or '-')}"]
+        items = fields.items() if isinstance(fields, dict) else []
+        for key, value in sorted(items, key=lambda kv: str(kv[0])):
+            k = str(key)
+            if not k:
+                continue
+            if value is None:
+                v = '-'
+            elif isinstance(value, bool):
+                v = 'true' if value else 'false'
+            elif isinstance(value, float):
+                v = f"{value:.3f}"
+            else:
+                v = str(value)
+            if any(ch in v for ch in (' ', '=', '|', '"')):
+                v = '"' + v.replace('"', "'") + '"'
+            parts.append(f"{k}={v}")
+
+        message = "ASM-SG DIAG " + ' '.join(parts)
         if level == 'info':
             log_info(message)
         elif level == 'warning':
@@ -3002,7 +3105,7 @@ class RadioMonitor(xbmc.Monitor):
             }
 
         score, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, mb_duration_ms = \
-            _musicbrainz_query_recording(title, artist)
+            self._mb_query_recording_timed(title, artist, context=f'candidate:{source}')
         artist_sim = _mb_similarity(artist, mb_artist) if mb_artist else 0.0
         title_sim = _mb_similarity(title, mb_title) if mb_title else 0.0
         combined = float(score) * ((artist_sim + title_sim) / 2.0)
@@ -3239,7 +3342,11 @@ class RadioMonitor(xbmc.Monitor):
                         display_artist = artist
                         display_title = title
                         if artist and title and self._is_pre_mb_song_pair((artist, title), station_name=station_name, source='api'):
-                            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
+                            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = self._mb_identify_timed(
+                                artist,
+                                title,
+                                context='api',
+                            )
                             if uncertain:
                                 mbid = ''
                                 duration_ms = 0
@@ -3268,7 +3375,10 @@ class RadioMonitor(xbmc.Monitor):
                                             f"MB-Bereinigung (API): '{artist} - {title}'"
                                             f" -> '{display_artist} - {display_title}'"
                                         )
-                                elif mb_artist and mb_title and (a_sim < 0.8 or t_sim < 0.8):
+                                elif mb_artist and mb_title and (
+                                    a_sim < _MB_LABEL_CORRECTION_MIN_SIM
+                                    or t_sim < _MB_LABEL_CORRECTION_MIN_SIM
+                                ):
                                     # MB hat anderen Song gefunden: MBID/Album verwerfen
                                     mbid = ''
                                     album = ''
@@ -3426,7 +3536,7 @@ class RadioMonitor(xbmc.Monitor):
 
                     # MusicBrainz-Lookup
                     _, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, duration_ms = \
-                        _musicbrainz_query_recording(mp_title, mp_artist)
+                        self._mb_query_recording_timed(mp_title, mp_artist, context='musicplayer')
 
                     # MB-Bereinigung: korrigierten Label nur verwenden wenn MB eindeutig
                     # denselben Song bestaetigt. Original fuer Aenderungs-Detektion behalten.
@@ -4010,12 +4120,24 @@ class RadioMonitor(xbmc.Monitor):
             # Mehrfaches ' - ' -> last-separator Variante prüfen
             alt_p1, alt_p2 = _get_last_separator_variant(stream_title)
             log_info(f"MusicBrainz: prüfe last-separator Variante: Title='{alt_p1}', Artist='{alt_p2}'")
-            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(alt_p1, alt_p2)
+            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = self._mb_identify_timed(
+                alt_p1,
+                alt_p2,
+                context='icy:last_separator',
+            )
             if uncertain:
                 # Fallback auf Standard-Split
-                mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
+                mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = self._mb_identify_timed(
+                    artist,
+                    title,
+                    context='icy:standard_fallback',
+                )
         else:
-            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = _identify_artist_title_via_musicbrainz(artist, title)
+            mb_artist, mb_title, mb_album, mb_album_date, mbid, mb_first_release, uncertain, duration_ms = self._mb_identify_timed(
+                artist,
+                title,
+                context='icy:standard',
+            )
 
         if uncertain:
             # Unsicherer MB-Treffer: nur Zusatzdaten verwerfen.
@@ -4712,6 +4834,10 @@ class RadioMonitor(xbmc.Monitor):
                                     last_winner_pair = decision_pair
                                 else:
                                     last_winner_pair = (artist or '', title or '')
+                                self._record_source_group_decision_if_allowed(
+                                    station_for_policy,
+                                    decision_source,
+                                )
                             self._emit_analysis_event(
                                 station_name=station_name,
                                 stream_title=stream_title,

@@ -245,7 +245,7 @@ Diagnose-Hinweis:
 - holt Titel via `get_nowplaying_from_apis()`
 - bei Artist+Title:
   - MB-Validierung/Anreicherung
-  - MB-Felder nur behalten wenn MB zum API-Titel plausibel passt
+  - MB-Felder nur behalten wenn MB zum API-Titel plausibel passt (Schwelle ebenfalls `MB_LABEL_CORRECTION_MIN_SIM`)
   - MB-Bereinigung: `display_artist`/`display_title` werden auf MB-Werte korrigiert wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; Titelwechsel-Erkennung verwendet stets den originalen API-Wert
 - bei nur Title:
   - Artist/MBID werden bewusst nicht aggressiv geloescht (stabileres AS-Verhalten)
@@ -373,8 +373,9 @@ Zentrale Methoden:
 
 Regeln:
 - nach gueltigem Titelupdate startet der Timer neu
-- wenn MB-Laenge bekannt: `timeout = max(0, duration_ms/1000 - SONG_TIMEOUT_EARLY_CLEAR_S)`
+- wenn MB-Laenge bekannt und plausibel (`duration_ms >= MB_TIMEOUT_MIN_DURATION_MS`): `timeout = max(0, duration_ms/1000 - SONG_TIMEOUT_EARLY_CLEAR_S)`
 - wenn MB-Laenge nicht bekannt: Fallback `240s`
+- wenn MB-Laenge vorhanden aber zu kurz (Variant-/Edit-Risiko): ebenfalls Fallback `240s`
 
 Wenn Timeout ablaeuft:
 - song-bezogene Properties werden geloescht
@@ -399,6 +400,7 @@ Ziel: schnelle Orientierung, welche Zeitparameter welche Laufzeiteffekte haben.
 | hoch | `API_NOW_REFRESH_INTERVAL_S` | `10s` | frischeres `ApiNowPlaying`, mehr Request-Last/Flattern | stabiler, aber laenger stale |
 | hoch | `SONG_TIMEOUT_FALLBACK_S` | `240s` | alte Titel verschwinden frueher | alte Titel bleiben laenger sichtbar |
 | hoch | `SONG_TIMEOUT_EARLY_CLEAR_S` | `15s` | Timer loescht spaeter bei bekannter MB-Laenge | Timer loescht frueher bei bekannter MB-Laenge |
+| hoch | `MB_TIMEOUT_MIN_DURATION_MS` | `120000ms` | mehr MB-Kurzvarianten werden akzeptiert (Risiko: fruehes Timeout) | mehr MB-Kurzvarianten werden abgefangen (Risiko: laenger sichtbare alte Titel) |
 | mittel | `SONG_END_MIN_SONG_AGE_S` | `45.0s` | aggressiveres Frueh-Loeschen | konservativer, weniger Fehl-Loeschungen |
 | mittel | `SONG_END_HOLD_S` | `8.0s` | schnellere Reaktion auf Endsignal | stabiler gegen kurze Stoerimpulse |
 | mittel | `SONG_END_STALE_API_MIN_S` | `12.0s` | stale API wird frueher als Zusatzsignal genutzt | stale API wirkt spaeter |
@@ -483,6 +485,7 @@ Nicht verletzen ohne expliziten Grund:
    - `Song DB persist uebersprungen (kein MB-Verify): 'Artist - Title'`
    - `Song DB ... fehlgeschlagen` (open/exec/commit/write/touch)
    - `MusicBrainz Entscheidung`
+   - `MB-TRACE query_recording ... elapsed=...` / `MB-TRACE identify ... elapsed=...`
    - `Song-Timeout abgelaufen`
    - `ASM-QF DIAG event=non_fresh` (mit `fresh_reason`, `gap_source`, `gap_s`)
    - `ASM-QF DIAG event=hold_*` (Hold-Lifecycle und Hold-Entscheidungen)

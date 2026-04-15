@@ -89,6 +89,9 @@ MB_WORK_CONTEXT_RATE_LIMIT_S = 1.0
 # Wenn keine MB-Laenge bekannt ist, greift SONG_TIMEOUT_FALLBACK_S.
 SONG_TIMEOUT_EARLY_CLEAR_S = 20
 SONG_TIMEOUT_FALLBACK_S = 4 * 60
+# MB-Laengen unterhalb dieser Schwelle gelten nur fuer den Timeout als unplausibel
+# (haeufig Edit/Jingle/Fehlmatch-Varianten) und triggern Fallback statt Early-Clear.
+MB_TIMEOUT_MIN_DURATION_MS = 120 * 1000
 API_NOW_REFRESH_INTERVAL_S = 10
 # QF-Dominanz: Solange innerhalb dieses Fensters keine frische QF-Response vorliegt,
 # bleibt QF weiterhin fuehrend (kein Fallback auf API/ICY/MP).
@@ -130,6 +133,10 @@ STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX = 0.05
 STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN = 0.30
 STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX = 0.25
 STATION_PROFILE_KEYWORD_STATS_MAX = 40
+# Persistente Quellgruppen-Statistik (nur Quellengruppe 1, ohne ASM-QF)
+SOURCE_GROUP_FAMILIES = ('api', 'icy', 'musicplayer')
+SOURCE_GROUP_DB_MIN_SAMPLES = 8
+SOURCE_GROUP_DB_MIN_SHARE = 0.55
 # Source policy defaults
 SOURCE_POLICY_WINDOW = 40
 SOURCE_POLICY_SWITCH_MARGIN = 0.12

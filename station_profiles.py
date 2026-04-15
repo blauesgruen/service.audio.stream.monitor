@@ -29,6 +29,9 @@ from constants import (
     STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX,
     STATION_PROFILE_MIN_SESSION_S,
     STATION_PROFILE_MIN_STABLE_SESSIONS,
+    SOURCE_GROUP_FAMILIES,
+    SOURCE_GROUP_DB_MIN_SAMPLES,
+    SOURCE_GROUP_DB_MIN_SHARE,
 )
 from song_db import SongDatabase
 from metadata import is_song_pair as _valid_pair
@@ -710,7 +713,7 @@ class StationProfileStore:
                     single_confirm_polls = max(single_confirm_polls, min(5, int(round(lag))))
 
         role_flags = self._derive_source_role_flags(profile)
-        return {
+        result = {
             'confidence': round(confidence, 3),
             'preferred_family': preferred,
             'weights': self._build_weights(profile),
@@ -723,6 +726,54 @@ class StationProfileStore:
             'mp_absent': bool(role_flags.get('mp_absent')),
             'mp_noise': bool(role_flags.get('mp_noise')),
         }
+        return self._apply_source_group_db_hints(station_key, result)
+
+    def _apply_source_group_db_hints(self, station_key, policy):
+        data = dict(policy or {})
+        data['source_group_db_hint'] = {'applied': False}
+        try:
+            family_stats = self._song_db.get_source_family_stats(station_key)
+        except Exception:
+            family_stats = {}
+        if not isinstance(family_stats, dict) or not family_stats:
+            return data
+
+        group_wins = {}
+        total_wins = 0
+        for family in SOURCE_GROUP_FAMILIES:
+            wins = int((family_stats.get(family) or {}).get('wins', 0) or 0)
+            if wins <= 0:
+                continue
+            group_wins[family] = wins
+            total_wins += wins
+        if total_wins < int(SOURCE_GROUP_DB_MIN_SAMPLES):
+            return data
+
+        top_family = max(group_wins.keys(), key=lambda fam: int(group_wins.get(fam, 0)))
+        top_share = float(group_wins.get(top_family, 0)) / float(total_wins or 1)
+        if top_share < float(SOURCE_GROUP_DB_MIN_SHARE):
+            return data
+
+        confidence = float(data.get('confidence', 0.0) or 0.0)
+        preferred = str(data.get('preferred_family', '') or '')
+        if confidence < float(STATION_PROFILE_CONFIDENCE_LOW) and preferred not in SOURCE_GROUP_FAMILIES:
+            data['preferred_family'] = top_family
+            weights = dict(data.get('weights') or {})
+            for family in SOURCE_GROUP_FAMILIES:
+                base_weight = float(weights.get(family, 1.0) or 1.0)
+                if family == top_family:
+                    base_weight += 0.10
+                else:
+                    base_weight -= 0.05
+                weights[family] = round(_clamp(base_weight, 0.70, 1.30), 3)
+            data['weights'] = weights
+            data['source_group_db_hint'] = {
+                'applied': True,
+                'family': top_family,
+                'share': round(top_share, 3),
+                'samples': int(total_wins),
+            }
+        return data
 
     def get_generic_keywords(self, station_key):
         return self._song_db.get_generic_strings(station_key)
@@ -732,6 +783,9 @@ class StationProfileStore:
 
     def record_confirmed_song(self, station_key, artist, title):
         self._song_db.record_song(station_key, artist, title)
+
+    def record_source_family_hit(self, station_key, source_family):
+        return self._song_db.record_source_family_hit(station_key, source_family)
 
     def get_known_songs(self, station_key):
         return self._song_db.get_known_songs(station_key)
