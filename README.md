@@ -85,11 +85,11 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
 
 Hinweis fuer Skin-Mapping:
-- ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response).
+- ASM spiegelt `RadioMonitor.QF.Response.StationUsed` direkt aus `RadioMonitor.QF.Response.Meta.station_used` (1:1; leer/fehlend = Label-Clear).
 - Fallback fuer aeltere Integrationen bleibt moeglich ueber `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
 
 Persistenz-Hinweis:
-- Die zentrale SQLite `song_data.db` enthaelt neben Song-/Keyword-Daten auch senderbezogene Quellgruppen-Statistik fuer `api`/`icy`/`musicplayer` (ohne `asm-qf`) zur schnelleren Frueh-Priorisierung.
+- Die zentrale SQLite `song_data.db` enthaelt neben Song-/Keyword-Daten auch senderbezogene Quellen-Statistik pro Einzelquelle (`api`/`icy`/`musicplayer`/`asm-qf`); fruehe Policy-Hints bleiben auf Quellengruppe 1 (`api`/`icy`/`musicplayer`) fokussiert.
 
 ## Verwendung in Skins
 

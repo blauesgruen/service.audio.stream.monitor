@@ -27,7 +27,7 @@ from constants import (
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
     STATION_PROFILE_DIRNAME, STATION_PROFILE_OBSERVE_INTERVAL_S, STATION_PROFILE_SAVE_INTERVAL_S,
     SOURCE_POLICY_WINDOW, SOURCE_POLICY_SWITCH_MARGIN, SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
-    SOURCE_GROUP_FAMILIES,
+    SOURCE_STATS_FAMILIES,
     STARTUP_SOURCE_QUALIFY_WINDOW_S, STARTUP_API_ONLY_STABLE_POLLS,
     STREAM_SOURCE_FAMILIES as _STREAM_SOURCE_FAMILIES,
     RADIODE_PLUGIN_IDS as _RADIODE_PLUGIN_IDS,
@@ -278,6 +278,9 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
+        self._qf_terminal_ids = set()
+        self._qf_terminal_order = []
+        self._qf_terminal_max = 128
         self._last_qf_nonfresh_diag = ''
         self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
@@ -563,11 +566,17 @@ class RadioMonitor(xbmc.Monitor):
         self._set_verified_source_properties(row if row else None)
         station_name = str((row or {}).get('station_name', '') or '').strip()
         if station_name and not (WINDOW.getProperty(_P.STATION) or '').strip():
-            self.set_property_safe(_P.STATION, station_name)
-            log_info(
-                f"Station aus verified source gesetzt: '{station_name}' "
-                f"(by='{(row or {}).get('verified_by', '') or 'unknown'}')"
-            )
+            if self._can_promote_station_name():
+                self.set_property_safe(_P.STATION, station_name)
+                log_info(
+                    f"Station aus verified source gesetzt: '{station_name}' "
+                    f"(by='{(row or {}).get('verified_by', '') or 'unknown'}')"
+                )
+            else:
+                log_debug(
+                    "Station aus verified source nicht autoritativ gesetzt "
+                    "(fehlender Source-Proof)"
+                )
         return station_name
 
     def _record_verified_station_source(
@@ -650,19 +659,29 @@ class RadioMonitor(xbmc.Monitor):
 
     def _record_source_group_decision_if_allowed(self, station_name, decision_source):
         """
-        Persistiert Gewinnerquellen nur fuer Quellengruppe 1 (api/icy/musicplayer).
-        ASM-QF wird hier bewusst ausgeschlossen.
+        Persistiert Gewinnerquellen pro Einzelquelle (api/icy/musicplayer/asm-qf).
+        Group-Hints bleiben weiterhin auf Quellengruppe 1 begrenzt.
         """
         if not (self._persist_data and self._profile_store):
             return False
-        family = self._source_family(decision_source)
-        if family not in SOURCE_GROUP_FAMILIES:
+        source_text = str(decision_source or '')
+        family = self._source_family(source_text)
+        if family not in SOURCE_STATS_FAMILIES:
             return False
+        swapped = source_text.endswith('_swapped')
         station_key = self._build_station_profile_key(station_name)
         if not station_key:
             return False
         try:
-            return bool(self._profile_store.record_source_family_hit(station_key, family))
+            ok = bool(self._profile_store.record_source_family_hit(station_key, family, swapped=swapped))
+            if ok:
+                self._log_source_group_diag('persist_source_hit', {
+                    'station_key': station_key,
+                    'family': family,
+                    'swapped': swapped,
+                    'source': source_text or '-',
+                })
+            return ok
         except Exception as e:
             log_debug(f"Source-Statistik Persist fehlgeschlagen: {e}")
             return False
@@ -957,7 +976,7 @@ class RadioMonitor(xbmc.Monitor):
         except Exception:
             confidence = 0.0
         if confidence < 0.20:
-            return False
+            return bool(profile.get('icy_prefer_swapped_early', False))
         return bool(profile.get('icy_prefer_swapped', False))
 
     def _should_prioritize_stream_candidates(self):
@@ -1407,6 +1426,8 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
+        self._qf_terminal_ids = set()
+        self._qf_terminal_order = []
         self._last_qf_nonfresh_diag = ''
         self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
@@ -1676,14 +1697,27 @@ class RadioMonitor(xbmc.Monitor):
             )
             return resolved
 
-        resolved['artist'] = mb_artist
-        resolved['title'] = mb_title
+        # QF-Werte bleiben 1:1 roh; MB entscheidet hier nur die Richtung.
+        direct_fit = (_mb_similarity(mb_artist, input_artist) + _mb_similarity(mb_title, input_title))
+        swapped_fit = (_mb_similarity(mb_artist, input_title) + _mb_similarity(mb_title, input_artist))
+        prefer_swapped = bool(swapped_fit > direct_fit and swapped_fit >= 1.35)
+        if prefer_swapped:
+            resolved['artist'] = input_title
+            resolved['title'] = input_artist
+        else:
+            resolved['artist'] = input_artist
+            resolved['title'] = input_title
         resolved['confident'] = True
-        resolved['mode'] = 'identify'
-        if (mb_artist, mb_title) != (input_artist, input_title):
+        resolved['mode'] = 'identify_swap_check'
+        if prefer_swapped:
             log_info(
                 f"ASM-MB DIAG event=qf_postcheck_swap_applied source='{source_name}' "
-                f"raw='{input_artist} - {input_title}' resolved='{mb_artist} - {mb_title}'"
+                f"raw='{input_artist} - {input_title}' resolved='{resolved['artist']} - {resolved['title']}'"
+            )
+        else:
+            log_debug(
+                f"ASM-MB DIAG event=qf_postcheck_keep_raw source='{source_name}' "
+                f"artist='{input_artist}' title='{input_title}'"
             )
         return resolved
 
@@ -1817,6 +1851,7 @@ class RadioMonitor(xbmc.Monitor):
         status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
         artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
         title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+        response_source = (WINDOW.getProperty(_P.QF_RESPONSE_SOURCE) or '').strip().lower()
         meta_raw = (WINDOW.getProperty(_P.QF_RESPONSE_META) or '').strip()
         response_ts_raw = WINDOW.getProperty(_P.QF_RESPONSE_TS) or ''
         request_ts_raw = WINDOW.getProperty(_P.QF_REQUEST_TS) or ''
@@ -1898,6 +1933,7 @@ class RadioMonitor(xbmc.Monitor):
             'status': status,
             'artist': artist,
             'title': title,
+            'source': response_source,
             'meta': meta,
             'station_used': station_used,
             'request_ts': request_ts,
@@ -1980,45 +2016,148 @@ class RadioMonitor(xbmc.Monitor):
         """
         return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
 
-    def _should_force_qf_apply_on_pair_change(self, last_winner_pair, current_qf_pair, qf_authoritative):
-        if not (self._qf_enabled and qf_authoritative):
+    def _should_force_qf_apply_on_pair_change(self, last_winner_pair, fresh_qf_pair):
+        if not self._qf_enabled:
             return False
-        if not (current_qf_pair and current_qf_pair[0] and current_qf_pair[1]):
+        if not (fresh_qf_pair and fresh_qf_pair[0] and fresh_qf_pair[1]):
             return False
         prev_artist = str((last_winner_pair or ('', ''))[0] or '').strip()
         prev_title = str((last_winner_pair or ('', ''))[1] or '').strip()
-        curr_artist = str(current_qf_pair[0] or '').strip()
-        curr_title = str(current_qf_pair[1] or '').strip()
+        curr_artist = str(fresh_qf_pair[0] or '').strip()
+        curr_title = str(fresh_qf_pair[1] or '').strip()
         return (curr_artist, curr_title) != (prev_artist, prev_title)
 
     def _current_qf_hit_pair(self, invalid_values, require_fresh=True, allow_recent_nonfresh_hit=False):
+        _ = invalid_values
+        context = self._current_qf_hit_context(
+            require_fresh=require_fresh,
+            allow_recent_nonfresh_hit=allow_recent_nonfresh_hit,
+        )
+        if not isinstance(context, dict):
+            return ('', '')
+        artist = str(context.get('artist') or '').strip()
+        title = str(context.get('title') or '').strip()
+        if not (artist and title):
+            return ('', '')
+        return (artist, title)
+
+    def _qf_candidate_source_from_snapshot(self, snapshot):
+        base = 'asm-qf'
+        if not isinstance(snapshot, dict):
+            return base
+        source_hint = str(snapshot.get('source') or '').strip().lower()
+        meta = snapshot.get('meta')
+        if isinstance(meta, dict) and not source_hint:
+            source_hint = str(meta.get('source') or meta.get('source_kind') or '').strip().lower()
+        if 'icy' in source_hint:
+            return 'asm-qf_icy'
+        return base
+
+    def _current_qf_hit_context(self, require_fresh=True, allow_recent_nonfresh_hit=False):
         """
         Liefert das aktuelle QF-Paar bei passender "hit"-Response.
         Standard: nur fresh responses (request_id match).
         Für aktiven ASM-QF-Lock kann require_fresh=False gesetzt werden, damit
         QF-Paarwechsel nicht an Request-Race-Conditions scheitern.
         """
-        _ = invalid_values
         snapshot = self._qf_response_snapshot()
         if not snapshot.get('fresh'):
             usable_nonfresh = self._is_qf_usable_nonfresh_hit(snapshot)
             if require_fresh:
                 if not (allow_recent_nonfresh_hit and usable_nonfresh):
-                    return ('', '')
+                    return None
             elif not usable_nonfresh:
-                return ('', '')
+                return None
         if snapshot.get('status') != 'hit':
-            return ('', '')
+            return None
         artist = str(snapshot.get('artist') or '').strip()
         title = str(snapshot.get('title') or '').strip()
         if not (artist and title):
-            return ('', '')
-        return (artist, title)
+            return None
+        return {
+            'artist': artist,
+            'title': title,
+            'snapshot': snapshot,
+            'source': self._qf_candidate_source_from_snapshot(snapshot),
+        }
+
+    @staticmethod
+    def _is_qf_terminal_status(status):
+        value = str(status or '').strip().lower()
+        return value in ('hit', 'no_hit', 'timeout', 'error', 'resolve_error', 'cancelled', 'superseded')
+
+    def _is_qf_request_terminalized(self, request_id):
+        rid = str(request_id or '').strip()
+        return bool(rid and rid in self._qf_terminal_ids)
+
+    def _remember_qf_terminal_response(self, request_id, status, reason='', source='qf'):
+        rid = str(request_id or '').strip()
+        status_text = str(status or '').strip().lower()
+        if not rid or not self._is_qf_terminal_status(status_text):
+            return False
+        if rid in self._qf_terminal_ids:
+            return False
+
+        self._qf_terminal_ids.add(rid)
+        self._qf_terminal_order.append(rid)
+        max_size = max(16, int(self._qf_terminal_max or 128))
+        while len(self._qf_terminal_order) > max_size:
+            evicted = self._qf_terminal_order.pop(0)
+            self._qf_terminal_ids.discard(evicted)
+
+        self._log_qf_diag('terminal_recorded', {
+            'req_id': rid,
+            'status': status_text,
+            'reason': str(reason or '-'),
+            'source': str(source or 'qf'),
+        })
+        return True
+
+    def _synthesize_qf_terminal_response(self, request_id, status, reason):
+        rid = str(request_id or '').strip()
+        status_text = str(status or '').strip().lower()
+        if not rid or not self._is_qf_terminal_status(status_text):
+            return False
+        if self._is_qf_request_terminalized(rid):
+            return False
+
+        now_ts = int(time.time())
+        WINDOW.setProperty(_P.QF_RESPONSE_ID, rid)
+        WINDOW.setProperty(_P.QF_RESPONSE_STATUS, status_text)
+        WINDOW.clearProperty(_P.QF_RESPONSE_ARTIST)
+        WINDOW.clearProperty(_P.QF_RESPONSE_TITLE)
+        WINDOW.setProperty(_P.QF_RESPONSE_SOURCE, 'asm')
+        WINDOW.setProperty(_P.QF_RESPONSE_REASON, str(reason or status_text))
+        WINDOW.clearProperty(_P.QF_RESPONSE_META)
+        WINDOW.clearProperty(_P.QF_RESPONSE_STATION_USED)
+        WINDOW.setProperty(_P.QF_RESPONSE_TS, str(now_ts))
+
+        self._last_qf_response_id = rid
+        self._last_qf_response_match_ts = float(now_ts)
+        self._remember_qf_terminal_response(
+            rid,
+            status_text,
+            reason=str(reason or status_text),
+            source='asm',
+        )
+        self._log_qf_diag('terminal_synth', {
+            'req_id': rid,
+            'status': status_text,
+            'reason': str(reason or status_text),
+        }, level='info')
+        return True
 
     def _send_qf_request(self, station_name, mode='asm_auto'):
         station = self._sanitize_station_text(station_name)
         if not station:
             return False
+        previous_request_id = str(self._last_qf_request_id or '').strip()
+        if previous_request_id and not self._is_qf_request_terminalized(previous_request_id):
+            self._synthesize_qf_terminal_response(
+                previous_request_id,
+                'superseded',
+                reason='new_request_sent',
+            )
         now_ts = time.time()
         self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
         request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
@@ -2121,6 +2260,11 @@ class RadioMonitor(xbmc.Monitor):
                 request_age_s = max(0.0, float(now_ts - float(self._last_qf_request_ts or 0.0)))
                 if request_age_s < float(QF_NO_RESPONSE_FALLBACK_S):
                     return
+                self._synthesize_qf_terminal_response(
+                    self._last_qf_request_id,
+                    'error',
+                    reason='no_response_timeout',
+                )
 
         request_due = (
             not self._last_qf_request_id
@@ -2170,6 +2314,14 @@ class RadioMonitor(xbmc.Monitor):
         qf_authoritative = self._is_qf_authoritative()
         if not snapshot.get('fresh'):
             response_id = snapshot.get('response_id') or '-'
+            response_status = str(snapshot.get('status') or '').strip().lower()
+            if response_id != '-' and self._is_qf_terminal_status(response_status):
+                self._remember_qf_terminal_response(
+                    response_id,
+                    response_status,
+                    reason='non_fresh_response_seen',
+                    source='qf',
+                )
             gap_source = snapshot.get('gap_source') or 'none'
             gap_raw = snapshot.get('gap_raw')
             gap_text = f"{float(gap_raw):.2f}s" if isinstance(gap_raw, (int, float)) else '-'
@@ -2208,9 +2360,17 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_nonfresh_diag = ''
         self._last_qf_nonfresh_log_ts = 0.0
         response_id = snapshot.get('response_id') or ''
+        response_status = str(snapshot.get('status') or '').strip().lower()
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
             self._last_qf_response_match_ts = time.time()
+        if response_id and self._is_qf_terminal_status(response_status):
+            self._remember_qf_terminal_response(
+                response_id,
+                response_status,
+                reason='fresh_response_seen',
+                source='qf',
+            )
 
         if snapshot.get('status') != 'hit':
             has_visible_song = bool(
@@ -2855,6 +3015,36 @@ class RadioMonitor(xbmc.Monitor):
             station_name,
             enable_policy=self._station_profile_policy_enabled
         )
+
+        # QF-autoritativ: keine Konkurrenz zwischen QF und Quellengruppe 1 auswerten.
+        if self._is_qf_authoritative():
+            qf_pair = current_qf_pair if self._is_song_pair(current_qf_pair) else ('', '')
+            qf_has_pair = bool(qf_pair and qf_pair[0] and qf_pair[1])
+            last_family = self._source_family(last_winner_source)
+            qf_pair_changed = bool(
+                qf_has_pair and (last_family != 'asm-qf' or qf_pair != (last_winner_pair or ('', '')))
+            )
+            changed = bool((initial_source_pending and qf_has_pair) or qf_pair_changed)
+            reason = self.TRIGGER_QF_CHANGE if changed else ''
+            self._last_policy_context = {
+                'station_name': station_name,
+                'current_mp_pair': ('', ''),
+                'current_api_pair': ('', ''),
+                'current_icy_pair': ('', ''),
+                'current_qf_pair': qf_pair if qf_has_pair else ('', ''),
+                'stream_title_changed': bool(stream_title_changed),
+                'triggered': bool(changed),
+                'trigger_reason': reason,
+            }
+            self._policy_preferred_source = 'asm-qf'
+            if changed or 'asm-qf' != getattr(self, '_last_logged_preferred', None):
+                self._last_logged_preferred = 'asm-qf'
+                log_debug(
+                    f"Source-Policy(QF-autoritativ): preferred='asm-qf', "
+                    f"trigger='{reason if changed else 'none'}'"
+                )
+            return changed, reason
+
         changed, reason, preferred = self.source_policy.decide_trigger(
             last_winner_source=last_winner_source,
             last_winner_pair=last_winner_pair,
@@ -3172,7 +3362,7 @@ class RadioMonitor(xbmc.Monitor):
             and resolver_confident
             and (resolved_artist, resolved_title) != (str(artist or '').strip(), str(title or '').strip())
         ):
-            resolved_source = 'asm-qf_swapped'
+            resolved_source = f"{resolved_source}_swapped"
 
         score, mb_artist, mb_title, mbid, mb_album, mb_album_date, mb_first_release, mb_duration_ms = \
             self._mb_query_recording_timed(resolved_title, resolved_artist, context=f'candidate:{source}')
@@ -3908,19 +4098,19 @@ class RadioMonitor(xbmc.Monitor):
             qf_locked = str(getattr(self, '_parse_locked_source', '') or '').startswith('asm-qf')
             qf_authoritative = self._is_qf_authoritative()
             qf_require_fresh = not (qf_authoritative or qf_locked)
-            qf_artist, qf_title = self._current_qf_hit_pair(invalid, require_fresh=qf_require_fresh)
-            qf_artist = str(qf_artist or '').strip()
-            qf_title = str(qf_title or '').strip()
+            qf_hit = self._current_qf_hit_context(
+                require_fresh=qf_require_fresh,
+                allow_recent_nonfresh_hit=(not qf_require_fresh),
+            )
+            qf_artist = str((qf_hit or {}).get('artist') or '').strip()
+            qf_title = str((qf_hit or {}).get('title') or '').strip()
+            qf_source = str((qf_hit or {}).get('source') or 'asm-qf').strip() or 'asm-qf'
             if qf_artist and qf_title:
                 qf_valid = True
-                candidates.append({'source': 'asm-qf', 'artist': qf_artist, 'title': qf_title})
+                candidates.append({'source': qf_source, 'artist': qf_artist, 'title': qf_title})
             if qf_valid:
-                # FIX #6: Nur asm-qf (nicht swapped!) für Exklusiv-Modus
-                # asm-qf_swapped ist Fallback, wenn direktes Paar fehlschlägt
-                # Wenn wir es hier adden, könnte es mit getauschter Reihenfolge gewinnen
-                # Wenn nicht adden, haben wir bei Kandidaten-Fehler kein Fallback
-                # → Kompromiss: nur asm-qf in Exklusiv-Modus
-                candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf') and c.get('source') == 'asm-qf']
+                # QF-autoritativ: nur QF-Kandidaten auswerten (inkl. Detailquelle wie asm-qf_icy).
+                candidates[:] = [c for c in candidates if str(c.get('source', '')).startswith('asm-qf')]
             elif self._is_qf_authoritative():
                 # FIX #5: Neu-evaluieren statt stale qf_authoritative nutzen
                 # QF kann sich während parse_stream_title() execution geändert haben
@@ -4384,6 +4574,7 @@ class RadioMonitor(xbmc.Monitor):
 
                         # ASM-QF-Daten synchronisieren und auslesen
                         current_qf_pair = ('', '')
+                        fresh_qf_pair = ('', '')
                         qf_authoritative = False
                         if self._qf_enabled:
                             self._sync_qf_result_property()
@@ -4399,6 +4590,13 @@ class RadioMonitor(xbmc.Monitor):
                                 allow_recent_nonfresh_hit=qf_allow_recent_nonfresh_hit
                             )
                             current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
+                            # Hard-Guard: nur echte fresh hits fuer Force-Apply nutzen.
+                            fresh_qf_pair = self._current_qf_hit_pair(
+                                invalid_values,
+                                require_fresh=True,
+                                allow_recent_nonfresh_hit=False,
+                            )
+                            fresh_qf_pair = self._sanitize_stream_source_pair(fresh_qf_pair, station_name)
                             qf_authoritative = self._is_qf_authoritative()
 
                         # QF-Dominanz: Solange QF autoritativ ist, werden andere Quellen in diesem
@@ -4543,8 +4741,7 @@ class RadioMonitor(xbmc.Monitor):
                             not source_changed_trigger
                             and self._should_force_qf_apply_on_pair_change(
                                 last_winner_pair,
-                                current_qf_pair,
-                                qf_authoritative,
+                                fresh_qf_pair,
                             )
                         ):
                             source_changed_trigger = True
@@ -4553,6 +4750,7 @@ class RadioMonitor(xbmc.Monitor):
                                 'winner_source': last_winner_source or '-',
                                 'prev_pair': self._label_from_pair(last_winner_pair) or '-',
                                 'qf_pair': self._label_from_pair(current_qf_pair) or '-',
+                                'fresh_qf_pair': self._label_from_pair(fresh_qf_pair) or '-',
                                 'req_id': self._last_qf_request_id or '-',
                                 'res_id': self._last_qf_response_id or '-',
                                 'authoritative': qf_authoritative,

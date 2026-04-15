@@ -133,10 +133,14 @@ STATION_PROFILE_MP_ABSENT_SONG_RATE_MAX = 0.05
 STATION_PROFILE_MP_NOISE_FLIP_RATE_MIN = 0.30
 STATION_PROFILE_MP_NOISE_RELIABLE_EMA_MAX = 0.25
 STATION_PROFILE_KEYWORD_STATS_MAX = 40
-# Persistente Quellgruppen-Statistik (nur Quellengruppe 1, ohne ASM-QF)
+# Persistente Quellen-Statistik (pro Einzelquelle inkl. ASM-QF)
+SOURCE_STATS_FAMILIES = ('api', 'icy', 'musicplayer', 'asm-qf')
+# Persistente Quellgruppen-Hints fuer Source-Policy (bewusst nur api/icy/musicplayer)
 SOURCE_GROUP_FAMILIES = ('api', 'icy', 'musicplayer')
 SOURCE_GROUP_DB_MIN_SAMPLES = 8
 SOURCE_GROUP_DB_MIN_SHARE = 0.55
+SOURCE_GROUP_DB_SWAP_MIN_SAMPLES = 6
+SOURCE_GROUP_DB_SWAP_MIN_SHARE = 0.60
 # Source policy defaults
 SOURCE_POLICY_WINDOW = 40
 SOURCE_POLICY_SWITCH_MARGIN = 0.12
