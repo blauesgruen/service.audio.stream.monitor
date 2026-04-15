@@ -114,8 +114,8 @@ Er aendert kein DB-Schema, ist aber fuer stabile Source-Entscheidungen verpflich
 - Bei `status=hit` zusaetzlich: `RadioMonitor.QF.Response.Artist`, `RadioMonitor.QF.Response.Title`
 
 Hinweis fuer Skin-Labels:
-- ASM setzt kein eigenes `RadioMonitor.QF.Response.StationUsed`.
-- Uebliche `stationused`-Labels mappen auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
+- ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response).
+- Uebliche `stationused`-Labels koennen weiterhin auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta` mappen.
 
 ### Supersede/Cancellation-Regel
 

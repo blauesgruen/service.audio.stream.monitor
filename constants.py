@@ -202,6 +202,7 @@ class PropertyNames:
     QF_RESPONSE_SOURCE = 'RadioMonitor.QF.Response.Source'
     QF_RESPONSE_REASON = 'RadioMonitor.QF.Response.Reason'
     QF_RESPONSE_META = 'RadioMonitor.QF.Response.Meta'
+    QF_RESPONSE_STATION_USED = 'RadioMonitor.QF.Response.StationUsed'
     QF_RESPONSE_TS = 'RadioMonitor.QF.Response.Ts'
     QF_RESULT = 'RadioMonitor.QF.Result'
     AN_TRACE_ID = 'RadioMonitor.Analysis.TraceId'

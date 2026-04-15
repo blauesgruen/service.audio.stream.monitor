@@ -13,7 +13,7 @@
 > - API-Stationsnamen aus radio.de/TuneIn werden nur mit Source-Proof (verifizierter Plugin-Start) autoritativ gesetzt.
 > - ASM stabilisiert `RadioMonitor.QF.Request.Station` per Session-Anchor bis zum echten Streamwechsel/Stop.
 > - Bei langsamer terminaler QF-Entscheidung kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `fresh_reason=stale_response` auftreten.
-> - ASM setzt kein eigenes `RadioMonitor.QF.Response.StationUsed`; `stationused`-Skins mappen i. d. R. auf `Response.Source`/`Response.Meta`.
+> - ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `Response.Meta.station_used` (bei frischer Response); Fallback fuer `stationused` bleibt `Response.Source`/`Response.Meta`.
 
 ## 1. Übersicht der QF-Logik-Kette
 

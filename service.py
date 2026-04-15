@@ -1433,7 +1433,7 @@ class RadioMonitor(xbmc.Monitor):
 
     _BULLET_KEYS = {
         'RadioMonitor.Station', 'RadioMonitor.Title', 'RadioMonitor.ArtistDisplay',
-        'RadioMonitor.Album', 'RadioMonitor.Genre',
+        'RadioMonitor.Album', 'RadioMonitor.Genre', 'RadioMonitor.QF.Response.StationUsed',
     }
 
     def _has_addon(self, addon_id):
@@ -1668,8 +1668,22 @@ class RadioMonitor(xbmc.Monitor):
         status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
         artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
         title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+        meta_raw = (WINDOW.getProperty(_P.QF_RESPONSE_META) or '').strip()
         response_ts_raw = WINDOW.getProperty(_P.QF_RESPONSE_TS) or ''
         request_ts_raw = WINDOW.getProperty(_P.QF_REQUEST_TS) or ''
+        meta = {}
+        station_used = ''
+        if meta_raw:
+            try:
+                meta = json.loads(meta_raw)
+            except Exception:
+                meta = {}
+            if isinstance(meta, dict):
+                raw_station_used = meta.get('station_used')
+                if isinstance(raw_station_used, str):
+                    station_used = raw_station_used
+            else:
+                meta = {}
         response_ts = self._parse_qf_epoch_ts(response_ts_raw)
         request_ts = self._parse_qf_epoch_ts(request_ts_raw)
         
@@ -1735,12 +1749,24 @@ class RadioMonitor(xbmc.Monitor):
             'status': status,
             'artist': artist,
             'title': title,
+            'meta': meta,
+            'station_used': station_used,
             'request_ts': request_ts,
             'response_ts': response_ts,
             'gap_source': gap_source,
             'gap_raw': gap_raw,
             'fresh_reason': fresh_reason,
         }
+
+    def _sync_qf_response_station_used(self, snapshot):
+        if not isinstance(snapshot, dict):
+            WINDOW.clearProperty(_P.QF_RESPONSE_STATION_USED)
+            return
+        station_used = snapshot.get('station_used')
+        if station_used:
+            self.set_property_safe(_P.QF_RESPONSE_STATION_USED, str(station_used))
+        else:
+            WINDOW.clearProperty(_P.QF_RESPONSE_STATION_USED)
 
     def _is_qf_usable_nonfresh_hit(self, snapshot):
         """
@@ -1858,6 +1884,7 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.QF_RESPONSE_SOURCE)
         WINDOW.clearProperty(_P.QF_RESPONSE_REASON)
         WINDOW.clearProperty(_P.QF_RESPONSE_META)
+        WINDOW.clearProperty(_P.QF_RESPONSE_STATION_USED)
         WINDOW.clearProperty(_P.QF_RESPONSE_TS)
 
     def _is_qf_no_hit_hold_active(self):
@@ -1979,6 +2006,7 @@ class RadioMonitor(xbmc.Monitor):
             return
 
         snapshot = self._qf_response_snapshot()
+        self._sync_qf_response_station_used(snapshot)
         qf_authoritative = self._is_qf_authoritative()
         if not snapshot.get('fresh'):
             response_id = snapshot.get('response_id') or '-'

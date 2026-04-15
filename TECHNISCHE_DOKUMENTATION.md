@@ -215,7 +215,7 @@ Im Loop:
 - `non_fresh` wird dedupliziert, damit Polling-Rauschen das Log nicht flutet.
 - Snapshot-Felder: `fresh_reason`, `gap_source` (`server_ts`/`none`), `gap_s`.
 - `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
-- Skin-Hinweis: ASM setzt kein eigenes Property `RadioMonitor.QF.Response.StationUsed`; uebliche Skin-Bindings mappen auf `RadioMonitor.QF.Response.Source`/`Meta`.
+- Skin-Hinweis: ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response); Fallback-Bindings bleiben `Source`/`Meta`.
 
 ### 6.3 ASM-QF Runtime-Contract (Request/Response)
 

@@ -85,8 +85,8 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
 
 Hinweis fuer Skin-Mapping:
-- In ASM existiert **kein** eigenes Property `RadioMonitor.QF.Response.StationUsed`.
-- Uebliche `stationused`-Skins binden auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
+- ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response).
+- Fallback fuer aeltere Integrationen bleibt moeglich ueber `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta`.
 
 ## Verwendung in Skins
 
