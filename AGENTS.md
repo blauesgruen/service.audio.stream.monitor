@@ -20,6 +20,9 @@
 - `self._persist_data` gate't DB/Profile-Schreibzugriffe (u. a. `song_data.db`, `station_profiles`); Analyse-Events (`analysis_events.jsonl`) sind davon nicht betroffen.
 - API-Stationsnamen (radio.de/TuneIn) nur autoritativ setzen, wenn Source-Proof aus verifiziertem Plugin-Start vorliegt; URL/Logo-Heuristiken allein duerfen keinen Source-Proof erzeugen.
 - ASM-QF `no_hit` ist im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S` in `service.py`): transientes `no_hit` darf Artist/Title nicht sofort leeren.
+- Frische QF-Hits werden als Paar-Anker gelatcht (`_last_qf_fresh_hit_pair`), damit kurze Poll-Races keinen QF-Wechsel-Trigger verlieren.
+- Bei `last_winner_source=asm-qf` muss die Quellenauswertung auch ohne neuen ICY-Block laufen (kein starres `meta_length>0`-Gate).
+- Im `asm-qf*`-Pfad Artist/Title nur paar-atomar behandeln: bei unvollstaendigem Paar beide Felder (`Artist`/`ArtistDisplay`/`Title`) gemeinsam loeschen.
 - QF-Diagnose-Logs laufen zentral ueber `ASM-QF DIAG event=...` (key=value); neue QF-Logs nicht als freie Textlogs duplizieren.
 - QF-Request/Response-Vertrag einhalten: jede `RadioMonitor.QF.Request.Id` braucht genau eine terminale `RadioMonitor.QF.Response.Id` (auch `superseded`/`cancelled`/`error`/`no_hit`). Kein stilles Verwerfen.
 - `RadioMonitor.QF.Request.Station` innerhalb derselben Stream-Session stabil halten (Session-Anchor); Namensvarianten ohne echten Streamwechsel duerfen keinen QF-Request-Stationwechsel ausloesen.

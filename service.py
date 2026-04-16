@@ -271,6 +271,8 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_enabled = False
         self._last_qf_install_request_ts = 0.0
         self._last_qf_result = ''
+        self._last_qf_applied_pair = ('', '')
+        self._last_qf_fresh_hit_pair = ('', '')
         self._qf_request_seq = 0
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
@@ -1420,6 +1422,8 @@ class RadioMonitor(xbmc.Monitor):
         self._active_policy_profile = {}
         self._last_verified_source_write = ('', '', '', 0.0)
         self._last_qf_result = ''
+        self._last_qf_applied_pair = ('', '')
+        self._last_qf_fresh_hit_pair = ('', '')
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
         self._qf_station_anchor = ''
@@ -2016,13 +2020,13 @@ class RadioMonitor(xbmc.Monitor):
         """
         return bool(self._qf_enabled and self.is_playing and not self._is_qf_fallback_exception())
 
-    def _should_force_qf_apply_on_pair_change(self, last_winner_pair, fresh_qf_pair):
+    def _should_force_qf_apply_on_pair_change(self, last_applied_qf_pair, fresh_qf_pair):
         if not self._qf_enabled:
             return False
         if not (fresh_qf_pair and fresh_qf_pair[0] and fresh_qf_pair[1]):
             return False
-        prev_artist = str((last_winner_pair or ('', ''))[0] or '').strip()
-        prev_title = str((last_winner_pair or ('', ''))[1] or '').strip()
+        prev_artist = str((last_applied_qf_pair or ('', ''))[0] or '').strip()
+        prev_title = str((last_applied_qf_pair or ('', ''))[1] or '').strip()
         curr_artist = str(fresh_qf_pair[0] or '').strip()
         curr_title = str(fresh_qf_pair[1] or '').strip()
         return (curr_artist, curr_title) != (prev_artist, prev_title)
@@ -2297,6 +2301,7 @@ class RadioMonitor(xbmc.Monitor):
         """
         if not self._qf_enabled or not self.is_playing:
             self._last_qf_result = ''
+            self._last_qf_fresh_hit_pair = ('', '')
             self._stop_qf_no_hit_hold(reason='qf_disabled_or_not_playing')
             if not self.is_playing:
                 self._clear_qf_response_properties()
@@ -2305,6 +2310,7 @@ class RadioMonitor(xbmc.Monitor):
 
         if not self._last_qf_request_id:
             self._last_qf_result = ''
+            self._last_qf_fresh_hit_pair = ('', '')
             self._stop_qf_no_hit_hold(reason='no_request_id')
             WINDOW.clearProperty(_P.QF_RESULT)
             return
@@ -2391,6 +2397,7 @@ class RadioMonitor(xbmc.Monitor):
                     })
                     return
             self._last_qf_result = ''
+            self._last_qf_fresh_hit_pair = ('', '')
             WINDOW.clearProperty(_P.QF_RESULT)
             self._stop_qf_no_hit_hold(reason='status_not_hit')
             # QF bleibt in diesem Zustand autoritativ (z.B. "kein Song"):
@@ -2420,6 +2427,7 @@ class RadioMonitor(xbmc.Monitor):
                     })
                     return
             self._last_qf_result = ''
+            self._last_qf_fresh_hit_pair = ('', '')
             WINDOW.clearProperty(_P.QF_RESULT)
             self._stop_qf_no_hit_hold(reason='empty_hit_pair')
             if qf_authoritative:
@@ -2431,6 +2439,7 @@ class RadioMonitor(xbmc.Monitor):
         label = self._compose_song_label(artist=artist, title=title)
         if not label:
             self._last_qf_result = ''
+            self._last_qf_fresh_hit_pair = ('', '')
             WINDOW.clearProperty(_P.QF_RESULT)
             if qf_authoritative:
                 WINDOW.clearProperty(_P.ARTIST)
@@ -2439,6 +2448,7 @@ class RadioMonitor(xbmc.Monitor):
             return
 
         self._stop_qf_no_hit_hold(reason='fresh_hit')
+        self._last_qf_fresh_hit_pair = (artist, title)
 
         if label != self._last_qf_result:
             self._last_qf_result = label
@@ -4514,6 +4524,7 @@ class RadioMonitor(xbmc.Monitor):
                         meta_length > 0
                         or last_winner_source.startswith('musicplayer')
                         or last_winner_source.startswith('api')
+                        or last_winner_source.startswith('asm-qf')
                         or initial_source_pending
                     ):
                         if meta_length > 0:
@@ -4584,19 +4595,31 @@ class RadioMonitor(xbmc.Monitor):
                                 and not last_winner_source
                                 and self._is_qf_authoritative()
                             )
-                            current_qf_pair = self._current_qf_hit_pair(
-                                invalid_values,
+                            qf_context = self._current_qf_hit_context(
                                 require_fresh=qf_require_fresh,
-                                allow_recent_nonfresh_hit=qf_allow_recent_nonfresh_hit
+                                allow_recent_nonfresh_hit=qf_allow_recent_nonfresh_hit,
                             )
+                            if isinstance(qf_context, dict):
+                                current_qf_pair = (
+                                    str(qf_context.get('artist') or '').strip(),
+                                    str(qf_context.get('title') or '').strip(),
+                                )
                             current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
-                            # Hard-Guard: nur echte fresh hits fuer Force-Apply nutzen.
-                            fresh_qf_pair = self._current_qf_hit_pair(
-                                invalid_values,
+                            # Force-Apply nur bei frischen Hits; Rohpaar absichtlich unsanitized,
+                            # damit QF-Pair-Wechsel den MB-Postcheck sicher triggert.
+                            fresh_qf_context = self._current_qf_hit_context(
                                 require_fresh=True,
                                 allow_recent_nonfresh_hit=False,
                             )
-                            fresh_qf_pair = self._sanitize_stream_source_pair(fresh_qf_pair, station_name)
+                            if isinstance(fresh_qf_context, dict):
+                                fresh_qf_pair = (
+                                    str(fresh_qf_context.get('artist') or '').strip(),
+                                    str(fresh_qf_context.get('title') or '').strip(),
+                                )
+                            if not (fresh_qf_pair[0] and fresh_qf_pair[1]):
+                                # Fresh-Hits koennen durch Poll/Loop-Rennen kurzzeitig nicht sichtbar sein.
+                                # Das letzte frische QF-Paar wird deshalb als Trigger-Anker genutzt.
+                                fresh_qf_pair = self._last_qf_fresh_hit_pair
                             qf_authoritative = self._is_qf_authoritative()
 
                         # QF-Dominanz: Solange QF autoritativ ist, werden andere Quellen in diesem
@@ -4740,7 +4763,7 @@ class RadioMonitor(xbmc.Monitor):
                         if (
                             not source_changed_trigger
                             and self._should_force_qf_apply_on_pair_change(
-                                last_winner_pair,
+                                self._last_qf_applied_pair,
                                 fresh_qf_pair,
                             )
                         ):
@@ -4748,7 +4771,7 @@ class RadioMonitor(xbmc.Monitor):
                             trigger_reason = self.TRIGGER_QF_CHANGE
                             self._log_qf_diag('force_apply_fresh_hit_changed_pair', {
                                 'winner_source': last_winner_source or '-',
-                                'prev_pair': self._label_from_pair(last_winner_pair) or '-',
+                                'prev_pair': self._label_from_pair(self._last_qf_applied_pair) or '-',
                                 'qf_pair': self._label_from_pair(current_qf_pair) or '-',
                                 'fresh_qf_pair': self._label_from_pair(fresh_qf_pair) or '-',
                                 'req_id': self._last_qf_request_id or '-',
@@ -5044,6 +5067,14 @@ class RadioMonitor(xbmc.Monitor):
                                 WINDOW.clearProperty(_P.ARTIST_DISPLAY)
                                 artist = ''
 
+                            if str(decision_source or '').startswith('asm-qf') and not (artist and title):
+                                # QF-Paare nur atomar fuehren: nie halbe Labels stehen lassen.
+                                WINDOW.clearProperty(_P.TITLE)
+                                WINDOW.clearProperty(_P.ARTIST)
+                                WINDOW.clearProperty(_P.ARTIST_DISPLAY)
+                                title = ''
+                                artist = ''
+
                             # Logo sofort nach Artist setzen – vor dem optionalen Artist-Info-Call,
                             # damit der time.sleep(1) das Logo nicht verzögert.
                             self.set_logo_safe()
@@ -5129,6 +5160,18 @@ class RadioMonitor(xbmc.Monitor):
                                     last_winner_pair = decision_pair
                                 else:
                                     last_winner_pair = (artist or '', title or '')
+                                if str(decision_source).startswith('asm-qf'):
+                                    # Fuer Force-Apply das rohe QF-Entscheidungspaar verwenden,
+                                    # nicht das ggf. MB-korrigierte Ausgabepaar.
+                                    if decision_pair[0] and decision_pair[1]:
+                                        self._last_qf_applied_pair = (
+                                            decision_pair[0] or '',
+                                            decision_pair[1] or '',
+                                        )
+                                    else:
+                                        self._last_qf_applied_pair = ('', '')
+                                else:
+                                    self._last_qf_applied_pair = ('', '')
                                 self._record_source_group_decision_if_allowed(
                                     station_for_policy,
                                     decision_source,

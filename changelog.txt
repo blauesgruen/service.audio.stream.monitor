@@ -1,3 +1,8 @@
+v1.1.4 (2026-04-16)
+- Doku-Sync: `README.md`, `TECHNISCHE_DOKUMENTATION.md`, `AGENTS.md`, `QF_CHAIN_ANALYSIS.md` und `docs/00_ueberblick/ASM_QF_SHARED_DB_CONTRACT.md` auf den aktuellen QF-Trigger-/Apply-Stand gebracht.
+- Dokumentiert: Fresh-Hit-Latch (`_last_qf_fresh_hit_pair`), QF-Auswertung ohne neuen ICY-Block bei `last_winner_source=asm-qf`, paar-atomisches Label-Clearing im `asm-qf*`-Pfad.
+- Klarstellung: `QF_CHAIN_ANALYSIS.md` ist historisch; autoritativ bleiben Runtime-Contract und technische Doku.
+
 v1.1.3 (2026-04-13)
 - Fix: ASM-QF-Prefill setzt nun sowohl `RadioMonitor.Artist` als auch `RadioMonitor.ArtistDisplay`, damit Skins mit `ArtistDisplay` keinen leeren Artist mehr zeigen.
 - Anpassung: Bei `last_winner_source=asm-qf` beeinflusst ein reiner ICY-`StreamTitle`-Wechsel die Trigger-Entscheidung nicht mehr.

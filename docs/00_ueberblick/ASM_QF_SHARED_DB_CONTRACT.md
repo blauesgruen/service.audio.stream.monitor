@@ -1,6 +1,6 @@
 # ASM <-> ASM-QF Shared DB Contract
 
-Stand: 2026-04-14
+Stand: 2026-04-16
 
 ## Ziel
 
@@ -127,7 +127,9 @@ Hinweis fuer Skin-Labels:
 - ASM bewertet Freshness primaer ueber Request-ID-Match; non-fresh ist nicht automatisch ein Fehler.
 - Fuer Diagnosen sind zentral die Felder `fresh_reason`, `gap_source`, `gap_s` aus `ASM-QF DIAG event=non_fresh` massgeblich.
 - Autoritative no-hit-Phasen koennen kurz gepuffert sein (`QF_NO_HIT_HOLD_S`), damit transiente no-hit-Responses Labels nicht sofort leeren.
+- Frische Hit-Paare werden in ASM kurzfristig gelatcht (`_last_qf_fresh_hit_pair`), damit kurze Poll-Races den QF-Wechsel-Trigger nicht verlieren.
 - Bei langen terminalen QF-Entscheidungen kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `fresh_reason=stale_response` auftreten; das ist ein Timing-Indikator fuer die QF-Kette.
+- Im `asm-qf*`-Entscheidungspfad werden Artist/Title paar-atomar behandelt: unvollstaendige Paare loeschen beide Label-Felder statt halber Updates.
 
 ### Stabile Request-Station (ASM-Seite)
 

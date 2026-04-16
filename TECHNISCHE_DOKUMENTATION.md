@@ -80,6 +80,7 @@ Wichtige Runtime-Felder in `RadioMonitor`:
 - `_api_source_proof` (autoritative API-Quellverifikation aus echtem Plugin-Start)
 - `_last_song_time`, `_song_timeout` (song timeout management)
 - `_qf_station_anchor` (stabile `QF.Request.Station` pro Stream-Session)
+- `_last_qf_fresh_hit_pair` (gelatchtes frisches QF-Hit-Paar als Trigger-Anker bei Poll-Races)
 - `source_policy`, `_last_policy_context`, `_policy_preferred_source`
 - `_profile_store`, `_station_profile_session`, `_active_policy_profile`, `_station_profile_policy_enabled`
 - `_session_icy_song_seen`, `_session_api_stable_pair`, `_session_api_stable_polls` (API-only Startup-Heuristik)
@@ -143,6 +144,7 @@ Source-Proof fuer API-Stationsnamen:
 Im Loop:
 - liest Audio-Bytes bis `metaint`, dann Metadatenblocklaenge und Metadatenblock
 - extrahiert `StreamTitle` via `metadata.extract_stream_title`
+- Auswertungs-Gate: Parse/Policy laeuft nicht nur bei `meta_length > 0`, sondern auch wenn die letzte Gewinnerquelle `asm-qf` ist; dadurch bleiben spaete QF-Hits ohne neuen ICY-Block verarbeitbar
 - API-Refresh nur nach stabilem Start oder nach gesetzter Erstquelle (kein Vorbefuellen waehrend Buffering)
 - bei Titelwechsel:
   - invalidiert MB Song-Cache: `_mb_cache.clear()`
@@ -204,6 +206,7 @@ Im Loop:
 7. ASM-QF Prefill / Skin-Kompatibilitaet
 - `_sync_qf_result_property()` setzt bei QF-`hit` sowohl `RadioMonitor.Artist` als auch `RadioMonitor.ArtistDisplay`.
 - Hintergrund: einige Skins rendern `ArtistDisplay` statt `Artist`; beide Felder werden daher im QF-Prefill konsistent befuellt.
+- Fresh-Hit-Latch: bei frischem QF-`hit` wird `_last_qf_fresh_hit_pair` gesetzt; wenn im Folgetakt kein frischer Kontext sichtbar ist, dient dieser Latch als kurzfristiger Trigger-Anker fuer `TRIGGER_QF_CHANGE`.
 - Der Prefill bleibt bewusst roh/schnell; die spaetere MB-Korrektur (inkl. moeglichem Swap) erfolgt nachgelagert im `parse_stream_title()`-Pfad.
 
 8. ASM-QF no-hit-hold / Trigger-Parking
@@ -473,6 +476,7 @@ Nicht verletzen ohne expliziten Grund:
 - API-only Startup-Bypass nur unter den vorgesehenen Heuristik-/Profilbedingungen aktivieren
 - MB-Bereinigung nur wenn beide Aehnlichkeitsschwellen erfuellt (`MB_LABEL_CORRECTION_MIN_SIM`); MB darf Labels niemals komplett ersetzen wenn der Treffer ein anderer Song ist
 - Quellentracking (`_set_last_song_decision`) immer mit Originalwerten aus der Quelle – nie mit MB-korrigierten Werten
+- Im `asm-qf*`-Pfad Artist/Title nur paar-atomar fuehren: wenn eines fehlt, beide Label-Felder (`Artist`, `ArtistDisplay`, `Title`) gemeinsam loeschen
 - `resources/settings.xml` muss vor dem Kodi-Start existieren und darf niemals komplett ueberschrieben werden; `skin_colors.update_settings_colors()` aendert ausschliesslich das `values`-Attribut von `bullet_color`
 - alle DB- und JSON-Schreibzugriffe pruefen `self._persist_data` (Setting `persist_data`); Lesezugriffe sind davon unabhaengig
 - Song-DB-Persistenz nur fuer MB-verifizierte Songs (MBID erforderlich)

@@ -49,8 +49,10 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Verbindlicher ASM↔ASM-QF Laufzeitvertrag: jede `RadioMonitor.QF.Request.Id` wird mit genau einer terminalen Response abgeschlossen (`hit`/`no_hit`/`resolve_error`/`error`/`timeout`/`superseded`/`cancelled`)
 - ✅ Supersede ohne Response ist unzulaessig: auch ueberholte Requests muessen als `superseded` oder `cancelled` beantwortet werden, damit ASM nicht bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster bleibt
 - ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
-- ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt (nicht strikt an `fresh`-Request-ID-Match gebunden)
+- ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt; als Trigger-Anker dient bei kurzen Poll-Races auch das zuletzt gelatchte frische Hit-Paar
 - ✅ QF-`no_hit` wird im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S=8s`), damit transiente Responses keine kurzen Label-Leerungen verursachen
+- ✅ Metadata-Loop bewertet QF auch ohne neuen ICY-Block weiter (`last_winner_source=asm-qf`), damit spaet eintreffende QF-Hits im selben Stream sauber angewendet werden
+- ✅ QF-Label-Fuehrung ist paar-atomar: im `asm-qf*`-Pfad werden `Artist`/`Title` nur gemeinsam gehalten; unvollstaendige Paare loeschen beide Felder
 - ✅ Zentrales QF-Diagnose-Logging: `ASM-QF DIAG event=...` mit stabilen Feldern (`fresh_reason`, `gap_source`, `gap_s`, `hold_*`) zur Flapping-/Race-Analyse
 - ✅ Bekannter Timing-Effekt im Diagnosemodus: bei langsam terminalen QF-Responses kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `stale_response` auftreten; siehe `ASM-QF DIAG event=non_fresh`
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
@@ -177,6 +179,7 @@ Parsing-Regeln:
 - Für alle anderen Quellen werden keine radio.de/TuneIn-API-Calls ausgeführt.
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierten Score (`MB score * artist similarity`) und akzeptiert Kandidaten erst oberhalb der Schwellen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`).
 - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
+- ASM-QF-Postcheck ist zweiphasig: pro QF-Kandidat erfolgt ein MB-`identify` fuer die Swap-Richtung und anschliessend ein MB-Recording-Score; im QF-Pfad bleibt die Korrektur auf die Paar-Richtung begrenzt (kein aggressives Umbenennen).
 - Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
 - Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
 - Shared-DB fuer verifizierte Senderquellen: Tabelle `verified_station_sources` in `song_data.db` (unter `~userdata/addon_data/service.audio.stream.monitor/`). ASM nutzt URL-Matches als Stations-Hint; ASM-QF kann in dieselbe Tabelle schreiben.
