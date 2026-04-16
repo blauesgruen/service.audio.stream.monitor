@@ -155,6 +155,8 @@ Im Loop:
 
 1. Kandidatenbildung (ASM-QF + API + ICY + optional MusicPlayer)
 - ASM-QF-Kandidaten (bei aktivem QF): Exklusiv-Modus, wenn ein valides QF-Paar vorliegt (andere Kandidaten werden verworfen)
+- QF-Hit-Paare werden im Runtime-Pfad fuer Trigger/Songwechsel 1:1 aus `RadioMonitor.QF.Response.Artist/Title` uebernommen (keine pre_mb-Sanitizer an dieser Stelle)
+- QF-Detailquelle wird aus QF-Response-Hints abgeleitet: bei ICY-Hinweis (`Response.Source` bzw. `Response.Meta.source/source_kind` enthaelt `icy`) wird der Kandidat als `asm-qf_icy` gefuehrt, sonst `asm-qf`
 - Im aktiven ASM-QF-Lock kann die QF-Paar-Erkennung ohne strikten `fresh`-Request-ID-Match laufen, aber nur fuer plausible Kurzzeit-Races: `status=hit`, valides Paar, `fresh_reason=id_mismatch_waiting` und `gap_s <= QF_HIT_MISMATCH_GRACE_S`.
 - Nicht-plausible non-fresh Hits (z. B. alte mismatches mit grossem `gap_s`) werden auch im Lock verworfen, um stale QF-Hits und Fehltrigger in Moderationsphasen zu vermeiden.
 - MusicPlayer-Kandidaten (direkt + swapped)
@@ -165,6 +167,7 @@ Im Loop:
 - jeder Kandidat wird per MB bewertet (`score`, `artist_sim`, `title_sim`, `combined`)
 - ASM-QF-Kandidaten bleiben Winner-priorisiert, laufen aber vor der Winner-Auswahl durch den zentralen MB-Resolver (Swap-/Identifikationslogik)
 - Ergebnis fuer ASM-QF ist damit zweiphasig: sofortiger QF-Prefill (Rohdaten), danach MB-Postcheck im Parse-Flow
+- Wenn der MB-Postcheck fuer einen QF-Kandidaten die Richtung sicher dreht, bleibt die Quellenfamilie `asm-qf`, aber `SourceDetail` wird als `asm-qf*_swapped` sichtbar (z. B. `asm-qf_icy_swapped`)
 - Non-QF-Kandidaten gelten als valide, wenn sie die Schwellwerte erreichen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`)
 - Quell-Prioritaet bei Gleichstand (Non-QF): `musicplayer > icy > api`
 - MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte

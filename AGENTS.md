@@ -23,6 +23,7 @@
 - Frische QF-Hits werden als Paar-Anker gelatcht (`_last_qf_fresh_hit_pair`), damit kurze Poll-Races keinen QF-Wechsel-Trigger verlieren.
 - Bei `last_winner_source=asm-qf` muss die Quellenauswertung auch ohne neuen ICY-Block laufen (kein starres `meta_length>0`-Gate).
 - Im `asm-qf*`-Pfad Artist/Title nur paar-atomar behandeln: bei unvollstaendigem Paar beide Felder (`Artist`/`ArtistDisplay`/`Title`) gemeinsam loeschen.
+- QF-Rohpaar fuer Trigger/Songwechsel 1:1 fuehren (aus `QF.Response.Artist/Title`), nicht vorzeitig durch pre_mb-Sanitizer filtern.
 - QF-Diagnose-Logs laufen zentral ueber `ASM-QF DIAG event=...` (key=value); neue QF-Logs nicht als freie Textlogs duplizieren.
 - QF-Request/Response-Vertrag einhalten: jede `RadioMonitor.QF.Request.Id` braucht genau eine terminale `RadioMonitor.QF.Response.Id` (auch `superseded`/`cancelled`/`error`/`no_hit`). Kein stilles Verwerfen.
 - `RadioMonitor.QF.Request.Station` innerhalb derselben Stream-Session stabil halten (Session-Anchor); Namensvarianten ohne echten Streamwechsel duerfen keinen QF-Request-Stationwechsel ausloesen.
@@ -35,6 +36,7 @@
 - Supersede-Regel: wird ein laufender QF-Request intern ueberholt, muss die alte Request-ID explizit mit terminalem Status beantwortet werden, sonst bleibt ASM bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster.
 - Aktiver ASM-QF-Lock: reiner ICY-`StreamTitle`-Wechsel triggert keinen Quellenwechsel; QF-Paarwechsel darf im Lock auch ohne strikten `fresh`-Request-ID-Match erkannt werden.
 - QF-Prefill fuer Skin-Kompatibilitaet: bei QF-`hit` werden `RadioMonitor.Artist` und `RadioMonitor.ArtistDisplay` synchron gesetzt.
+- Winner-Detailquelle sichtbar halten: bei QF-ICY-Pfad `SourceDetail=asm-qf_icy`, bei sicherem MB-Swap `asm-qf_icy_swapped`.
 - Bei aktivem QF-no-hit-hold werden Trigger/Clears defensiv geparkt (`hold_park_trigger`, `hold_skip_no_usable_clear`), Song-Ende-Signale (Detektor/Timeout) bleiben davon unberuehrt.
 
 ## Integrationen und Vertraege

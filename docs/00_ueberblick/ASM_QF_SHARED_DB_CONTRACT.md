@@ -114,7 +114,9 @@ Er aendert kein DB-Schema, ist aber fuer stabile Source-Entscheidungen verpflich
 - Bei `status=hit` zusaetzlich: `RadioMonitor.QF.Response.Artist`, `RadioMonitor.QF.Response.Title`
 
 Hinweis fuer Skin-Labels:
-- ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `RadioMonitor.QF.Response.Meta.station_used` (bei frischer Response).
+- ASM setzt `RadioMonitor.QF.Response.StationUsed` 1:1 aus `RadioMonitor.QF.Response.Meta.station_used`.
+- Ist `station_used` leer/fehlend, leert ASM das Label (`RadioMonitor.QF.Response.StationUsed`).
+- Bei Streamwechsel/Stop leert ASM die QF-Response-Properties ebenfalls konsistent (inkl. `RadioMonitor.QF.Response.StationUsed`).
 - Uebliche `stationused`-Labels koennen weiterhin auf `RadioMonitor.QF.Response.Source` und/oder `RadioMonitor.QF.Response.Meta` mappen.
 
 ### Supersede/Cancellation-Regel

@@ -13,10 +13,11 @@
 > - API-Stationsnamen aus radio.de/TuneIn werden nur mit Source-Proof (verifizierter Plugin-Start) autoritativ gesetzt.
 > - ASM stabilisiert `RadioMonitor.QF.Request.Station` per Session-Anchor bis zum echten Streamwechsel/Stop.
 > - Bei langsamer terminaler QF-Entscheidung kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `fresh_reason=stale_response` auftreten.
-> - ASM setzt `RadioMonitor.QF.Response.StationUsed` aus `Response.Meta.station_used` (bei frischer Response); Fallback fuer `stationused` bleibt `Response.Source`/`Response.Meta`.
+> - ASM spiegelt `RadioMonitor.QF.Response.StationUsed` 1:1 aus `Response.Meta.station_used` (leer/fehlend => Clear); Fallback fuer `stationused` bleibt `Response.Source`/`Response.Meta`.
 > - Frische QF-Hits werden als Paar-Anker gelatcht (`_last_qf_fresh_hit_pair`), damit Trigger bei Poll-Races nicht verloren gehen.
 > - Bei `last_winner_source=asm-qf` bleibt die Quellenauswertung auch ohne neuen ICY-Metablock aktiv.
 > - Im `asm-qf*`-Pfad werden Artist/Title nur paar-atomar gefuehrt (keine halben Label-Zustaende).
+> - QF-Rohpaare fuer Trigger/Songwechsel bleiben 1:1 aus `QF.Response.Artist/Title` (kein pre_mb-Sanitizer vor MB-Postcheck).
 >
 > Einordnung: Die folgenden Kapitel dokumentieren historische Problemhypothesen. Mehrere dort genannte Punkte
 > sind im aktuellen Code bereits adressiert oder durch neuere Invarianten ersetzt. Fuer Entscheidungen immer

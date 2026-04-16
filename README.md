@@ -49,7 +49,9 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Verbindlicher ASM↔ASM-QF Laufzeitvertrag: jede `RadioMonitor.QF.Request.Id` wird mit genau einer terminalen Response abgeschlossen (`hit`/`no_hit`/`resolve_error`/`error`/`timeout`/`superseded`/`cancelled`)
 - ✅ Supersede ohne Response ist unzulaessig: auch ueberholte Requests muessen als `superseded` oder `cancelled` beantwortet werden, damit ASM nicht bis `QF_NO_RESPONSE_FALLBACK_S` im no-response-Wartefenster bleibt
 - ✅ QF-Prefill schreibt fuer Skin-Kompatibilitaet beide Artist-Properties (`RadioMonitor.Artist` + `RadioMonitor.ArtistDisplay`)
+- ✅ QF-Rohdaten werden im QF-Pfad fuer Trigger/Songwechsel 1:1 genutzt (keine pre_mb-Sanitizer vor dem MB-Postcheck)
 - ✅ QF-Paarwechsel im aktiven QF-Lock wird robust erkannt; als Trigger-Anker dient bei kurzen Poll-Races auch das zuletzt gelatchte frische Hit-Paar
+- ✅ `RadioMonitor.SourceDetail` bleibt im QF-ICY-Pfad nachvollziehbar (`asm-qf_icy`, bei MB-Swap `asm-qf_icy_swapped`)
 - ✅ QF-`no_hit` wird im autoritativen QF-Zustand kurz gepuffert (`QF_NO_HIT_HOLD_S=8s`), damit transiente Responses keine kurzen Label-Leerungen verursachen
 - ✅ Metadata-Loop bewertet QF auch ohne neuen ICY-Block weiter (`last_winner_source=asm-qf`), damit spaet eintreffende QF-Hits im selben Stream sauber angewendet werden
 - ✅ QF-Label-Fuehrung ist paar-atomar: im `asm-qf*`-Pfad werden `Artist`/`Title` nur gemeinsam gehalten; unvollstaendige Paare loeschen beide Felder
@@ -73,6 +75,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.FirstRelease`     | Jahr der Erstveröffentlichung des Songs | "1975" |
 | `RadioMonitor.StreamTitle`      | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.Source`           | Aktive Song-Quellenfamilie (`asm-qf`, `musicplayer`, `api`, `icy`) | "asm-qf" |
+| `RadioMonitor.SourceDetail`     | Detailquelle des Winners (z. B. `asm-qf`, `asm-qf_icy`, `asm-qf_icy_swapped`, `icy_swapped`) | "asm-qf_icy_swapped" |
 | `RadioMonitor.Genre`            | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo`             | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed`       | Gründungsjahr (nur bei Bands) | "1995" |
@@ -85,6 +88,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.VerifiedSourceBy` | Verifizierender Addon-Owner der Quelle | "service.audio.stream.monitor.qf" |
 | `RadioMonitor.VerifiedSourceConfidence` | Confidence der verifizierten Quelle (0..1) | "0.950" |
 | `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
+| `RadioMonitor.QF.Response.StationUsed` | 1:1-Spiegel aus `RadioMonitor.QF.Response.Meta.station_used` (leer/fehlend => Label-Clear) | "Antenne Bayern" |
 
 Hinweis fuer Skin-Mapping:
 - ASM spiegelt `RadioMonitor.QF.Response.StationUsed` direkt aus `RadioMonitor.QF.Response.Meta.station_used` (1:1; leer/fehlend = Label-Clear).

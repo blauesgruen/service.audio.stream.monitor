@@ -1,3 +1,9 @@
+v1.1.5 (2026-04-16)
+- QF-Runtime: QF-Rohpaar bleibt fuer Trigger/Songwechsel 1:1 aus `RadioMonitor.QF.Response.Artist/Title` (kein pre_mb-Sanitizer vor MB-Postcheck).
+- QF-First-Paint-Reihenfolge praezisiert: `Title` vor `Artist`, MBID-Clear dazwischen, damit Trigger-Leser konsistente Felder sehen.
+- Doku-Sync: `README.md`, `TECHNISCHE_DOKUMENTATION.md`, `AGENTS.md`, `QF_CHAIN_ANALYSIS.md` und `docs/00_ueberblick/ASM_QF_SHARED_DB_CONTRACT.md` auf den aktuellen QF-Stand gebracht.
+- Dokumentiert: `RadioMonitor.SourceDetail` im QF-ICY-Pfad (`asm-qf_icy`, bei MB-Swap `asm-qf_icy_swapped`) sowie `RadioMonitor.QF.Response.StationUsed` als 1:1-Spiegel mit Clear bei leer/fehlend und bei Stop/Streamwechsel.
+
 v1.1.4 (2026-04-16)
 - Doku-Sync: `README.md`, `TECHNISCHE_DOKUMENTATION.md`, `AGENTS.md`, `QF_CHAIN_ANALYSIS.md` und `docs/00_ueberblick/ASM_QF_SHARED_DB_CONTRACT.md` auf den aktuellen QF-Trigger-/Apply-Stand gebracht.
 - Dokumentiert: Fresh-Hit-Latch (`_last_qf_fresh_hit_pair`), QF-Auswertung ohne neuen ICY-Block bei `last_winner_source=asm-qf`, paar-atomisches Label-Clearing im `asm-qf*`-Pfad.
