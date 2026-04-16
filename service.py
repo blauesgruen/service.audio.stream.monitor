@@ -4600,11 +4600,11 @@ class RadioMonitor(xbmc.Monitor):
                                 allow_recent_nonfresh_hit=qf_allow_recent_nonfresh_hit,
                             )
                             if isinstance(qf_context, dict):
+                                # QF-Rohpaar bleibt bewusst 1:1; keine pre_mb-Sanitizer im QF-Pfad.
                                 current_qf_pair = (
                                     str(qf_context.get('artist') or '').strip(),
                                     str(qf_context.get('title') or '').strip(),
                                 )
-                            current_qf_pair = self._sanitize_stream_source_pair(current_qf_pair, station_name)
                             # Force-Apply nur bei frischen Hits; Rohpaar absichtlich unsanitized,
                             # damit QF-Pair-Wechsel den MB-Postcheck sicher triggert.
                             fresh_qf_context = self._current_qf_hit_context(
@@ -4896,8 +4896,8 @@ class RadioMonitor(xbmc.Monitor):
                                 and current_qf_pair[0]
                                 and current_qf_pair[1]
                             ):
-                                WINDOW.clearProperty(_P.MBID)
                                 self.set_property_safe(_P.TITLE, current_qf_pair[1])
+                                WINDOW.clearProperty(_P.MBID)
                                 self.set_property_safe(_P.ARTIST, current_qf_pair[0])
                                 self.set_property_safe(_P.ARTIST_DISPLAY, current_qf_pair[0])
                                 self._log_qf_diag('first_paint_qf', {
