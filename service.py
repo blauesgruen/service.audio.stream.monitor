@@ -3947,6 +3947,9 @@ class RadioMonitor(xbmc.Monitor):
             station_name = icy_name
             if station_name:
                 log_debug(f"Station (ICY): {station_name}")
+                # ICY-Station sofort publizieren. Sonst bleibt RadioMonitor.Station
+                # bei leerem StreamTitle unter Umstaenden dauerhaft leer.
+                self.set_property_safe(_P.STATION, station_name)
                 self._record_verified_station_source(
                     station_name=station_name,
                     stream_url=url,
