@@ -23,7 +23,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Source-Policy nach Erstentscheidung: Songwechsel werden ueber eine zustandsbehaftete Quellen-Policy (`asm-qf`/`musicplayer`/`api`/`icy`) bewertet; Wechsel erfolgen nur bei belastbaren Signalen; ICY-Songwechsel werden sofort erkannt (kein Multi-Poll-Confirm, da ICY-Metadaten nur einmal pro Songwechsel ankommen)
 - ✅ Aktiver ASM-QF-Lock ist strikt: bei `last_winner_source=asm-qf` beeinflusst ein reiner ICY-`StreamTitle`-Wechsel die Trigger-Entscheidung nicht
 - ✅ Wenn MB-Scores aller Kandidaten = 0, bleibt bei aktivem Source-Lock die gelockte Quelle fuer Artist/Title massgeblich
-- ✅ MusicPlayer als eigenstaendige Entscheidungsquelle ist per Feature-Flag vorhanden, aktuell aber standardmaessig deaktiviert (`MP_DECISION_ENABLED=false`); der MusicPlayer-Fallback ohne ICY/API bleibt aktiv
+- ✅ MusicPlayer als eigenstaendige Entscheidungsquelle ist per Feature-Flag vorhanden, aktuell aber standardmaessig deaktiviert (`MP_DECISION_ENABLED=false`); der MusicPlayer-Fallback ohne ICY/API laeuft nur wenn `_is_mp_decision_active()` greift (Flag oder verlaessliches Stationsprofil)
 - ✅ Lernende Senderprofile pro Station (persistiert als JSON): Confidence, dominante Quellenfamilie, API-Lag und adaptive Policy-Gewichte
 - ✅ SQLite-Datenbank: bestätigte Songs als LRU-Cache (bis 200 pro Sender), Tageszaehler und sender-spezifische Generic-Keywords (Jingles/Stationsinfos) zur Filterung nicht-songartiger ICY-Blöcke
 - ✅ Gemeinsame Verified-Source-DB in `addon_data/service.audio.stream.monitor/song_data.db`: ASM und `service.audio.stream.monitor.qf` teilen verifizierte Senderquellen (`verified_station_sources`)
@@ -32,10 +32,10 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ Struktur-Flags aus Senderprofilen verbessern Quellbewertung: `icy_structural_generic`, `mp_absent`, `mp_noise`
 - ✅ Startup-Bypass fuer API-only-Sender: initialer Song-Block wird aufgehoben, wenn API stabil liefert und ICY/MusicPlayer keine belastbaren Songs liefern
 - ✅ `RadioMonitor.ApiNowPlaying` wird periodisch aktualisiert (auch ohne StreamTitle-Wechsel)
-- ✅ API/ICY-Property-Befuellung erst nach stabilem Start (Kodi-Buffering vorbei), Logo weiterhin sofort
+- ✅ API-Song-Properties werden erst nach stabilem Start (Kodi-Buffering vorbei) befuellt; Logo bleibt weiterhin sofort. `RadioMonitor.Station` kann bereits frueh aus `icy-name` gesetzt werden
 - ✅ Station-ID direkt aus Logo-URL: kein Fehlmatching mehr bei abweichenden ICY-Namen (z.B. NRJ CLUBBIN → ENERGY Clubbin')
 - ✅ Stationsname via radio.de Details-API wenn Station-ID aus Logo bekannt
-- ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz
+- ✅ MusicPlayer-Fallback fuer Streams ohne ICY und ohne verfuegbare API-Basis (z.B. AzuraCast, Ampache): erkennt Titelwechsel bei Live-Streams, verarbeitet Metadaten via MusicBrainz (wenn `_is_mp_decision_active()` aktiv ist)
 - ✅ Logo-Update bei Titelwechsel: AzuraCast-Streams liefern pro Song ein anderes Album-Cover
 - ✅ Song-Timeout: Properties werden automatisch gelöscht wenn der Song abgelaufen ist (MB-Songlänge minus `SONG_TIMEOUT_EARLY_CLEAR_S`; wenn keine MB-Songlänge vorliegt: Fallback 4 min) – verhindert veraltete Metadaten bei Sendern ohne Titelwechsel-Signal
 - ✅ Debug-Properties für Timeout-Validierung: MB-Songdauer und Live-Countdown als Window-Properties sichtbar
@@ -198,7 +198,7 @@ Parsing-Regeln:
 
 ### Source-Policy und Senderprofile
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
-- Pro Station lernt das Addon ein Profil (`profile_store/*.json`) und uebergibt dieses als Policy-Profil an die Laufzeit.
+- Pro Station lernt das Addon ein Profil (`station_profiles/*.json`) und uebergibt dieses als Policy-Profil an die Laufzeit.
 - Bei ausreichend hoher Profil-Confidence werden `weights`, `switch_margin` und `single_confirm_polls` adaptiv gesetzt.
 - Struktur-Flags werden aus EMA-Metriken abgeleitet:
   - `icy_structural_generic` bei hoher ICY-Generic-Rate (>= `0.90`)

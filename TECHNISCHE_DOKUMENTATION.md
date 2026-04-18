@@ -130,7 +130,7 @@ Bei Streamwechsel:
 `metadata_worker()` -> `parse_icy_metadata(url)`:
 - Request mit Header `Icy-MetaData: 1`
 - liest `icy-name`, `icy-genre`, `icy-metaint`
-- schreibt Station/Genre-Properties erst nach stabilem Start (Buffering-Gate), nicht beim Header-Read
+- setzt `RadioMonitor.Station` bei vorhandenem `icy-name` bereits beim Header-Read; `Genre` wird wie API-Songdaten erst nach stabilem Start gesetzt
 - wenn `icy-metaint` fehlt:
   - `_setup_api_fallback_from_url(url)`
   - kein ICY-Worker, stattdessen Fallback-Worker
@@ -264,7 +264,7 @@ Diagnose-Hinweis:
 ### 6.5 MusicPlayer-Fallback-Worker
 
 `_musicplayer_metadata_fallback()` (Intervall 5s):
-- fuer Streams ohne ICY und ohne API-Basis
+- fuer Streams ohne ICY und ohne API-Basis, wenn `_is_mp_decision_active()` aktiv ist
 - pollt `MusicInfoTag` Artist/Title auf Aenderung
 - bei Aenderung:
   - MB-Recording-Query fuer Normalisierung + MB-Felder
@@ -274,7 +274,7 @@ Diagnose-Hinweis:
 
 ### 6.6 Senderprofile und adaptive Policy
 
-`StationProfileStore` sammelt pro Station Session-Metriken und speichert sie in `profile_store/*.json`.
+`StationProfileStore` sammelt pro Station Session-Metriken und speichert sie in `station_profiles/*.json`.
 
 Session-Metriken (Auszug):
 - Winner-Shares je Quellenfamilie
@@ -307,7 +307,7 @@ API-only Startup-Heuristik:
 
 ### 6.7 SQLite-Datenbank (`song_data.db`)
 
-`SongDB` verwaltet drei Tabellen:
+`SongDatabase` verwaltet fuenf Tabellen:
 
 **`songs`** - bestaetigte Songs als LRU-Cache pro Sender:
 - Spalten: `station_key`, `artist`, `title`, `last_seen`, `last_seen_ts`, `count`
@@ -326,6 +326,14 @@ API-only Startup-Heuristik:
 - Strings mit langen Ziffernfolgen (`> GENERIC_STRING_MAX_DIGIT_SEQ=3`) werden verworfen
 - Promotion: nach `KEYWORD_PROMOTE_MIN_SEEN=5` Beobachtungen wird `promoted=1` gesetzt
 - Promotete Strings werden als Filter-Keywords verwendet, um nicht-songartige ICY-Bloecke zu erkennen
+
+**`verified_station_sources`** - verifizierte Senderquellen (Shared-Contract mit ASM-QF):
+- Spalten: `station_key`, `station_name`, `station_name_norm`, `source_url`, `source_url_norm`, `source_kind`, `verified_by`, `confidence`, `verified_at_utc`, `last_seen_ts`, `meta_json`
+- Primaerschluessel: `(station_key, source_url_norm)`
+
+**`station_source_stats`** - persistente Winner-Historie je Sender und Quellenfamilie:
+- Spalten: `station_key`, `source_family`, `wins`, `swapped_wins`, `last_seen_ts`, `last_seen_utc`
+- Primaerschluessel: `(station_key, source_family)`
 
 Persistenz-Gating:
 - Song-DB-Schreiben wird zentral ueber `service._persist_confirmed_song_if_allowed(...)` angestossen
@@ -414,7 +422,7 @@ Ziel: schnelle Orientierung, welche Zeitparameter welche Laufzeiteffekte haben.
 | hoch | `MUSICPLAYER_FALLBACK_POLL_INTERVAL_S` | `5s` | schnellere MP-Updates, mehr Polling-Last | traeger, dafuer weniger Last |
 | hoch | `API_NOW_REFRESH_INTERVAL_S` | `10s` | frischeres `ApiNowPlaying`, mehr Request-Last/Flattern | stabiler, aber laenger stale |
 | hoch | `SONG_TIMEOUT_FALLBACK_S` | `240s` | alte Titel verschwinden frueher | alte Titel bleiben laenger sichtbar |
-| hoch | `SONG_TIMEOUT_EARLY_CLEAR_S` | `15s` | Timer loescht spaeter bei bekannter MB-Laenge | Timer loescht frueher bei bekannter MB-Laenge |
+| hoch | `SONG_TIMEOUT_EARLY_CLEAR_S` | `20s` | Timer loescht spaeter bei bekannter MB-Laenge | Timer loescht frueher bei bekannter MB-Laenge |
 | hoch | `MB_TIMEOUT_MIN_DURATION_MS` | `120000ms` | mehr MB-Kurzvarianten werden akzeptiert (Risiko: fruehes Timeout) | mehr MB-Kurzvarianten werden abgefangen (Risiko: laenger sichtbare alte Titel) |
 | mittel | `SONG_END_MIN_SONG_AGE_S` | `45.0s` | aggressiveres Frueh-Loeschen | konservativer, weniger Fehl-Loeschungen |
 | mittel | `SONG_END_HOLD_S` | `8.0s` | schnellere Reaktion auf Endsignal | stabiler gegen kurze Stoerimpulse |

@@ -22,6 +22,9 @@
 > Einordnung: Die folgenden Kapitel dokumentieren historische Problemhypothesen. Mehrere dort genannte Punkte
 > sind im aktuellen Code bereits adressiert oder durch neuere Invarianten ersetzt. Fuer Entscheidungen immer
 > zuerst `TECHNISCHE_DOKUMENTATION.md` (Abschnitt 6.x und Invarianten) lesen.
+>
+> Hinweis: Kapitel mit festen Zeilennummern und historischen Default-Werten koennen vom aktuellen Code abweichen
+> (z. B. `QF_NO_RESPONSE_FALLBACK_S` aktuell `25.0s` in `constants.py`).
 
 ## 1. Übersicht der QF-Logik-Kette
 
@@ -58,7 +61,7 @@ if self._last_qf_request_id and not station_changed:
 
 **FEHLER #1 - Blocking-Logik Problem:**
 - Die Bedingung `if request_age_s < float(QF_NO_RESPONSE_FALLBACK_S)` blockiert neue Requests
-- Problem: Wenn QF länger als `QF_NO_RESPONSE_FALLBACK_S` (5 Sekunden Default) auf die Antwort wartet, wird zwar eine neue Request gesendet, aber die **alte Response wird trotzdem noch verarbeitet**
+- Problem: Wenn QF laenger als `QF_NO_RESPONSE_FALLBACK_S` (historischer Stand in dieser Analyse; aktueller Default: `25.0s`) auf die Antwort wartet, wird zwar eine neue Request gesendet, aber die **alte Response wird trotzdem noch verarbeitet**
 - **Coderest:** Die frühere Response kann als "fresh" interpretiert werden, obwohl sie zu alt ist
 
 ### 2.2 `_send_qf_request()` (Zeile 1782-1801)
@@ -482,5 +485,4 @@ Die QF-Integration hat **mehrere kritische Fehler** an der Schnittstelle zwische
 1. Fix #8 (Status-Validierung) - verhindert Silent Failures
 2. Fix #5 (First-Paint MBID) - verhindert AS-Integration Fehler
 3. Fix #11 (Hold-Park Restoration) - verhindert Lost Triggers
-
 
