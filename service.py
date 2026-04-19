@@ -1029,28 +1029,50 @@ class RadioMonitor(xbmc.Monitor):
             return profile_hint
         return 'unknown'
 
-    def _prefer_icy_swapped_from_history(self):
+    @staticmethod
+    def _normalize_swap_family(value):
+        family = str(value or '').strip().lower()
+        if family in SOURCE_STATS_FAMILIES:
+            return family
+        return ''
+
+    def _prefer_source_swapped_from_history(self, source_family, station_name=''):
+        family = self._normalize_swap_family(self._source_family(source_family) or source_family)
+        if not family:
+            return False
+
         profile = self._active_policy_profile or {}
         try:
             confidence = float(profile.get('confidence', 0.0))
         except Exception:
             confidence = 0.0
-        if confidence < 0.20:
-            if bool(profile.get('icy_prefer_swapped_early', False)):
-                return True
-            return self._prefer_icy_swapped_from_db()
-        if bool(profile.get('icy_prefer_swapped', False)):
-            return True
-        # Fallback auf harte DB-Quote, falls Profil noch nicht stabil genug
-        # oder noch nicht aktiv geladen wurde.
-        return self._prefer_icy_swapped_from_db()
 
-    def _prefer_icy_swapped_from_db(self, station_name=''):
+        prefer_swapped = profile.get('prefer_swapped')
+        if isinstance(prefer_swapped, dict):
+            if bool(prefer_swapped.get(family, False)):
+                return True
+
+        prefer_swapped_early = profile.get('prefer_swapped_early')
+        if isinstance(prefer_swapped_early, dict):
+            if bool(prefer_swapped_early.get(family, False)):
+                return True
+
+        # Legacy-Compat fuer bestehende Profile.
+        if family == 'icy':
+            if bool(profile.get('icy_prefer_swapped', False)):
+                return True
+            if confidence < 0.20 and bool(profile.get('icy_prefer_swapped_early', False)):
+                return True
+
+        return self._prefer_source_swapped_from_db(family, station_name=station_name)
+
+    def _prefer_source_swapped_from_db(self, source_family, station_name=''):
         """
-        Leitet eine fruehe ICY-Swap-Praeferenz direkt aus DB-Statistik ab.
+        Leitet eine fruehe Swap-Praeferenz direkt aus DB-Statistik ab.
         Nutzt dieselben Schwellen wie StationProfileStore._apply_source_group_db_hints().
         """
-        if self._profile_store is None:
+        family = self._normalize_swap_family(self._source_family(source_family) or source_family)
+        if not family or self._profile_store is None:
             return False
         station_key = str(self._active_station_profile_key or '').strip()
         if not station_key:
@@ -1063,13 +1085,21 @@ class RadioMonitor(xbmc.Monitor):
             stats = {}
         if not isinstance(stats, dict) or not stats:
             return False
-        icy_row = stats.get('icy') or {}
-        wins = int(icy_row.get('wins', 0) or 0)
-        swapped_wins = int(icy_row.get('swapped_wins', 0) or 0)
+        row = stats.get(family) or {}
+        wins = int(row.get('wins', 0) or 0)
+        swapped_wins = int(row.get('swapped_wins', 0) or 0)
         if wins < int(SOURCE_GROUP_DB_SWAP_MIN_SAMPLES):
             return False
         share = float(swapped_wins) / float(max(1, wins))
         return bool(share >= float(SOURCE_GROUP_DB_SWAP_MIN_SHARE))
+
+    def _prefer_icy_swapped_from_history(self):
+        # Legacy-Wrapper fuer bestehende Call-Sites.
+        return self._prefer_source_swapped_from_history('icy')
+
+    def _prefer_icy_swapped_from_db(self, station_name=''):
+        # Legacy-Wrapper fuer bestehende Call-Sites.
+        return self._prefer_source_swapped_from_db('icy', station_name=station_name)
 
     def _should_prioritize_stream_candidates(self):
         if not self._has_station_analysis():
@@ -3007,7 +3037,7 @@ class RadioMonitor(xbmc.Monitor):
         """Filtert nur valide (artist, title)-Paare."""
         return [p for p in pairs if p and p[0] and p[1]]
 
-    def _select_musicplayer_pair_for_source(self, source, mp_pairs, last_winner_pair=None):
+    def _select_musicplayer_pair_for_source(self, source, mp_pairs, last_winner_pair=None, station_name=''):
         """
         Waehlt das passende MP-Paar fuer die aktuelle MP-Quellenvariante:
         - musicplayer -> direktes Paar
@@ -3019,7 +3049,14 @@ class RadioMonitor(xbmc.Monitor):
         if not mp_pairs:
             return ('', '')
         src = str(source or '')
+        prefer_swapped = bool(
+            len(mp_pairs) > 1
+            and not src.endswith('_swapped')
+            and self._prefer_source_swapped_from_history('musicplayer', station_name=station_name)
+        )
         if src.startswith('musicplayer_swapped') and len(mp_pairs) > 1:
+            return mp_pairs[1]
+        if src.startswith('musicplayer') and prefer_swapped and len(mp_pairs) > 1:
             return mp_pairs[1]
         if not src.startswith('musicplayer') and len(mp_pairs) > 1:
             winner_pair = last_winner_pair or ('', '')
@@ -3028,7 +3065,7 @@ class RadioMonitor(xbmc.Monitor):
                     return mp_pairs[0]
                 if mp_pairs[1] == winner_pair:
                     return mp_pairs[1]
-            if src.endswith('_swapped'):
+            if src.endswith('_swapped') or prefer_swapped:
                 return mp_pairs[1]
         return mp_pairs[0]
 
@@ -3256,6 +3293,90 @@ class RadioMonitor(xbmc.Monitor):
             return (b, a)
         return (a, b)
 
+    def _ordered_family_sources(
+        self,
+        family,
+        explicit_source='',
+        station_name='',
+        include_icy_format_hint=False,
+    ):
+        """
+        Liefert eine priorisierte Source-Liste (direct/swapped) fuer eine Quellenfamilie.
+        Explizite Varianten (z. B. *_swapped) haben immer Vorrang.
+        """
+        family_name = self._normalize_swap_family(self._source_family(family) or family)
+        if not family_name:
+            family_name = self._normalize_swap_family(self._source_family(explicit_source))
+        if not family_name:
+            return []
+
+        explicit = str(explicit_source or '').strip()
+        prefer_swapped = False
+        if explicit.endswith('_swapped'):
+            prefer_swapped = True
+        elif (
+            include_icy_format_hint
+            and family_name == 'icy'
+            and self._effective_icy_format_hint() == 'title_artist'
+        ):
+            prefer_swapped = True
+        elif self._prefer_source_swapped_from_history(family_name, station_name=station_name):
+            prefer_swapped = True
+
+        ordered = []
+        if explicit and self._source_family(explicit) == family_name:
+            ordered.append(explicit)
+        swapped_name = f"{family_name}_swapped"
+        if prefer_swapped:
+            ordered.extend([swapped_name, family_name])
+        else:
+            ordered.extend([family_name, swapped_name])
+
+        deduped = []
+        seen = set()
+        for src in ordered:
+            key = str(src or '')
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+    def _select_preferred_family_evaluation(
+        self,
+        evaluations,
+        family,
+        explicit_source='',
+        station_name='',
+        include_icy_format_hint=False,
+    ):
+        family_name = self._normalize_swap_family(self._source_family(family) or family)
+        if not family_name:
+            return None
+        evals = list(evaluations or [])
+        if not evals:
+            return None
+
+        ordered_sources = self._ordered_family_sources(
+            family=family_name,
+            explicit_source=explicit_source,
+            station_name=station_name,
+            include_icy_format_hint=include_icy_format_hint,
+        )
+        for source_name in ordered_sources:
+            for ev in evals:
+                if str(ev.get('source') or '') != source_name:
+                    continue
+                if ev.get('input_artist') and ev.get('input_title'):
+                    return ev
+
+        for ev in evals:
+            if self._source_family(ev.get('source')) != family_name:
+                continue
+            if ev.get('input_artist') and ev.get('input_title'):
+                return ev
+        return None
+
     def _apply_locked_source_policy(self, candidates, locked_source, api_candidate, icy_pairs, mp_pairs):
         """
         Erzwingt Source-Lock fuer die aktuelle Auswertung:
@@ -3291,7 +3412,7 @@ class RadioMonitor(xbmc.Monitor):
             return locked_candidates
         return candidates
 
-    def _resolve_mb_zero_with_source_lock(self, locked_source, mp_pairs, api_candidate, icy_candidates):
+    def _resolve_mb_zero_with_source_lock(self, locked_source, mp_pairs, api_candidate, icy_candidates, station_name=''):
         """
         MB=0 Fallback fuer source-locked Auswertungen:
         - Bei aktivem Lock darf keine andere Quelle den Lock uebersteuern.
@@ -3304,16 +3425,36 @@ class RadioMonitor(xbmc.Monitor):
             if pair and pair[0] and pair[1]:
                 return locked_source_name, pair
         if locked_family == 'musicplayer' and mp_pairs:
-            pair = self._select_musicplayer_pair_for_source(locked_source_name, mp_pairs)
+            preferred_sources = self._ordered_family_sources(
+                family='musicplayer',
+                explicit_source=locked_source_name,
+                station_name=station_name,
+            )
+            selected_source = preferred_sources[0] if preferred_sources else (locked_source_name or 'musicplayer')
+            pair = self._select_musicplayer_pair_for_source(
+                selected_source,
+                mp_pairs,
+                station_name=station_name,
+            )
             if pair and pair[0] and pair[1]:
-                return locked_source_name, pair
+                return selected_source, pair
         if (
             locked_family == 'api'
             and api_candidate
             and api_candidate[0]
             and api_candidate[1]
         ):
-            return locked_source_name, self._pair_for_source(locked_source_name, api_candidate)
+            preferred_sources = self._ordered_family_sources(
+                family='api',
+                explicit_source=locked_source_name,
+                station_name=station_name,
+            )
+            if not preferred_sources:
+                preferred_sources = [locked_source_name or 'api']
+            for source_name in preferred_sources:
+                pair = self._pair_for_source(source_name, api_candidate)
+                if pair and pair[0] and pair[1]:
+                    return source_name, pair
         if locked_family == 'icy' and icy_candidates:
             normalized = []
             for item in list(icy_candidates or []):
@@ -3326,17 +3467,12 @@ class RadioMonitor(xbmc.Monitor):
             if not normalized:
                 return '', ('', '')
 
-            prefer_swapped = (
-                (self._prefer_icy_swapped_from_history() or self._effective_icy_format_hint() == 'title_artist')
-                and not locked_source_name.endswith('_swapped')
+            preferred_sources = self._ordered_family_sources(
+                family='icy',
+                explicit_source=locked_source_name,
+                station_name=station_name,
+                include_icy_format_hint=True,
             )
-            preferred_sources = []
-            if locked_source_name:
-                preferred_sources.append(locked_source_name)
-            if prefer_swapped:
-                preferred_sources.extend(['icy_swapped', 'icy'])
-            else:
-                preferred_sources.extend(['icy', 'icy_swapped'])
 
             for preferred in preferred_sources:
                 for src_name, pair in normalized:
@@ -4325,12 +4461,24 @@ class RadioMonitor(xbmc.Monitor):
         # Standardfall bleibt "score=0 für alle". Zusätzlich greifen wir den Fallback
         # bei klarer historischer ICY-Swap-Tendenz, auch wenn MB nur schwache Treffer liefert.
         mb_all_zero = bool(evaluations) and all(int(ev.get('score', 0) or 0) == 0 for ev in evaluations)
-        has_icy_in_evaluations = any(str(ev.get('source', '')).startswith('icy') for ev in evaluations)
+        swap_hint_families = sorted({
+            self._source_family(ev.get('source'))
+            for ev in evaluations
+            if (
+                ev.get('input_artist')
+                and ev.get('input_title')
+                and self._source_family(ev.get('source')) in SOURCE_STATS_FAMILIES
+            )
+        })
+        active_swap_families = [
+            family
+            for family in swap_hint_families
+            if self._prefer_source_swapped_from_history(family, station_name=station_name)
+        ]
         mb_no_winner_with_swap_hint = bool(
             evaluations
             and not mb_all_zero
-            and has_icy_in_evaluations
-            and self._prefer_icy_swapped_from_history()
+            and bool(active_swap_families)
         )
         # Dann API nur übernehmen, wenn sie sich gegenüber der letzten API-Antwort geändert hat.
         # Sonst gilt: keine verlässlichen Songdaten -> Artist/Title leer lassen.
@@ -4338,9 +4486,10 @@ class RadioMonitor(xbmc.Monitor):
             # Kein MB-Winner für die Stream-Quelle: API/ICY intern entscheiden.
             # MusicPlayer wird danach nur zum Abgleich/Trust genutzt.
             if mb_no_winner_with_swap_hint and not mb_all_zero:
+                families_text = ','.join(active_swap_families) if active_swap_families else '-'
                 log_info(
-                    "MB ohne Winner (unter Schwellwerten) + ICY-Swap-Historie aktiv "
-                    "-> Swap-orientierter Fallback"
+                    "MB ohne Winner (unter Schwellwerten) + Swap-Historie aktiv "
+                    f"(families={families_text}) -> Swap-orientierter Fallback"
                 )
             icy_candidates = [
                 (
@@ -4358,7 +4507,8 @@ class RadioMonitor(xbmc.Monitor):
                 locked_source,
                 mp_pairs,
                 api_candidate,
-                icy_candidates
+                icy_candidates,
+                station_name=station_name,
             )
             if locked_source_family and locked_source_pair[0] and locked_source_pair[1]:
                 if (
@@ -4401,33 +4551,44 @@ class RadioMonitor(xbmc.Monitor):
                 return locked_source_pair[0], locked_source_pair[1], '', '', '', '', 0
 
             has_icy_candidate = any(str(ev.get('source', '')).startswith('icy') for ev in evaluations)
-            if api_candidate[0] and api_candidate[1] and (api_changed or not has_icy_candidate):
+            api_fallback_ev = self._select_preferred_family_evaluation(
+                evaluations,
+                family='api',
+                explicit_source='api',
+                station_name=station_name,
+            )
+            if api_fallback_ev:
+                api_fallback_pair = (
+                    api_fallback_ev.get('input_artist') or '',
+                    api_fallback_ev.get('input_title') or '',
+                )
+                api_fallback_source = str(api_fallback_ev.get('source') or 'api')
+            else:
+                api_fallback_pair = (api_candidate[0] or '', api_candidate[1] or '')
+                api_fallback_source = 'api'
+
+            if api_fallback_pair[0] and api_fallback_pair[1] and (api_changed or not has_icy_candidate):
                 reason = "API hat gewechselt" if api_changed else "kein valider ICY-Kandidat"
                 log_info(
                     f"MB ohne Winner, {reason} -> nutze API: "
-                    f"'{api_candidate[0]} - {api_candidate[1]}'"
+                    f"'{api_fallback_pair[0]} - {api_fallback_pair[1]}' "
+                    f"(source={api_fallback_source})"
                 )
-                self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
+                self._set_last_song_decision(api_fallback_source, api_fallback_pair[0], api_fallback_pair[1])
                 if self._is_mp_decision_active():
-                    self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
-                    self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
-                return api_candidate[0], api_candidate[1], '', '', '', '', 0
+                    self._log_musicplayer_comparison(api_fallback_source, api_fallback_pair, mp_pairs)
+                    self._update_musicplayer_trust_after_decision(api_fallback_source, api_fallback_pair, mp_pairs)
+                return api_fallback_pair[0], api_fallback_pair[1], '', '', '', '', 0
             # ICY-Rohdaten-Fallback: kein API, kein Lock, aber valider ICY-Split vorhanden.
             # MB kennt den Song nicht sicher genug (z.B. DJ-Sets, Radiosendungen).
-            # Bei historischer Swap-Tendenz darf bewusst icy_swapped bevorzugt werden.
+            # Bei historischer Swap-Tendenz darf bewusst *_swapped bevorzugt werden.
             if has_icy_candidate:
-                preferred_icy_source = (
-                    'icy_swapped'
-                    if (self._prefer_icy_swapped_from_history() or self._effective_icy_format_hint() == 'title_artist')
-                    else 'icy'
-                )
-                icy_preferred_ev = next(
-                    (ev for ev in evaluations if ev.get('source') == preferred_icy_source),
-                    None
-                )
-                icy_fallback_ev = icy_preferred_ev or next(
-                    (ev for ev in evaluations if str(ev.get('source', '')).startswith('icy')),
-                    None
+                icy_fallback_ev = self._select_preferred_family_evaluation(
+                    evaluations,
+                    family='icy',
+                    explicit_source='icy',
+                    station_name=station_name,
+                    include_icy_format_hint=True,
                 )
                 if icy_fallback_ev:
                     _a = icy_fallback_ev.get('input_artist')
@@ -4452,17 +4613,21 @@ class RadioMonitor(xbmc.Monitor):
                     # kein echter Song (z.B. "284684 - Real Title" oder "Artist - 399409").
                     _pure_num = re.compile(r'^\d+$')
                     if _pure_num.match(_a) or _pure_num.match(_t):
-                        if api_candidate[0] and api_candidate[1]:
+                        if api_fallback_pair[0] and api_fallback_pair[1]:
                             log_info(
                                 f"MB ohne Winner, ICY-Teil ist numerische ID "
                                 f"('{_a} - {_t}') – Fallback auf API: "
-                                f"'{api_candidate[0]} - {api_candidate[1]}'"
+                                f"'{api_fallback_pair[0]} - {api_fallback_pair[1]}' (source={api_fallback_source})"
                             )
-                            self._set_last_song_decision('api', api_candidate[0], api_candidate[1])
+                            self._set_last_song_decision(
+                                api_fallback_source,
+                                api_fallback_pair[0],
+                                api_fallback_pair[1],
+                            )
                             if self._is_mp_decision_active():
-                                self._log_musicplayer_comparison('api', api_candidate, mp_pairs)
-                                self._update_musicplayer_trust_after_decision('api', api_candidate, mp_pairs)
-                            return api_candidate[0], api_candidate[1], '', '', '', '', 0
+                                self._log_musicplayer_comparison(api_fallback_source, api_fallback_pair, mp_pairs)
+                                self._update_musicplayer_trust_after_decision(api_fallback_source, api_fallback_pair, mp_pairs)
+                            return api_fallback_pair[0], api_fallback_pair[1], '', '', '', '', 0
                         log_debug(
                             f"MB ohne Winner, ICY-Teil ist numerische ID ('{_a} - {_t}'), kein API – kein Song"
                         )
@@ -4664,7 +4829,8 @@ class RadioMonitor(xbmc.Monitor):
                             current_mp_pair = self._select_musicplayer_pair_for_source(
                                 last_winner_source,
                                 mp_live_pairs,
-                                last_winner_pair=last_winner_pair
+                                last_winner_pair=last_winner_pair,
+                                station_name=station_name,
                             )
                             current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
                         icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
@@ -4793,7 +4959,8 @@ class RadioMonitor(xbmc.Monitor):
                                     current_mp_pair = self._select_musicplayer_pair_for_source(
                                         last_winner_source,
                                         mp_live_pairs,
-                                        last_winner_pair=last_winner_pair
+                                        last_winner_pair=last_winner_pair,
+                                        station_name=station_name,
                                     )
                                     current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
                                 else:

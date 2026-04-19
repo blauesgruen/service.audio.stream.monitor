@@ -6,6 +6,7 @@ from datetime import datetime
 
 from constants import (
     SOURCE_FAMILIES,
+    SOURCE_STATS_FAMILIES,
     ICY_FORMAT_KEYS,
     SOURCE_POLICY_SINGLE_CONFIRM_POLLS,
     SONG_END_DETECTOR_ENABLED,
@@ -715,6 +716,9 @@ class StationProfileStore:
                     single_confirm_polls = max(single_confirm_polls, min(5, int(round(lag))))
 
         role_flags = self._derive_source_role_flags(profile)
+        prefer_swapped = {family: False for family in SOURCE_STATS_FAMILIES}
+        prefer_swapped['icy'] = bool(profile.get('icy_prefer_swapped', False))
+
         result = {
             'confidence': round(confidence, 3),
             'preferred_family': preferred,
@@ -724,6 +728,7 @@ class StationProfileStore:
             'mp_reliable': bool(profile.get('mp_reliable', False)),
             'icy_format': str(profile.get('icy_format', 'unknown') or 'unknown'),
             'icy_prefer_swapped': bool(profile.get('icy_prefer_swapped', False)),
+            'prefer_swapped': prefer_swapped,
             'icy_structural_generic': bool(role_flags.get('icy_structural_generic')),
             'mp_absent': bool(role_flags.get('mp_absent')),
             'mp_noise': bool(role_flags.get('mp_noise')),
@@ -734,20 +739,32 @@ class StationProfileStore:
         data = dict(policy or {})
         data['source_group_db_hint'] = {'applied': False}
         data['icy_prefer_swapped_early'] = False
+        prefer_swapped_early = {
+            family: False for family in SOURCE_STATS_FAMILIES
+        }
         try:
             family_stats = self._song_db.get_source_family_stats(station_key)
         except Exception:
             family_stats = {}
         if not isinstance(family_stats, dict) or not family_stats:
+            data['prefer_swapped_early'] = prefer_swapped_early
             return data
 
-        icy_row = family_stats.get('icy') or {}
-        icy_wins = int(icy_row.get('wins', 0) or 0)
-        icy_swapped_wins = int(icy_row.get('swapped_wins', 0) or 0)
-        if icy_wins >= int(SOURCE_GROUP_DB_SWAP_MIN_SAMPLES):
-            icy_swap_share = float(icy_swapped_wins) / float(max(1, icy_wins))
-            if icy_swap_share >= float(SOURCE_GROUP_DB_SWAP_MIN_SHARE):
-                data['icy_prefer_swapped_early'] = True
+        icy_wins = 0
+        icy_swapped_wins = 0
+        for family in SOURCE_STATS_FAMILIES:
+            row = family_stats.get(family) or {}
+            wins = int(row.get('wins', 0) or 0)
+            swapped_wins = int(row.get('swapped_wins', 0) or 0)
+            if family == 'icy':
+                icy_wins = wins
+                icy_swapped_wins = swapped_wins
+            if wins >= int(SOURCE_GROUP_DB_SWAP_MIN_SAMPLES):
+                swap_share = float(swapped_wins) / float(max(1, wins))
+                if swap_share >= float(SOURCE_GROUP_DB_SWAP_MIN_SHARE):
+                    prefer_swapped_early[family] = True
+        data['prefer_swapped_early'] = prefer_swapped_early
+        data['icy_prefer_swapped_early'] = bool(prefer_swapped_early.get('icy', False))
 
         group_wins = {}
         total_wins = 0
