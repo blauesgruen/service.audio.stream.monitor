@@ -76,6 +76,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.StreamTitle`      | Vollständiger StreamTitle (roh) | "Queen - Bohemian Rhapsody" |
 | `RadioMonitor.Source`           | Aktive Song-Quellenfamilie (`asm-qf`, `musicplayer`, `api`, `icy`) | "asm-qf" |
 | `RadioMonitor.SourceDetail`     | Detailquelle des Winners (z. B. `asm-qf`, `asm-qf_icy`, `asm-qf_icy_swapped`, `icy_swapped`) | "asm-qf_icy_swapped" |
+| `RadioMonitor.SourceSwapStatus` | DB-basierter Swap-Status der aktiven/staerksten Familie (`<family>:<swapped_wins>/<wins> (<share>)`) | "icy:12/40 (0.300)" |
 | `RadioMonitor.Genre`            | Genre des Künstlers (via MusicBrainz) | "alternative rock" |
 | `RadioMonitor.Logo`             | URL zum Senderlogo | "https://cdn.radio.de/images/broadcasts/..." |
 | `RadioMonitor.BandFormed`       | Gründungsjahr (nur bei Bands) | "1995" |
@@ -184,7 +185,7 @@ Parsing-Regeln:
 - Die Artist/Title-Entscheidung bleibt konservativ: MusicBrainz nutzt kombinierten Score (`MB score * artist similarity`) und akzeptiert Kandidaten erst oberhalb der Schwellen (`MB_WINNER_MIN_SCORE=60`, `MB_WINNER_MIN_COMBINED=55.0`).
 - MB-Bereinigung der Schreibweise: Labels werden nur korrigiert, wenn MB denselben Song mit ausreichend hoher Aehnlichkeit bestaetigt (`MB_LABEL_CORRECTION_MIN_SIM=0.85`); bei abweichendem MB-Treffer bleiben Originalwerte erhalten.
 - ASM-QF-Postcheck ist zweiphasig: pro QF-Kandidat erfolgt ein MB-`identify` fuer die Swap-Richtung und anschliessend ein MB-Recording-Score; im QF-Pfad bleibt die Korrektur auf die Paar-Richtung begrenzt (kein aggressives Umbenennen).
-- Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; wenn API gewechselt hat oder kein ICY vorhanden ist, wird die API übernommen; existiert ein valides ICY-Direktpaar und kein API, werden Artist/Title direkt aus dem ICY-Split übernommen (ICY-Rohdaten-Fallback); sonst bleiben Artist/Title leer.
+- Spezieller No-Song-Fall (MB-Score=0): bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich; die Richtung `direkt`/`swapped` wird zentral pro Quellenfamilie aus der Historie priorisiert (`api`/`icy`/`musicplayer`/`asm-qf`). Wenn API gewechselt hat oder kein valider ICY-Kandidat vorhanden ist, wird API (ggf. `api_swapped`) uebernommen; existiert ein valides ICY-Paar und kein API, werden Artist/Title direkt aus dem ICY-Split uebernommen (bevorzugt `icy_swapped`, falls Historie/Format-Hint das nahelegt); sonst bleiben Artist/Title leer.
 - Song-Historie-DB: Ein Song wird nur persistiert, wenn MB-Verifikation vorliegt (`MBID` gesetzt). Wiederholungen desselben Songs innerhalb von `10` Minuten pro Sender erhoehen den Zaehler nicht erneut.
 - Shared-DB fuer verifizierte Senderquellen: Tabelle `verified_station_sources` in `song_data.db` (unter `~userdata/addon_data/service.audio.stream.monitor/`). ASM nutzt URL-Matches als Stations-Hint; ASM-QF kann in dieselbe Tabelle schreiben.
 
@@ -200,6 +201,7 @@ Parsing-Regeln:
 - Quellenwechsel werden ueber `SourcePolicy` mit Zustandsfenster (Validitaet, Generic-Rate, Churn, Agreement, Lead-Errors) bewertet.
 - Pro Station lernt das Addon ein Profil (`station_profiles/*.json`) und uebergibt dieses als Policy-Profil an die Laufzeit.
 - Bei ausreichend hoher Profil-Confidence werden `weights`, `switch_margin` und `single_confirm_polls` adaptiv gesetzt.
+- DB-basierte Swap-Historie (`swapped_wins`) wird zentral pro Quellenfamilie ausgewertet (`api`/`icy`/`musicplayer`/`asm-qf`): fruehe Hints laufen ueber `prefer_swapped_early`, profilbasierte ueber `prefer_swapped`.
 - Struktur-Flags werden aus EMA-Metriken abgeleitet:
   - `icy_structural_generic` bei hoher ICY-Generic-Rate (>= `0.90`)
   - `mp_absent` bei sehr niedriger MusicPlayer-Song-Rate (<= `0.05`)

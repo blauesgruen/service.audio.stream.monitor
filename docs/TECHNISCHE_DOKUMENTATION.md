@@ -173,11 +173,12 @@ Im Loop:
 - MB-Bereinigung der Schreibweise: Winner liefert `corrected_artist`/`corrected_title` – nur wenn `artist_sim >= MB_LABEL_CORRECTION_MIN_SIM` (0.85) UND `title_sim >= MB_LABEL_CORRECTION_MIN_SIM`; sonst bleiben Originalwerte (`input_artist`/`input_title`) fuer die Labels massgeblich; interne Quellentracking-Werte verwenden immer die Originalwerte
 
 3. Sonderfall alle MB-Scores = 0
-- bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich (kein API-Override gegen Lock)
+- bei aktivem Source-Lock bleibt die gelockte Quelle massgeblich (kein API-Override gegen Lock); die Richtung `direkt`/`swapped` wird zentral pro Familienhistorie priorisiert
 - wenn MusicPlayer-Entscheidungspfad aktiv ist und MusicPlayer (direkt/swapped) konsistent zu API oder ICY ist: MusicPlayer wird uebernommen
-- wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen
+- wenn API-Kandidat gegenueber letzter API-Antwort gewechselt hat: API wird uebernommen (mit priorisierter Richtung `api`/`api_swapped` aus der Family-Historie)
 - wenn kein valider ICY-Kandidat existiert (z.B. numerische ICY-IDs): API wird ebenfalls uebernommen
-- **ICY-Rohdaten-Fallback**: kein API, kein Lock, aber valides ICY-Direktpaar vorhanden -> Artist/Title direkt aus ICY-Split (ohne MB-Anreicherung, kein MBID, Timeout=Fallback); typisch fuer DJ-Sets und Radiosendungen, die MB nicht kennt
+- **ICY-Rohdaten-Fallback**: kein API, kein Lock, aber valides ICY-Paar vorhanden -> Artist/Title direkt aus ICY-Split (bevorzugt `icy_swapped` falls Historie/Format-Hint dies nahelegt; ohne MB-Anreicherung, kein MBID, Timeout=Fallback); typisch fuer DJ-Sets und Radiosendungen, die MB nicht kennt
+- Swap-Historie wird zentral pro Quellenfamilie ausgewertet (`api`, `icy`, `musicplayer`, `asm-qf`) und in MB-no-winner-Fallback sowie Source-Lock-Pfaden genutzt.
 - sonst: keine belastbaren Songdaten -> Rueckgabe `Artist=None`, `Title=None`
 
 4. ICY-Analyse/Fallback
@@ -295,7 +296,10 @@ Policy-Integration:
 Persistente Quellgruppen-Historie (SQLite):
 - In `song_data.db` ergaenzt `station_source_stats` die senderbezogene Winner-Historie pro Einzelquelle (`api`, `icy`, `musicplayer`, `asm-qf`).
 - Pro Sender/Familie wird zusaetzlich eine Swap-Tendenz (`swapped_wins`) gespeichert, um frueh eine Richtung (`swapped` vs. `direkt`) abzuleiten.
-- Bei ausreichender Stichprobe kann diese Historie fuer Quellengruppen-Hints in `get_policy_profile()` genutzt werden (weiterhin fuer `api`/`icy`/`musicplayer`), inkl. `icy_prefer_swapped_early`.
+- Bei ausreichender Stichprobe werden aus der DB generische Swap-Hints pro Familie abgeleitet:
+  - `prefer_swapped_early` (pro Family, DB-basiert; aktiv auch bei niedriger Profil-Confidence)
+  - `prefer_swapped` (pro Family; derzeit fuer `icy` aus dem EMA-Profil)
+- Legacy-Kompatibilitaet bleibt erhalten: `icy_prefer_swapped_early`/`icy_prefer_swapped` werden weiterhin gespiegelt.
 
 API-only Startup-Heuristik:
 - Falls ICY/MP initial nur generisch/leer sind, kann der "Initialer Song-Block" aufgehoben werden.
@@ -385,6 +389,7 @@ Bei klar fehlenden Songdaten werden song-bezogene Felder geloescht:
 - `Artist`, `Title`, `Album`, `AlbumDate`, `ArtistMBID`, `FirstRelease`, `BandFormed`, `BandMembers`, `Genre`
 - `Station` und `StreamTitle` bleiben fuer die Anzeige erhalten
 - `ApiNowPlaying` wird separat aus der API-Refresh-Logik gepflegt
+- `SourceSwapStatus` ist ein Diagnose-Label (`<family>:<swapped_wins>/<wins> (<share>)`) aus `station_source_stats`.
 
 ## 8) Song-Timeout
 
