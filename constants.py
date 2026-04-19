@@ -176,6 +176,7 @@ class PropertyNames:
     ICY_NOW    = 'RadioMonitor.IcyNowPlaying'
     SOURCE     = 'RadioMonitor.Source'
     SOURCE_DETAIL = 'RadioMonitor.SourceDetail'
+    SOURCE_SWAP_STATUS = 'RadioMonitor.SourceSwapStatus'
     PLAYING    = 'RadioMonitor.Playing'
     LOGO       = 'RadioMonitor.Logo'
     BAND_FORM  = 'RadioMonitor.BandFormed'

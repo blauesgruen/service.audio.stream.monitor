@@ -799,6 +799,9 @@ class StationProfileStore:
     def record_source_family_hit(self, station_key, source_family, swapped=False):
         return self._song_db.record_source_family_hit(station_key, source_family, swapped=swapped)
 
+    def get_source_family_stats(self, station_key):
+        return self._song_db.get_source_family_stats(station_key)
+
     def get_known_songs(self, station_key):
         return self._song_db.get_known_songs(station_key)
 

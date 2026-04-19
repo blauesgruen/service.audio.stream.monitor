@@ -263,6 +263,9 @@ class ASMRuntime:
         self._lock = threading.RLock()
         self._desired_stream_url = ""
         self._last_restart_ts = 0.0
+        self._last_activity_ts = time.time()
+        self._last_observed_state: Tuple[str, str, str, str] = ("", "", "", "")
+        self._idle_restart_s = 10.0
         self._supervisor_stop = threading.Event()
         self._supervisor_thread = threading.Thread(
             target=self._supervisor_loop,
@@ -289,7 +292,38 @@ class ASMRuntime:
 
                 worker = getattr(self.monitor, "metadata_thread", None)
                 worker_alive = bool(worker and worker.is_alive())
+
+                snap = self.property_snapshot()
+                observed_state = (
+                    str(snap.get(self.P.STREAM_TTL, "") or ""),
+                    str(snap.get(self.P.ARTIST, "") or ""),
+                    str(snap.get(self.P.TITLE, "") or ""),
+                    str(snap.get(self.P.API_NOW, "") or ""),
+                )
+                if observed_state != self._last_observed_state:
+                    self._last_observed_state = observed_state
+                    self._last_activity_ts = time.time()
+
                 if worker_alive:
+                    # Recovery for streams that stay in empty-StreamTitle/no-song state:
+                    # mimic manual re-start behavior automatically.
+                    stream_ttl = (observed_state[0] or "").strip()
+                    artist = (observed_state[1] or "").strip()
+                    title = (observed_state[2] or "").strip()
+                    idle_s = max(0.0, time.time() - float(self._last_activity_ts or 0.0))
+                    if (
+                        idle_s >= float(self._idle_restart_s)
+                        and not stream_ttl
+                        and not (artist and title)
+                        and (time.time() - float(self._last_restart_ts or 0.0)) >= float(self._idle_restart_s)
+                    ):
+                        self.monitor.current_url = stream_url
+                        self.monitor.is_playing = True
+                        self.window.setProperty(self.P.PLAYING, "true")
+                        self.monitor.start_metadata_monitoring(stream_url)
+                        now_ts = time.time()
+                        self._last_restart_ts = now_ts
+                        self._last_activity_ts = now_ts
                     continue
 
                 now_ts = time.time()
@@ -313,6 +347,8 @@ class ASMRuntime:
             self.stop_stream(clear=False)
             self._desired_stream_url = stream_url
             self._last_restart_ts = time.time()
+            self._last_activity_ts = self._last_restart_ts
+            self._last_observed_state = ("", "", "", "")
 
             self.monitor.current_url = stream_url
             self.monitor.is_playing = True
@@ -697,7 +733,7 @@ def run_gui(log_q: "queue.Queue[str]") -> None:
     middle.add(prop_frame, weight=3)
     middle.add(log_frame, weight=2)
 
-    filter_var = tk.StringVar(value="RadioMonitor.")
+    filter_var = tk.StringVar(value=".Artist,.Title,.Station")
     ttk.Label(prop_frame, text="Filter:").pack(anchor="w")
     ttk.Entry(prop_frame, textvariable=filter_var).pack(fill=tk.X, pady=(0, 6))
 
