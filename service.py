@@ -110,6 +110,7 @@ class PlayerMonitor(xbmc.Player):
             playing_file = self.getPlayingFile()
             self.radio_monitor._capture_plugin_playback_raw(playing_file)
             self.radio_monitor._capture_listitem_raw('onPlayBackStarted')
+            self.radio_monitor._ensure_api_source_proof_from_listitem('onPlayBackStarted.listitem')
             if (
                 self.radio_monitor.current_url
                 and playing_file
@@ -444,6 +445,44 @@ class RadioMonitor(xbmc.Monitor):
                 f"API-Source automatisch erkannt "
                 f"(context={context}, source={inferred})")
         return self.api_source
+
+    def _set_api_source_proof_from_plugin_context(self, text, context=''):
+        """
+        Setzt Source-Proof ausschliesslich aus echtem Plugin-Kontext.
+        HTTP/Logo-Heuristiken duerfen niemals Source-Proof erzeugen.
+        """
+        raw = str(text or '').strip()
+        if not raw:
+            return self.API_SOURCE_NONE
+        lowered = raw.lower()
+        if 'plugin://' not in lowered:
+            return self.API_SOURCE_NONE
+        inferred = self._infer_api_source_from_text(raw)
+        if inferred not in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+            return self.API_SOURCE_NONE
+        if self.api_source != inferred:
+            self._set_api_source(inferred)
+        self._set_api_source_proof(inferred, context=context or 'plugin_context')
+        return inferred
+
+    def _ensure_api_source_proof_from_listitem(self, context=''):
+        """
+        Nutzt ListItem-Pfade als verifizierbaren Plugin-Kontext.
+        Damit bleibt Source-Proof erhalten, auch wenn getPlayingFile bereits
+        auf die aufgeloeste Stream-URL zeigt.
+        """
+        fields = (
+            xbmc.getInfoLabel('ListItem.Path') or '',
+            xbmc.getInfoLabel('ListItem.FilenameAndPath') or '',
+        )
+        for value in fields:
+            source = self._set_api_source_proof_from_plugin_context(
+                value,
+                context=context or 'listitem'
+            )
+            if source in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN):
+                return source
+        return self.API_SOURCE_NONE
 
     def _is_api_source_allowed(self):
         return self.api_source in (self.API_SOURCE_RADIODE, self.API_SOURCE_TUNEIN)
@@ -2835,6 +2874,27 @@ class RadioMonitor(xbmc.Monitor):
             log_debug(f"Fehler bei URL-Analyse fuer API-Fallback: {str(e)}")
         return None
 
+    def _resolve_station_name_when_icy_missing(self, stream_url):
+        """
+        Versucht bei leerem icy-name einen Stationsnamen zu liefern.
+        Reihenfolge:
+        1) verified-source Hint (URL-basiert)
+        2) radio.de API (Details/Now-Playing), falls Quelle erlaubt
+        """
+        hinted = self._apply_verified_source_hint(stream_url)
+        if hinted:
+            return hinted
+
+        if self._can_use_radiode_api() and (self.plugin_slug or self.station_id):
+            log_debug("Kein icy-name: versuche Station via radio.de API aufzulösen")
+            self.get_radiode_api_nowplaying(WINDOW.getProperty(_P.STATION) or '')
+            resolved = str(WINDOW.getProperty(_P.STATION) or '').strip()
+            if resolved:
+                log_info(f"Station via radio.de API aufgeloest: '{resolved}'")
+                return resolved
+
+        return ''
+
     def get_tunein_api_nowplaying(self, station_name=None):
         """Delegiert an tunein-Modul."""
         return _tunein_get_nowplaying(
@@ -4186,10 +4246,10 @@ class RadioMonitor(xbmc.Monitor):
                 )
             else:
                 log_debug("Kein icy-name im Header")
-                hinted = self._apply_verified_source_hint(url)
-                if hinted:
-                    station_name = hinted
-                    log_debug(f"Station aus verified source (URL): {station_name}")
+                resolved_station = self._resolve_station_name_when_icy_missing(url)
+                if resolved_station:
+                    station_name = resolved_station
+                    log_debug(f"Station ohne icy-name aufgeloest: {station_name}")
             
             if icy_genre:
                 log_debug(f"Genre: {icy_genre}")
@@ -5680,6 +5740,7 @@ class RadioMonitor(xbmc.Monitor):
                         self._capture_listitem_raw('check_playing_new_url')
                         self._capture_playing_item_raw()
                         self._capture_jsonrpc_player_raw()
+                        self._ensure_api_source_proof_from_listitem('check_playing_new_url.listitem')
                         self._ensure_api_source_from_context(playing_file, 'check_playing_new_url')
                         if self._can_use_tunein_api() and not self.tunein_station_id:
                             tunein_id = _tunein_extract_station_id(playing_file)
