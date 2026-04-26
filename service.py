@@ -22,6 +22,7 @@ from constants import (
     SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
     SONG_END_NEAR_TIMEOUT_S,
     API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, QF_HIT_MISMATCH_GRACE_S,
+    QF_NO_RESPONSE_DEGRADE_S, QF_DEGRADE_PROBE_INTERVAL_S,
     PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
     ANALYSIS_ENABLED, ANALYSIS_EVENTS_FILENAME, ANALYSIS_MAX_EVENTS, ANALYSIS_FLUSH_INTERVAL_S,
@@ -226,6 +227,8 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_QF_CHANGE = _TRIGGER_QF_CHANGE
     MP_GENERIC_HOLD_MAX_S = 120.0
     QF_NO_HIT_HOLD_S = 8.0
+    QF_NO_RESPONSE_DEGRADE_S = float(QF_NO_RESPONSE_DEGRADE_S)
+    QF_DEGRADE_PROBE_INTERVAL_S = float(QF_DEGRADE_PROBE_INTERVAL_S)
     QF_NONFRESH_LOG_MIN_INTERVAL_S = 15.0
     QF_NONFRESH_LOG_MIN_INTERVAL_STALE_S = 5.0
     STATION_NAME_MATCH_MIN_LEN = int(STATION_NAME_MATCH_MIN_LEN)
@@ -290,6 +293,10 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
         self._qf_no_hit_hold_s = float(self.QF_NO_HIT_HOLD_S)
+        self._qf_no_response_streak_since_ts = 0.0
+        self._qf_degraded_mode_active = False
+        self._qf_degraded_since_ts = 0.0
+        self._qf_last_probe_ts = 0.0
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -1596,6 +1603,10 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
+        self._qf_no_response_streak_since_ts = 0.0
+        self._qf_degraded_mode_active = False
+        self._qf_degraded_since_ts = 0.0
+        self._qf_last_probe_ts = 0.0
         self._mp_generic_hold_active = False
         self._mp_generic_hold_since_ts = 0.0
         self._mp_generic_hold_timed_out = False
@@ -2145,6 +2156,56 @@ class RadioMonitor(xbmc.Monitor):
             return False
         return float(gap_raw) <= float(QF_HIT_MISMATCH_GRACE_S)
 
+    def _qf_start_no_response_streak(self, base_ts=0.0):
+        if self._qf_no_response_streak_since_ts > 0.0:
+            return
+        start_ts = float(base_ts or self._last_qf_request_ts or time.time())
+        self._qf_no_response_streak_since_ts = max(0.0, start_ts)
+        self._log_qf_diag('no_response_streak_start', {
+            'since_ts': int(self._qf_no_response_streak_since_ts),
+            'req_id': self._last_qf_request_id or '-',
+        })
+
+    def _qf_clear_no_response_streak(self, reason=''):
+        if self._qf_no_response_streak_since_ts <= 0.0:
+            return
+        age_s = max(0.0, float(time.time() - float(self._qf_no_response_streak_since_ts)))
+        self._qf_no_response_streak_since_ts = 0.0
+        self._log_qf_diag('no_response_streak_end', {
+            'age_s': age_s,
+            'reason': reason or '-',
+            'req_id': self._last_qf_request_id or '-',
+        })
+
+    def _qf_enter_degraded_mode(self, reason=''):
+        if self._qf_degraded_mode_active:
+            return
+        self._qf_degraded_mode_active = True
+        self._qf_degraded_since_ts = time.time()
+        self._qf_last_probe_ts = 0.0
+        self._log_qf_diag('degrade_start', {
+            'reason': reason or 'no_response_over_threshold',
+            'degrade_s': self.QF_NO_RESPONSE_DEGRADE_S,
+            'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
+            'req_id': self._last_qf_request_id or '-',
+            'res_id': self._last_qf_response_id or '-',
+        }, level='info')
+
+    def _qf_exit_degraded_mode(self, reason=''):
+        if not self._qf_degraded_mode_active:
+            return
+        age_s = max(0.0, float(time.time() - float(self._qf_degraded_since_ts or 0.0)))
+        self._qf_degraded_mode_active = False
+        self._qf_degraded_since_ts = 0.0
+        self._qf_last_probe_ts = 0.0
+        self._qf_clear_no_response_streak(reason=reason or 'degrade_exit')
+        self._log_qf_diag('degrade_end', {
+            'reason': reason or '-',
+            'degrade_age_s': age_s,
+            'req_id': self._last_qf_request_id or '-',
+            'res_id': self._last_qf_response_id or '-',
+        }, level='info')
+
     def _is_qf_fallback_exception(self):
         """
         Liefert True, wenn QF fuer den aktuellen Zyklus als nicht verfuegbar gilt
@@ -2155,6 +2216,8 @@ class RadioMonitor(xbmc.Monitor):
         Nur True-Timeouts (no response) erlauben Fallback.
         """
         if not self._qf_enabled or not self.is_playing:
+            return True
+        if self._qf_degraded_mode_active:
             return True
         if not self._last_qf_request_id:
             return True
@@ -2415,6 +2478,7 @@ class RadioMonitor(xbmc.Monitor):
 
         now_ts = time.time()
         station_changed = station_name.strip().lower() != self._last_qf_request_station.strip().lower()
+        snapshot = None
 
         # Solange die letzte Anfrage noch unbeantwortet ist, keine neue Request-ID senden.
         # Sonst "ueberholt" der naechste Request die laufende Antwort und die Rueckmeldung
@@ -2422,6 +2486,13 @@ class RadioMonitor(xbmc.Monitor):
         if self._last_qf_request_id and not station_changed:
             snapshot = self._qf_response_snapshot()
             if not snapshot.get('fresh'):
+                self._qf_start_no_response_streak(base_ts=self._last_qf_request_ts)
+                streak_age_s = max(
+                    0.0,
+                    float(now_ts - float(self._qf_no_response_streak_since_ts or now_ts))
+                )
+                if streak_age_s >= float(self.QF_NO_RESPONSE_DEGRADE_S):
+                    self._qf_enter_degraded_mode(reason='no_response_over_threshold')
                 request_age_s = max(0.0, float(now_ts - float(self._last_qf_request_ts or 0.0)))
                 if request_age_s < float(QF_NO_RESPONSE_FALLBACK_S):
                     return
@@ -2430,6 +2501,24 @@ class RadioMonitor(xbmc.Monitor):
                     'error',
                     reason='no_response_timeout',
                 )
+
+        if self._qf_degraded_mode_active and not station_changed:
+            probe_due = (
+                not self._last_qf_request_id
+                or (
+                    now_ts - float(self._qf_last_probe_ts or 0.0)
+                ) >= float(self.QF_DEGRADE_PROBE_INTERVAL_S)
+            )
+            if not probe_due:
+                return
+            if self._send_qf_request(station_name=station_name, mode='asm_recovery_probe'):
+                self._qf_last_probe_ts = now_ts
+                self._log_qf_diag('degrade_probe_sent', {
+                    'station': station_name,
+                    'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
+                    'req_id': self._last_qf_request_id or '-',
+                })
+            return
 
         request_due = (
             not self._last_qf_request_id
@@ -2464,6 +2553,8 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_result = ''
             self._last_qf_fresh_hit_pair = ('', '')
             self._stop_qf_no_hit_hold(reason='qf_disabled_or_not_playing')
+            self._qf_exit_degraded_mode(reason='qf_disabled_or_not_playing')
+            self._qf_clear_no_response_streak(reason='qf_disabled_or_not_playing')
             if not self.is_playing:
                 self._clear_qf_response_properties()
             WINDOW.clearProperty(_P.QF_RESULT)
@@ -2473,6 +2564,7 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_result = ''
             self._last_qf_fresh_hit_pair = ('', '')
             self._stop_qf_no_hit_hold(reason='no_request_id')
+            self._qf_clear_no_response_streak(reason='no_request_id')
             WINDOW.clearProperty(_P.QF_RESULT)
             return
 
@@ -2528,6 +2620,12 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_nonfresh_log_ts = 0.0
         response_id = snapshot.get('response_id') or ''
         response_status = str(snapshot.get('status') or '').strip().lower()
+        response_source = str(snapshot.get('source') or '').strip().lower()
+        if response_source != 'asm':
+            if self._qf_degraded_mode_active:
+                self._qf_exit_degraded_mode(reason='fresh_qf_response')
+            else:
+                self._qf_clear_no_response_streak(reason='fresh_qf_response')
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
             self._last_qf_response_match_ts = time.time()

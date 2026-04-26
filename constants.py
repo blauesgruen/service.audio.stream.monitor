@@ -97,6 +97,11 @@ API_NOW_REFRESH_INTERVAL_S = 10
 # bleibt QF weiterhin fuehrend (kein Fallback auf API/ICY/MP).
 # Erst danach darf bei QF-Ausfall auf andere Quellen zurueckgegriffen werden.
 QF_NO_RESPONSE_FALLBACK_S = 25.0
+# Nach dieser Zeit ohne echte QF-Antwort wird QF in den Degrade-Modus versetzt.
+# In diesem Modus faellt ASM auf Standardquellen zurueck.
+QF_NO_RESPONSE_DEGRADE_S = 10 * 60.0
+# Im QF-Degrade-Modus wird nur noch periodisch ein Probe-Request gesendet.
+QF_DEGRADE_PROBE_INTERVAL_S = 3 * 60.0
 # Kurzes Grace-Fenster fuer non-fresh QF-Hits bei Request-ID-Race.
 # Nur innerhalb dieses Fensters duerfen hit-Paare trotz id_mismatch als nutzbar gelten.
 QF_HIT_MISMATCH_GRACE_S = 3.0

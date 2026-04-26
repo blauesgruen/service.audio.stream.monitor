@@ -57,6 +57,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ QF-Label-Fuehrung ist paar-atomar: im `asm-qf*`-Pfad werden `Artist`/`Title` nur gemeinsam gehalten; unvollstaendige Paare loeschen beide Felder
 - ✅ Zentrales QF-Diagnose-Logging: `ASM-QF DIAG event=...` mit stabilen Feldern (`fresh_reason`, `gap_source`, `gap_s`, `hold_*`) zur Flapping-/Race-Analyse
 - ✅ Bekannter Timing-Effekt im Diagnosemodus: bei langsam terminalen QF-Responses kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `stale_response` auftreten; siehe `ASM-QF DIAG event=non_fresh`
+- ✅ QF-Degrade-Modus bei langem No-Response: nach `QF_NO_RESPONSE_DEGRADE_S` (10 min) faellt ASM auf Standard-Quellengruppe zurueck; QF wird dann nur noch alle `QF_DEGRADE_PROBE_INTERVAL_S` (3 min) per Probe-Request geprueft und bei frischer QF-Response automatisch reaktiviert
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
