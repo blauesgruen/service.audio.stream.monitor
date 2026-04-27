@@ -1746,6 +1746,8 @@ class RadioMonitor(xbmc.Monitor):
 
     def set_property_safe(self, key, value):
         """Setzt eine Window-Property nur wenn der Wert nicht leer ist."""
+        if key == _P.STATION:
+            value = self._sanitize_station_text(value)
         if value:
             text = f"{self._bullet_prefix}{value}" if key in self._BULLET_KEYS else str(value)
             WINDOW.setProperty(key, text)
@@ -1899,14 +1901,37 @@ class RadioMonitor(xbmc.Monitor):
 
     def _sanitize_station_text(self, value):
         """
-        Entfernt Kodi-Markup (z.B. [COLOR ...][/COLOR]) und Bullet-Zeichen
-        aus einem Stationslabel fuer externe Requests.
+        Entfernt Kodi-Markup (z.B. [COLOR ...][/COLOR]), Bullet-Zeichen
+        und technische Audioqualitaets-Suffixe aus einem Stationslabel.
         """
         text = str(value or '')
         if not text:
             return ''
         text = re.sub(r'\[[^\]]+\]', '', text)
         text = text.replace('•', ' ')
+        text = ' '.join(text.split()).strip()
+        if not text:
+            return ''
+
+        quality_word = (
+            r'(?:mp3|aac\+?|ogg|opus|wma|flac|hls|dash|shoutcast|icecast|'
+            r'webstream|stream|low|high|hq|hd|sd|mobile|dsl|broadband|inter\d+)'
+        )
+        bitrate = r'(?:[1-9]\d{1,3}\s*(?:k(?:bps|bit/s)?|kbps|kbit/s))'
+        bare_bitrate = r'(?:[1-9]\d{1,3})'
+        separators = r'(?:\s*[-_/|,]\s*|\s+)'
+
+        suffix_patterns = (
+            rf'\s*\(\s*{quality_word}(?:{separators}(?:{quality_word}|{bitrate}|{bare_bitrate}))*\s*\)\s*$',
+            rf'\s*\(\s*{bitrate}(?:{separators}{quality_word})?\s*\)\s*$',
+            rf'\s*(?:[-_/|,]\s*|\s+){quality_word}(?:{separators}(?:{quality_word}|{bitrate}|{bare_bitrate}))*\s*$',
+            rf'\s*(?:[-_/|,]\s*|\s+){bitrate}(?:{separators}{quality_word})?\s*$',
+        )
+        previous = None
+        while text and text != previous:
+            previous = text
+            for pattern in suffix_patterns:
+                text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip(' -_/|,')
         return ' '.join(text.split()).strip()
 
     def _set_api_nowplaying_label(self, artist=None, title=None):
