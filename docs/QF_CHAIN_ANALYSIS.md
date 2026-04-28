@@ -214,8 +214,8 @@ def _is_qf_fallback_exception(self):
     return age_s >= float(QF_NO_RESPONSE_FALLBACK_S)
 ```
 
-**FEHLER #9 - Status-Werte nicht vollständig geprüft:**
-- Nur `resolve_error`, `error`, `timeout` bei Fresh-Responses werden als Fallback-Gründe erkannt
+**FEHLER #9 - Status-Werte nicht vollstÃ¤ndig geprÃ¼ft:**
+- Nur `resolve_error`, `error`, `timeout` bei Fresh-Responses werden als Fallback-GrÃ¼nde erkannt
 - **Coderest:** Status `'no_hit'` ist normales Verhalten, aber bei `'unknown'` oder anderen Status-Werten wird nicht automatisch gefallback
 - **Problem:** Wenn ASM-QF einen Status sendet, der nicht in der Liste ist, wird QF als autoritativ behandelt, obwohl es fehlgeschlagen hat
 
@@ -467,12 +467,13 @@ if (
     self._pending_qf_trigger_restoration = True
 ```
 
-### Fix #5: Status-Validierung
+### Hinweis #5: Optionale Status-Validierung
 ```python
 KNOWN_QF_STATUS = {'hit', 'no_hit', 'resolve_error', 'error', 'timeout', 'unknown'}
 if snapshot.get('status') not in KNOWN_QF_STATUS:
     log_warning(f"Unknown QF status: {snapshot.get('status')}")
-    return True  # Fallback to API/ICY
+    # Aktuelle Code-Semantik: kein automatischer Fallback.
+    # Wenn gewuenscht, muesste dies bewusst als Hardening geaendert werden.
 ```
 
 ---

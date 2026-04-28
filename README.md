@@ -57,7 +57,7 @@ Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspie
 - ✅ QF-Label-Fuehrung ist paar-atomar: im `asm-qf*`-Pfad werden `Artist`/`Title` nur gemeinsam gehalten; unvollstaendige Paare loeschen beide Felder
 - ✅ Zentrales QF-Diagnose-Logging: `ASM-QF DIAG event=...` mit stabilen Feldern (`fresh_reason`, `gap_source`, `gap_s`, `hold_*`) zur Flapping-/Race-Analyse
 - ✅ Bekannter Timing-Effekt im Diagnosemodus: bei langsam terminalen QF-Responses kann um `QF_NO_RESPONSE_FALLBACK_S` (~25s) kurz `stale_response` auftreten; siehe `ASM-QF DIAG event=non_fresh`
-- ✅ QF-Degrade-Modus bei langem No-Response: nach `QF_NO_RESPONSE_DEGRADE_S` (10 min) faellt ASM auf Standard-Quellengruppe zurueck; QF wird dann nur noch alle `QF_DEGRADE_PROBE_INTERVAL_S` (3 min) per Probe-Request geprueft und bei frischer QF-Response automatisch reaktiviert
+- ✅ QF-Degrade-Modus zentral fuer Ausfallfaelle: bei langem No-Response nach `QF_NO_RESPONSE_DEGRADE_S` (10 min) oder bei anhaltenden frischen externen `error`-Responses nach `QF_ERROR_FALLBACK_S` (30s) faellt ASM auf die Standard-Quellengruppe zurueck; der Degrade-Zustand wird pro Sender in `song_data.db` gemerkt, beim naechsten Start derselben Station sofort wieder angewandt und QF dann nur noch alle `QF_DEGRADE_PROBE_INTERVAL_S` (3 min) per Probe-Request geprueft. Bei frischer brauchbarer QF-Response wird der persistierte Degrade-Hinweis automatisch geloescht.
 - ✅ ICY-Rohdaten-Fallback: bei MB-Score=0 und fehlendem API werden Artist/Title direkt aus dem ICY-Split übernommen (z.B. DJ-Sets, Radiosendungen)
 
 ## Verfügbare Window Properties
@@ -98,6 +98,7 @@ Hinweis fuer Skin-Mapping:
 
 Persistenz-Hinweis:
 - Die zentrale SQLite `song_data.db` enthaelt neben Song-/Keyword-Daten auch senderbezogene Quellen-Statistik pro Einzelquelle (`api`/`icy`/`musicplayer`/`asm-qf`); fruehe Policy-Hints bleiben auf Quellengruppe 1 (`api`/`icy`/`musicplayer`) fokussiert.
+- Fuer ASM-QF wird zusaetzlich ein senderbezogener Degrade-Status gespeichert: wenn QF fuer eine Station laenger ausfaellt, startet ASM bei der naechsten Session dieser Station direkt im Fallback auf die Standard-Quellengruppe und verwendet QF nur noch fuer Recovery-Probes.
 
 ## Verwendung in Skins
 

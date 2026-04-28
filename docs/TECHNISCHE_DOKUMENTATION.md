@@ -227,6 +227,8 @@ Im Loop:
 - `fresh_reason=id_mismatch_*` bedeutet nicht automatisch "verwendbar": nutzbar sind nur kurze, plausible hit-Races innerhalb `QF_HIT_MISMATCH_GRACE_S`.
 - Skin-Hinweis: ASM spiegelt `RadioMonitor.QF.Response.StationUsed` 1:1 aus `RadioMonitor.QF.Response.Meta.station_used` (leer/fehlend => Clear); Fallback-Bindings bleiben `Source`/`Meta`.
 - QF-Terminalitaet: pro `RadioMonitor.QF.Request.Id` wird genau ein terminaler Abschluss erfasst. Bei ausbleibender Antwort wird nach `QF_NO_RESPONSE_FALLBACK_S` ein synthetischer terminaler Status `error` mit Reason `no_response_timeout` gesetzt; beim internen Ueberholen einer offenen Request-ID wird `superseded` mit Reason `new_request_sent` gesetzt.
+- QF-Degrade zentral: derselbe Degrade-Mode greift sowohl bei langem No-Response (`QF_NO_RESPONSE_DEGRADE_S`) als auch bei anhaltenden frischen externen `QF.Response.Status=error`-Antworten. Fuer den Error-Pfad wird nach `QF_ERROR_FALLBACK_S=30s` auf die Standard-Quellengruppe zurueckgefallen; Re-Probes laufen wie gewohnt ueber `QF_DEGRADE_PROBE_INTERVAL_S`.
+- Der QF-Degrade-Zustand wird pro Station in `song_data.db` persistiert. Wenn eine Station spaeter erneut gestartet wird und der persistierte Zustand noch aktiv ist, geht ASM sofort in den Fallback auf die Standard-Quellengruppe und nutzt QF nur fuer Recovery-Probes. Erst eine frische brauchbare externe QF-Response hebt den persistierten Degrade-Hinweis wieder auf.
 
 ### 6.3 ASM-QF Runtime-Contract (Request/Response)
 
@@ -296,6 +298,7 @@ Policy-Integration:
 Persistente Quellgruppen-Historie (SQLite):
 - In `song_data.db` ergaenzt `station_source_stats` die senderbezogene Winner-Historie pro Einzelquelle (`api`, `icy`, `musicplayer`, `asm-qf`).
 - Pro Sender/Familie wird zusaetzlich eine Swap-Tendenz (`swapped_wins`) gespeichert, um frueh eine Richtung (`swapped` vs. `direkt`) abzuleiten.
+- Fuer ASM-QF speichert `station_qf_state` zusaetzlich einen senderbezogenen Degrade-Hinweis (`qf_degraded`, Reason, Zeitstempel). Dieser Hinweis wirkt nicht als neue Quellenfamilie, sondern nur als Startsignal fuer den bestehenden Fallback auf die Standard-Quellengruppe plus periodische Recovery-Probes.
 - Bei ausreichender Stichprobe werden aus der DB generische Swap-Hints pro Familie abgeleitet:
   - `prefer_swapped_early` (pro Family, DB-basiert; aktiv auch bei niedriger Profil-Confidence)
   - `prefer_swapped` (pro Family; derzeit fuer `icy` aus dem EMA-Profil)
