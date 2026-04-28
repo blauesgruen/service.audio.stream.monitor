@@ -21,7 +21,7 @@ from constants import (
     SONG_END_MIN_KEYWORD_HITS, SONG_END_MIN_NON_SONG_SOURCES,
     SONG_END_REQUIRE_ADDITIONAL_SIGNAL, SONG_END_STALE_API_MIN_S,
     SONG_END_NEAR_TIMEOUT_S,
-    API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, QF_HIT_MISMATCH_GRACE_S,
+    API_NOW_REFRESH_INTERVAL_S, QF_NO_RESPONSE_FALLBACK_S, QF_ERROR_FALLBACK_S, QF_HIT_MISMATCH_GRACE_S,
     QF_NO_RESPONSE_DEGRADE_S, QF_DEGRADE_PROBE_INTERVAL_S,
     PLAYER_BUFFER_SETTLE_S, PLAYER_BUFFER_MAX_WAIT_S,
     API_METADATA_POLL_INTERVAL_S, MUSICPLAYER_FALLBACK_POLL_INTERVAL_S,
@@ -227,6 +227,7 @@ class RadioMonitor(xbmc.Monitor):
     TRIGGER_QF_CHANGE = _TRIGGER_QF_CHANGE
     MP_GENERIC_HOLD_MAX_S = 120.0
     QF_NO_HIT_HOLD_S = 8.0
+    QF_ERROR_FALLBACK_S = float(QF_ERROR_FALLBACK_S)
     QF_NO_RESPONSE_DEGRADE_S = float(QF_NO_RESPONSE_DEGRADE_S)
     QF_DEGRADE_PROBE_INTERVAL_S = float(QF_DEGRADE_PROBE_INTERVAL_S)
     QF_NONFRESH_LOG_MIN_INTERVAL_S = 15.0
@@ -293,6 +294,7 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
         self._qf_no_hit_hold_s = float(self.QF_NO_HIT_HOLD_S)
+        self._qf_error_streak_since_ts = 0.0
         self._qf_no_response_streak_since_ts = 0.0
         self._qf_degraded_mode_active = False
         self._qf_degraded_since_ts = 0.0
@@ -738,6 +740,55 @@ class RadioMonitor(xbmc.Monitor):
         except Exception as e:
             log_debug(f"Source-Statistik Persist fehlgeschlagen: {e}")
             return False
+
+    def _persist_qf_degraded_state_if_allowed(self, station_name='', degraded=False, reason=''):
+        if not (self._persist_data and self._profile_store):
+            return False
+        station_key = self._build_station_profile_key(station_name)
+        if not station_key:
+            station_key = str(self._active_station_profile_key or '')
+        if not station_key:
+            return False
+        try:
+            return bool(
+                self._profile_store.set_qf_degraded_state(
+                    station_key,
+                    degraded=bool(degraded),
+                    reason=str(reason or ''),
+                )
+            )
+        except Exception as e:
+            log_debug(f"QF-Degrade Persist fehlgeschlagen: {e}")
+            return False
+
+    def _apply_persisted_qf_degraded_hint(self, station_name='', station_key=''):
+        if self._profile_store is None:
+            return False
+        key = str(station_key or self._build_station_profile_key(station_name) or '').strip()
+        if not key:
+            return False
+        try:
+            state = self._profile_store.get_qf_degraded_state(key) or {}
+        except Exception as e:
+            log_debug(f"QF-Degrade Read fehlgeschlagen: {e}")
+            return False
+        if not bool(state.get('qf_degraded')):
+            return False
+
+        self._qf_degraded_mode_active = True
+        self._qf_degraded_since_ts = time.time()
+        self._qf_last_probe_ts = 0.0
+        if station_name:
+            self._last_qf_request_station = str(station_name or '')
+        degraded_at_ts = int(state.get('degraded_at_ts', 0) or 0)
+        persisted_age_s = max(0, int(time.time()) - degraded_at_ts) if degraded_at_ts > 0 else 0
+        self._log_qf_diag('degrade_hint_applied', {
+            'station_key': key,
+            'reason': str(state.get('degrade_reason') or 'persisted_qf_degraded'),
+            'persisted_age_s': persisted_age_s,
+            'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
+        }, level='info')
+        return True
 
     def _update_source_swap_status_property(self, station_name='', decision_source=''):
         """
@@ -1305,6 +1356,7 @@ class RadioMonitor(xbmc.Monitor):
             self.source_policy.clear_station_profile()
             log_debug(f"Station-Profil Session gestartet: key='{key}'")
             self._update_source_swap_status_property(station_name=station_name)
+            self._apply_persisted_qf_degraded_hint(station_name=station_name, station_key=key)
 
         if enable_policy and not key_changed and not self._station_profile_policy_enabled:
             policy_profile = self._profile_store.get_policy_profile(key)
@@ -1603,6 +1655,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_nonfresh_log_ts = 0.0
         self._qf_no_hit_hold_active = False
         self._qf_no_hit_hold_since_ts = 0.0
+        self._qf_error_streak_since_ts = 0.0
         self._qf_no_response_streak_since_ts = 0.0
         self._qf_degraded_mode_active = False
         self._qf_degraded_since_ts = 0.0
@@ -2202,15 +2255,61 @@ class RadioMonitor(xbmc.Monitor):
             'req_id': self._last_qf_request_id or '-',
         })
 
-    def _qf_enter_degraded_mode(self, reason=''):
+    def _qf_start_error_streak(self, base_ts=0.0):
+        if self._qf_error_streak_since_ts > 0.0:
+            return
+        start_ts = float(base_ts or time.time())
+        self._qf_error_streak_since_ts = max(0.0, start_ts)
+        self._log_qf_diag('error_streak_start', {
+            'since_ts': int(self._qf_error_streak_since_ts),
+            'fallback_s': self.QF_ERROR_FALLBACK_S,
+            'req_id': self._last_qf_request_id or '-',
+            'res_id': self._last_qf_response_id or '-',
+        })
+
+    def _qf_clear_error_streak(self, reason=''):
+        if self._qf_error_streak_since_ts <= 0.0:
+            return
+        age_s = max(0.0, float(time.time() - float(self._qf_error_streak_since_ts)))
+        self._qf_error_streak_since_ts = 0.0
+        self._log_qf_diag('error_streak_end', {
+            'age_s': age_s,
+            'reason': reason or '-',
+            'req_id': self._last_qf_request_id or '-',
+            'res_id': self._last_qf_response_id or '-',
+        })
+
+    def _qf_error_streak_age_s(self):
+        if self._qf_error_streak_since_ts <= 0.0:
+            return 0.0
+        return max(0.0, float(time.time() - float(self._qf_error_streak_since_ts)))
+
+    @staticmethod
+    def _is_qf_fresh_external_error(response_status, response_source):
+        return (
+            str(response_source or '').strip().lower() != 'asm'
+            and str(response_status or '').strip().lower() == 'error'
+        )
+
+    def _qf_enter_degraded_mode(self, reason='', degrade_after_s=None):
         if self._qf_degraded_mode_active:
             return
         self._qf_degraded_mode_active = True
         self._qf_degraded_since_ts = time.time()
         self._qf_last_probe_ts = 0.0
+        self._persist_qf_degraded_state_if_allowed(
+            station_name=WINDOW.getProperty(_P.STATION) or '',
+            degraded=True,
+            reason=reason or 'no_response_over_threshold',
+        )
+        threshold_s = (
+            float(degrade_after_s)
+            if isinstance(degrade_after_s, (int, float)) and float(degrade_after_s) > 0.0
+            else float(self.QF_NO_RESPONSE_DEGRADE_S)
+        )
         self._log_qf_diag('degrade_start', {
             'reason': reason or 'no_response_over_threshold',
-            'degrade_s': self.QF_NO_RESPONSE_DEGRADE_S,
+            'degrade_s': threshold_s,
             'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
             'req_id': self._last_qf_request_id or '-',
             'res_id': self._last_qf_response_id or '-',
@@ -2224,6 +2323,7 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_degraded_since_ts = 0.0
         self._qf_last_probe_ts = 0.0
         self._qf_clear_no_response_streak(reason=reason or 'degrade_exit')
+        self._qf_clear_error_streak(reason=reason or 'degrade_exit')
         self._log_qf_diag('degrade_end', {
             'reason': reason or '-',
             'degrade_age_s': age_s,
@@ -2527,7 +2627,7 @@ class RadioMonitor(xbmc.Monitor):
                     reason='no_response_timeout',
                 )
 
-        if self._qf_degraded_mode_active and not station_changed:
+        if self._qf_degraded_mode_active:
             probe_due = (
                 not self._last_qf_request_id
                 or (
@@ -2580,6 +2680,7 @@ class RadioMonitor(xbmc.Monitor):
             self._stop_qf_no_hit_hold(reason='qf_disabled_or_not_playing')
             self._qf_exit_degraded_mode(reason='qf_disabled_or_not_playing')
             self._qf_clear_no_response_streak(reason='qf_disabled_or_not_playing')
+            self._qf_clear_error_streak(reason='qf_disabled_or_not_playing')
             if not self.is_playing:
                 self._clear_qf_response_properties()
             WINDOW.clearProperty(_P.QF_RESULT)
@@ -2590,6 +2691,7 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_fresh_hit_pair = ('', '')
             self._stop_qf_no_hit_hold(reason='no_request_id')
             self._qf_clear_no_response_streak(reason='no_request_id')
+            self._qf_clear_error_streak(reason='no_request_id')
             WINDOW.clearProperty(_P.QF_RESULT)
             return
 
@@ -2646,11 +2748,6 @@ class RadioMonitor(xbmc.Monitor):
         response_id = snapshot.get('response_id') or ''
         response_status = str(snapshot.get('status') or '').strip().lower()
         response_source = str(snapshot.get('source') or '').strip().lower()
-        if response_source != 'asm':
-            if self._qf_degraded_mode_active:
-                self._qf_exit_degraded_mode(reason='fresh_qf_response')
-            else:
-                self._qf_clear_no_response_streak(reason='fresh_qf_response')
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
             self._last_qf_response_match_ts = time.time()
@@ -2661,6 +2758,30 @@ class RadioMonitor(xbmc.Monitor):
                 reason='fresh_response_seen',
                 source='qf',
             )
+
+        if self._is_qf_fresh_external_error(response_status, response_source):
+            self._qf_clear_no_response_streak(reason='fresh_qf_error_response')
+            self._qf_start_error_streak(base_ts=time.time())
+            error_age_s = self._qf_error_streak_age_s()
+            if error_age_s >= float(self.QF_ERROR_FALLBACK_S):
+                self._qf_enter_degraded_mode(
+                    reason='error_over_threshold',
+                    degrade_after_s=self.QF_ERROR_FALLBACK_S,
+                )
+        else:
+            self._qf_clear_error_streak(reason='fresh_non_error_qf_response')
+            if response_source != 'asm':
+                self._persist_qf_degraded_state_if_allowed(
+                    station_name=WINDOW.getProperty(_P.STATION) or '',
+                    degraded=False,
+                    reason='fresh_qf_response',
+                )
+                if self._qf_degraded_mode_active:
+                    self._qf_exit_degraded_mode(reason='fresh_qf_response')
+                else:
+                    self._qf_clear_no_response_streak(reason='fresh_qf_response')
+
+        qf_authoritative = self._is_qf_authoritative()
 
         if snapshot.get('status') != 'hit':
             has_visible_song = bool(

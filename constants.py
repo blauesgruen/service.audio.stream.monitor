@@ -97,6 +97,9 @@ API_NOW_REFRESH_INTERVAL_S = 10
 # bleibt QF weiterhin fuehrend (kein Fallback auf API/ICY/MP).
 # Erst danach darf bei QF-Ausfall auf andere Quellen zurueckgegriffen werden.
 QF_NO_RESPONSE_FALLBACK_S = 25.0
+# Nach dieser Zeit mit frischen externen QF-`error`-Responses wird QF ebenfalls
+# als nicht verfuegbar behandelt und faellt auf die Standard-Quellengruppe zurueck.
+QF_ERROR_FALLBACK_S = 30.0
 # Nach dieser Zeit ohne echte QF-Antwort wird QF in den Degrade-Modus versetzt.
 # In diesem Modus faellt ASM auf Standardquellen zurueck.
 QF_NO_RESPONSE_DEGRADE_S = 10 * 60.0
