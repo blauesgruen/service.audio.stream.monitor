@@ -819,6 +819,27 @@ class StationProfileStore:
     def get_source_family_stats(self, station_key):
         return self._song_db.get_source_family_stats(station_key)
 
+    def get_qf_degraded_state(self, station_key):
+        profile = self.get_profile(station_key)
+        if not isinstance(profile, dict):
+            return {}
+        return {
+            'qf_degraded': bool(profile.get('qf_degraded', False)),
+            'degraded_at_ts': int(profile.get('degraded_at_ts', 0) or 0),
+            'degrade_reason': str(profile.get('degrade_reason', '') or ''),
+        }
+
+    def set_qf_degraded_state(self, station_key, degraded=False, reason=''):
+        if not station_key:
+            return False
+        key = str(station_key or '')
+        profile = self._ensure_profile(key)
+        profile['qf_degraded'] = bool(degraded)
+        profile['degraded_at_ts'] = int(time.time()) if degraded else 0
+        profile['degrade_reason'] = str(reason or '') if degraded else ''
+        self._dirty_keys.add(key)
+        return True
+
     def get_known_songs(self, station_key):
         return self._song_db.get_known_songs(station_key)
 
