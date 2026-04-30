@@ -283,6 +283,9 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
         self._qf_station_anchor = ''  # stabile QF-Station pro Stream-Session
+        self._qf_station_id_anchor = ''  # stabile QF-StationId pro Stream-Session
+        self._qf_station_id_anchor_source = ''
+        self._last_qf_request_station_id = ''
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
@@ -629,6 +632,68 @@ class RadioMonitor(xbmc.Monitor):
                     "(fehlender Source-Proof)"
                 )
         return station_name
+
+    def _decode_verified_source_meta(self, row):
+        meta_raw = str((row or {}).get('meta_json') or '').strip()
+        if not meta_raw:
+            return {}
+        try:
+            meta = json.loads(meta_raw)
+        except Exception as e:
+            log_debug(f"Verified-source Meta konnte nicht geparst werden: {e}")
+            return {}
+        return meta if isinstance(meta, dict) else {}
+
+    def _resolve_qf_request_station_id(self, stream_url=''):
+        tunein_id = str(self.tunein_station_id or '').strip()
+        if tunein_id:
+            return tunein_id, 'tunein_station_id'
+
+        plugin_slug = str(self.plugin_slug or '').strip()
+        if plugin_slug:
+            return plugin_slug, 'plugin_slug'
+
+        station_slug = str(self.station_slug or '').strip()
+        if station_slug:
+            return station_slug, 'station_slug'
+
+        station_id = str(self.station_id or '').strip()
+        if station_id:
+            return station_id, 'station_id'
+
+        row = self._resolve_verified_station_for_url(stream_url or self.current_url)
+        meta = self._decode_verified_source_meta(row)
+        for key_name, source_name in (
+            ('tunein_station_id', 'verified_meta.tunein_station_id'),
+            ('plugin_slug', 'verified_meta.plugin_slug'),
+        ):
+            value = str(meta.get(key_name) or '').strip()
+            if value:
+                return value, source_name
+
+        station_key = str((row or {}).get('station_key') or '').strip().lower()
+        if station_key.startswith('tunein:'):
+            return station_key.split(':', 1)[1].strip(), 'verified_station_key.tunein'
+        if station_key.startswith('radiode:'):
+            return station_key.split(':', 1)[1].strip(), 'verified_station_key.radiode'
+        if station_key.startswith('stream:'):
+            return station_key.split(':', 1)[1].strip(), 'verified_station_key.stream'
+        return '', ''
+
+    def _qf_station_id_source_priority(self, source_name):
+        source = str(source_name or '').strip().lower()
+        priorities = {
+            'tunein_station_id': 50,
+            'verified_meta.tunein_station_id': 45,
+            'verified_station_key.tunein': 40,
+            'plugin_slug': 35,
+            'verified_meta.plugin_slug': 30,
+            'verified_station_key.radiode': 25,
+            'station_id': 20,
+            'station_slug': 15,
+            'verified_station_key.stream': 10,
+        }
+        return int(priorities.get(source, 0))
 
     def _record_verified_station_source(
         self,
@@ -1646,6 +1711,9 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_id = ''
         self._last_qf_request_station = ''
         self._qf_station_anchor = ''
+        self._qf_station_id_anchor = ''
+        self._qf_station_id_anchor_source = ''
+        self._last_qf_request_station_id = ''
         self._last_qf_request_ts = 0.0
         self._last_qf_response_id = ''
         self._last_qf_response_match_ts = 0.0
@@ -1696,6 +1764,7 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
         WINDOW.clearProperty(_P.QF_REQUEST_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_STATION)
+        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_MODE)
         WINDOW.clearProperty(_P.QF_REQUEST_TS)
         self._clear_qf_response_properties()
@@ -2500,10 +2569,11 @@ class RadioMonitor(xbmc.Monitor):
         }, level='info')
         return True
 
-    def _send_qf_request(self, station_name, mode='asm_auto'):
+    def _send_qf_request(self, station_name, mode='asm_auto', station_id=''):
         station = self._sanitize_station_text(station_name)
         if not station:
             return False
+        station_id_text = str(station_id or '').strip()
         previous_request_id = str(self._last_qf_request_id or '').strip()
         if previous_request_id and not self._is_qf_request_terminalized(previous_request_id):
             self._synthesize_qf_terminal_response(
@@ -2515,17 +2585,24 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
         request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
         WINDOW.setProperty(_P.QF_REQUEST_STATION, station)
+        if station_id_text:
+            WINDOW.setProperty(_P.QF_REQUEST_STATION_ID, station_id_text)
+        else:
+            WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.setProperty(_P.QF_REQUEST_MODE, str(mode or 'asm_auto'))
         WINDOW.setProperty(_P.QF_REQUEST_TS, str(int(now_ts)))
         # Request-ID immer zuletzt setzen, damit ASM-QF ein konsistentes Request-Paket liest.
         WINDOW.setProperty(_P.QF_REQUEST_ID, request_id)
         self._last_qf_request_id = request_id
         self._last_qf_request_station = station
+        self._last_qf_request_station_id = station_id_text
         self._last_qf_request_ts = now_ts
-        log_debug(
-            f"ASM-QF Request gesendet: id='{request_id}', station='{station}', "
-            f"mode='{mode}'"
-        )
+        self._log_qf_diag('request_sent', {
+            'req_id': request_id,
+            'station': station,
+            'station_id': station_id_text or '-',
+            'mode': str(mode or 'asm_auto'),
+        })
         return True
 
     def _clear_qf_response_properties(self):
@@ -2601,14 +2678,52 @@ class RadioMonitor(xbmc.Monitor):
                 f"anchor='{self._qf_station_anchor}'"
             )
 
+        live_station_id, live_station_id_source = self._resolve_qf_request_station_id(self.current_url)
+        if not self._qf_station_id_anchor and live_station_id:
+            self._qf_station_id_anchor = live_station_id
+            self._qf_station_id_anchor_source = live_station_id_source or ''
+            self._log_qf_diag('station_id_anchor_set', {
+                'station': station_name,
+                'station_id': live_station_id,
+                'source': live_station_id_source or '-',
+            })
+        elif live_station_id:
+            live_priority = self._qf_station_id_source_priority(live_station_id_source)
+            anchor_priority = self._qf_station_id_source_priority(self._qf_station_id_anchor_source)
+            if live_station_id == self._qf_station_id_anchor:
+                if live_priority > anchor_priority:
+                    self._qf_station_id_anchor_source = live_station_id_source or ''
+            elif live_priority > anchor_priority:
+                previous_station_id = self._qf_station_id_anchor
+                previous_source = self._qf_station_id_anchor_source or '-'
+                self._qf_station_id_anchor = live_station_id
+                self._qf_station_id_anchor_source = live_station_id_source or ''
+                self._log_qf_diag('station_id_anchor_upgraded', {
+                    'station': station_name,
+                    'station_id_prev': previous_station_id,
+                    'station_id_new': live_station_id,
+                    'source_prev': previous_source,
+                    'source_new': live_station_id_source or '-',
+                })
+            elif live_station_id != self._qf_station_id_anchor:
+                self._log_qf_diag('station_id_drift_blocked', {
+                    'station': station_name,
+                    'station_id_live': live_station_id,
+                    'station_id_anchor': self._qf_station_id_anchor,
+                    'source_live': live_station_id_source or '-',
+                    'source_anchor': self._qf_station_id_anchor_source or '-',
+                })
+        station_id = self._qf_station_id_anchor or live_station_id
+
         now_ts = time.time()
         station_changed = station_name.strip().lower() != self._last_qf_request_station.strip().lower()
+        station_id_changed = station_id.strip().lower() != self._last_qf_request_station_id.strip().lower()
         snapshot = None
 
         # Solange die letzte Anfrage noch unbeantwortet ist, keine neue Request-ID senden.
         # Sonst "ueberholt" der naechste Request die laufende Antwort und die Rueckmeldung
         # wird wegen ID-Mismatch als non-fresh verworfen.
-        if self._last_qf_request_id and not station_changed:
+        if self._last_qf_request_id and not station_changed and not station_id_changed:
             snapshot = self._qf_response_snapshot()
             if not snapshot.get('fresh'):
                 self._qf_start_no_response_streak(base_ts=self._last_qf_request_ts)
@@ -2636,10 +2751,15 @@ class RadioMonitor(xbmc.Monitor):
             )
             if not probe_due:
                 return
-            if self._send_qf_request(station_name=station_name, mode='asm_recovery_probe'):
+            if self._send_qf_request(
+                station_name=station_name,
+                mode='asm_recovery_probe',
+                station_id=station_id,
+            ):
                 self._qf_last_probe_ts = now_ts
                 self._log_qf_diag('degrade_probe_sent', {
                     'station': station_name,
+                    'station_id': station_id or '-',
                     'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
                     'req_id': self._last_qf_request_id or '-',
                 })
@@ -2648,6 +2768,7 @@ class RadioMonitor(xbmc.Monitor):
         request_due = (
             not self._last_qf_request_id
             or station_changed
+            or station_id_changed
             or (
                 now_ts - (
                     self._last_qf_response_match_ts
@@ -2667,7 +2788,11 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_result = ''
             self._clear_qf_response_properties()
             WINDOW.clearProperty(_P.QF_RESULT)
-        self._send_qf_request(station_name=station_name, mode='asm_auto')
+        self._send_qf_request(
+            station_name=station_name,
+            mode='asm_auto',
+            station_id=station_id,
+        )
 
     def _sync_qf_result_property(self):
         """
