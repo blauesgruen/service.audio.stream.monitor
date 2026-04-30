@@ -3,7 +3,9 @@ radio.de API - Hilfsfunktionen.
 
 Exportiert Parsing- und Abfragefunktionen fuer radio.de API-Antworten.
 """
+from concurrent.futures import ThreadPoolExecutor
 import re
+from api_client import APIClient
 from constants import (
     INVALID_METADATA_VALUES,
     NUMERIC_ID_PATTERN as _NUMERIC_ID_RE,
@@ -12,6 +14,77 @@ from constants import (
     RADIODE_DETAILS_API_URL,
 )
 from logger import log_debug, log_info, log_warning
+
+
+def _clone_api_client(api_client):
+    headers = {}
+    try:
+        headers = dict(getattr(getattr(api_client, 'session', None), 'headers', {}) or {})
+    except Exception:
+        headers = {}
+    try:
+        retry_count = int(getattr(api_client, 'retry_count', 3) or 3)
+    except Exception:
+        retry_count = 3
+    return APIClient(headers=headers, retry_count=retry_count)
+
+
+def _fetch_details_by_slug(api_client, slug):
+    resolved_name = None
+    det_logo = None
+    client = _clone_api_client(api_client)
+    try:
+        det_response = client.get(
+            RADIODE_DETAILS_API_URL, params={'stationIds': slug}, timeout=5
+        )
+        if det_response.status_code == 200:
+            det_data = det_response.json()
+            if isinstance(det_data, list) and len(det_data) > 0:
+                proper_name = det_data[0].get('name', '')
+                if proper_name:
+                    resolved_name = proper_name
+                found_logo = det_data[0].get('logo300x300', '')
+                if found_logo:
+                    det_logo = found_logo
+    except Exception as e:
+        log_debug(f"Fehler bei Details-API: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    return resolved_name, det_logo
+
+
+def _fetch_nowplaying_by_slug(api_client, slug, station_name, debug_log=None):
+    client = _clone_api_client(api_client)
+    try:
+        np_response = client.get(
+            RADIODE_NOWPLAYING_API_URL, params={'stationIds': slug}, timeout=5
+        )
+        if np_response.status_code == 200:
+            np_data = np_response.json()
+            if debug_log:
+                debug_log('radiode.now_playing.slug', np_data)
+            if isinstance(np_data, list) and len(np_data) > 0:
+                full_title = np_data[0].get('title', '')
+                if full_title:
+                    artist, title = parse_radiode_api_title(full_title, station_name)
+                    if artist or title:
+                        return artist, title
+            # Slug bekannt, aber API hat keinen Song geliefert (Programm/Moderation).
+            # Keine Stationssuche starten: eine Suche koennte faelschlicherweise
+            # einen anderen Sender mit aehnlichem Namen finden und dessen Daten
+            # (Logo, Name, Now-Playing) uebernehmen.
+            log_debug("Slug bekannt, aber kein aktiver Song via Slug-API (Programm/Moderation)")
+    except Exception as e:
+        log_debug(f"Fehler bei now-playing via Slug: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    return None, None
 
 
 def parse_radiode_api_title(full_title, station_name=None):
@@ -84,45 +157,20 @@ def get_nowplaying(api_client, plugin_slug, station_name, existing_logo=None, de
 
         if slug:
             log_debug(f"Station-Slug: '{slug}' (plugin={bool(plugin_slug)})")
-            try:
-                det_response = api_client.get(
-                    RADIODE_DETAILS_API_URL, params={'stationIds': slug}, timeout=5
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                details_future = executor.submit(_fetch_details_by_slug, api_client, slug)
+                nowplaying_future = executor.submit(
+                    _fetch_nowplaying_by_slug,
+                    api_client,
+                    slug,
+                    station_name,
+                    debug_log,
                 )
-                if det_response.status_code == 200:
-                    det_data = det_response.json()
-                    if isinstance(det_data, list) and len(det_data) > 0:
-                        proper_name = det_data[0].get('name', '')
-                        if proper_name:
-                            resolved_name = proper_name
-                        found_logo = det_data[0].get('logo300x300', '')
-                        if found_logo:
-                            det_logo = found_logo
-            except Exception as e:
-                log_debug(f"Fehler bei Details-API: {e}")
-
-            try:
-                np_response = api_client.get(
-                    RADIODE_NOWPLAYING_API_URL, params={'stationIds': slug}, timeout=5
-                )
-                if np_response.status_code == 200:
-                    np_data = np_response.json()
-                    if debug_log:
-                        debug_log('radiode.now_playing.slug', np_data)
-                    if isinstance(np_data, list) and len(np_data) > 0:
-                        full_title = np_data[0].get('title', '')
-                        if full_title:
-                            artist, title = parse_radiode_api_title(full_title, station_name)
-                            if artist or title:
-                                log_info(f"OK now-playing via Slug: {artist} - {title}")
-                                return artist, title, resolved_name, det_logo, search_logo
-                    # Slug bekannt, aber API hat keinen Song geliefert (Programm/Moderation).
-                    # Keine Stationssuche starten: eine Suche koennte faelschlicherweise
-                    # einen anderen Sender mit aehnlichem Namen finden und dessen Daten
-                    # (Logo, Name, Now-Playing) uebernehmen.
-                    log_debug("Slug bekannt, aber kein aktiver Song via Slug-API (Programm/Moderation)")
-                    return None, None, resolved_name, det_logo, search_logo
-            except Exception as e:
-                log_debug(f"Fehler bei now-playing via Slug: {e}")
+                resolved_name, det_logo = details_future.result()
+                artist, title = nowplaying_future.result()
+            if artist or title:
+                log_info(f"OK now-playing via Slug: {artist} - {title}")
+                return artist, title, resolved_name, det_logo, search_logo
             # Bei Netzwerkfehler ebenfalls kein Suchfallback (Sender ist bekannt)
             return None, None, resolved_name, det_logo, search_logo
 

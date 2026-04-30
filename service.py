@@ -1764,7 +1764,6 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.VERIFIED_SOURCE_CONF)
         WINDOW.clearProperty(_P.QF_REQUEST_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_STATION)
-        WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.clearProperty(_P.QF_REQUEST_MODE)
         WINDOW.clearProperty(_P.QF_REQUEST_TS)
         self._clear_qf_response_properties()
@@ -2569,11 +2568,10 @@ class RadioMonitor(xbmc.Monitor):
         }, level='info')
         return True
 
-    def _send_qf_request(self, station_name, mode='asm_auto', station_id=''):
+    def _send_qf_request(self, station_name, mode='asm_auto'):
         station = self._sanitize_station_text(station_name)
         if not station:
             return False
-        station_id_text = str(station_id or '').strip()
         previous_request_id = str(self._last_qf_request_id or '').strip()
         if previous_request_id and not self._is_qf_request_terminalized(previous_request_id):
             self._synthesize_qf_terminal_response(
@@ -2585,24 +2583,17 @@ class RadioMonitor(xbmc.Monitor):
         self._qf_request_seq = (self._qf_request_seq + 1) % 1000000
         request_id = f"asm-{int(now_ts * 1000)}-{self._qf_request_seq}"
         WINDOW.setProperty(_P.QF_REQUEST_STATION, station)
-        if station_id_text:
-            WINDOW.setProperty(_P.QF_REQUEST_STATION_ID, station_id_text)
-        else:
-            WINDOW.clearProperty(_P.QF_REQUEST_STATION_ID)
         WINDOW.setProperty(_P.QF_REQUEST_MODE, str(mode or 'asm_auto'))
         WINDOW.setProperty(_P.QF_REQUEST_TS, str(int(now_ts)))
         # Request-ID immer zuletzt setzen, damit ASM-QF ein konsistentes Request-Paket liest.
         WINDOW.setProperty(_P.QF_REQUEST_ID, request_id)
         self._last_qf_request_id = request_id
         self._last_qf_request_station = station
-        self._last_qf_request_station_id = station_id_text
         self._last_qf_request_ts = now_ts
-        self._log_qf_diag('request_sent', {
-            'req_id': request_id,
-            'station': station,
-            'station_id': station_id_text or '-',
-            'mode': str(mode or 'asm_auto'),
-        })
+        log_debug(
+            f"ASM-QF Request gesendet: id='{request_id}', station='{station}', "
+            f"mode='{mode}'"
+        )
         return True
 
     def _clear_qf_response_properties(self):
@@ -2751,15 +2742,10 @@ class RadioMonitor(xbmc.Monitor):
             )
             if not probe_due:
                 return
-            if self._send_qf_request(
-                station_name=station_name,
-                mode='asm_recovery_probe',
-                station_id=station_id,
-            ):
+            if self._send_qf_request(station_name=station_name, mode='asm_recovery_probe'):
                 self._qf_last_probe_ts = now_ts
                 self._log_qf_diag('degrade_probe_sent', {
                     'station': station_name,
-                    'station_id': station_id or '-',
                     'probe_interval_s': self.QF_DEGRADE_PROBE_INTERVAL_S,
                     'req_id': self._last_qf_request_id or '-',
                 })
@@ -2768,7 +2754,6 @@ class RadioMonitor(xbmc.Monitor):
         request_due = (
             not self._last_qf_request_id
             or station_changed
-            or station_id_changed
             or (
                 now_ts - (
                     self._last_qf_response_match_ts
@@ -2788,11 +2773,7 @@ class RadioMonitor(xbmc.Monitor):
             self._last_qf_result = ''
             self._clear_qf_response_properties()
             WINDOW.clearProperty(_P.QF_RESULT)
-        self._send_qf_request(
-            station_name=station_name,
-            mode='asm_auto',
-            station_id=station_id,
-        )
+        self._send_qf_request(station_name=station_name, mode='asm_auto')
 
     def _sync_qf_result_property(self):
         """
