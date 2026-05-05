@@ -7,6 +7,7 @@ aus ICY-Streams und APIs.
 import re
 from typing import Tuple, List, Optional
 from constants import INVALID_METADATA_VALUES, NUMERIC_ID_PATTERN as _NUMERIC_ID_RE
+from text_encoding import normalize_text
 
 # --- ICY Extraktion ---
 
@@ -15,13 +16,14 @@ def extract_stream_title(metadata_raw: str) -> Optional[str]:
     Extrahiert den StreamTitle aus dem ICY-Roh-String.
     Format: StreamTitle='Artist - Title';
     """
+    metadata_raw = normalize_text(metadata_raw)
     if not metadata_raw:
         return None
     try:
         # Wichtig: Non-greedy .*? bis zum letzten ' vor ; um Apostrophe in Titeln zu unterstÃ¼tzen
         match = re.search(r"StreamTitle='(.*?)';", metadata_raw)
         if match:
-            return match.group(1)
+            return normalize_text(match.group(1))
     except Exception:
         pass
     return None
@@ -41,6 +43,7 @@ def parse_stream_title_simple(stream_title: str) -> Tuple[Optional[str], Optiona
     """
     Einfaches Parsing eines "Artist - Title" Strings.
     """
+    stream_title = normalize_text(stream_title, collapse_whitespace=True)
     if not stream_title or ' - ' not in stream_title:
         return None, stream_title
     if stream_title.count(' - ') > 1:
@@ -59,6 +62,8 @@ def parse_stream_title_complex(stream_title: str, station_name: str = None) -> T
     Komplexe Trennung von Artist und Title aus dem ICY-StreamTitle.
     Gibt (artist, title, is_von_format, has_multiple_separators) zurÃ¼ck.
     """
+    stream_title = normalize_text(stream_title, collapse_whitespace=True)
+    station_name = normalize_text(station_name, collapse_whitespace=True)
     invalid = INVALID_METADATA_VALUES + ["", station_name]
     
     if not stream_title or stream_title in invalid or _NUMERIC_ID_RE.match(stream_title):
@@ -85,7 +90,7 @@ def parse_stream_title_complex(stream_title: str, station_name: str = None) -> T
             return artist, title, True, False
 
     # --- Trennzeichen-Erkennung ---
-    separators = [' - ', ' â€“ ', ' â€” ', ' | ', ': ']
+    separators = [' - ', ' – ', ' — ', ' â€“ ', ' â€” ', ' | ', ': ']
     for sep in separators:
         if sep in stream_title:
             if sep == ' - ' and stream_title.count(' - ') > 1:

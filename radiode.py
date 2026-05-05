@@ -14,6 +14,7 @@ from constants import (
     RADIODE_DETAILS_API_URL,
 )
 from logger import log_debug, log_info, log_warning
+from text_encoding import normalize_text
 
 
 def _clone_api_client(api_client):
@@ -40,7 +41,7 @@ def _fetch_details_by_slug(api_client, slug):
         if det_response.status_code == 200:
             det_data = det_response.json()
             if isinstance(det_data, list) and len(det_data) > 0:
-                proper_name = det_data[0].get('name', '')
+                proper_name = normalize_text(det_data[0].get('name', ''), collapse_whitespace=True)
                 if proper_name:
                     resolved_name = proper_name
                 found_logo = det_data[0].get('logo300x300', '')
@@ -97,6 +98,8 @@ def parse_radiode_api_title(full_title, station_name=None):
 
     Ungültige Werte werden zu None normalisiert.
     """
+    full_title = normalize_text(full_title, collapse_whitespace=True)
+    station_name = normalize_text(station_name, collapse_whitespace=True)
     invalid = INVALID_METADATA_VALUES + ['']
     if not full_title:
         return None, None
@@ -125,6 +128,8 @@ def parse_radiode_api_title(full_title, station_name=None):
             title = von_match.group(1).strip()
             artist = von_match.group(2).strip()
 
+    artist = normalize_text(artist, collapse_whitespace=True)
+    title = normalize_text(title, collapse_whitespace=True)
     if artist in invalid:
         artist = ''
     if title in invalid or (station_name and title == station_name):
@@ -175,7 +180,7 @@ def get_nowplaying(api_client, plugin_slug, station_name, existing_logo=None, de
             return None, None, resolved_name, det_logo, search_logo
 
         # Sendernamen fuer die Suche bereinigen
-        search_name = station_name or ''
+        search_name = normalize_text(station_name or '', collapse_whitespace=True)
         search_name = re.sub(
             r'\s*(inter\d+|mp3|aac|low|high|128|64|256).*$', '', search_name, flags=re.IGNORECASE
         )
@@ -209,7 +214,7 @@ def get_nowplaying(api_client, plugin_slug, station_name, existing_logo=None, de
         search_normalized = search_name.lower().replace('-', ' ').replace('_', ' ').strip()
 
         for station in data['playables'][:20]:
-            station_found = station.get('name', '')
+            station_found = normalize_text(station.get('name', ''), collapse_whitespace=True)
             station_normalized = station_found.lower().replace('-', ' ').replace('_', ' ').strip()
 
             # Exakter Match hat hoechste Prioritaet
@@ -244,7 +249,7 @@ def get_nowplaying(api_client, plugin_slug, station_name, existing_logo=None, de
             log_debug("Kein Match gefunden (Score zu niedrig)")
             return None, None, resolved_name, det_logo, search_logo
 
-        station_found = best_match.get('name', '')
+        station_found = normalize_text(best_match.get('name', ''), collapse_whitespace=True)
         station_id = best_match.get('id', '')
         found_logo = best_match.get('logo300x300', '')
         if found_logo:

@@ -13,6 +13,7 @@ from constants import (
 )
 from metadata import parse_stream_title_simple as _parse_stream_title_simple
 from logger import log_debug, log_info
+from text_encoding import normalize_text
 
 
 def extract_station_id(text):
@@ -56,7 +57,8 @@ def parse_nowplaying_candidate(value, station_name=None):
     if value is None:
         return None, None
 
-    candidate = str(value).strip()
+    candidate = normalize_text(value, collapse_whitespace=True)
+    station_name = normalize_text(station_name, collapse_whitespace=True)
     if not candidate:
         return None, None
     if candidate.lower().startswith('http'):
@@ -141,7 +143,7 @@ def extract_from_text(text, station_name=None):
     best_artist, best_title = None, None
     for pattern in patterns:
         for match in re.finditer(pattern, text, re.IGNORECASE):
-            candidate = match.group(1).strip()
+            candidate = normalize_text(match.group(1), collapse_whitespace=True)
             artist, title = parse_nowplaying_candidate(candidate, station_name)
             if artist and title:
                 return artist, title  # vollstaendiges Paar gefunden

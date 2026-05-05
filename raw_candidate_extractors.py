@@ -3,6 +3,7 @@ Helper functions to extract artist/title pairs from raw Kodi payloads.
 This module is Kodi-agnostic and intended for analysis enrichment.
 """
 import json
+from text_encoding import normalize_text
 
 
 def _as_text(value):
@@ -14,7 +15,7 @@ def _as_text(value):
             if text:
                 return text
         return ""
-    return str(value).strip()
+    return normalize_text(value, collapse_whitespace=True)
 
 
 def _split_pair(text):

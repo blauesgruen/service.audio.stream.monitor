@@ -57,7 +57,10 @@ from song_end_detector import SongEndDetector
 from raw_sources import RawSourceLabels, snapshot_getters
 from analysis_events import AnalysisEventStore, new_trace_id
 import skin_colors as _skin_colors
-from text_encoding import decode_text_bytes as _decode_text_bytes, repair_mojibake_text as _repair_mojibake_text
+from text_encoding import (
+    decode_text_bytes as _decode_text_bytes,
+    normalize_text as _normalize_text,
+)
 from musicbrainz import (
     identify_artist_title_via_musicbrainz as _identify_artist_title_via_musicbrainz,
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
@@ -98,6 +101,22 @@ from pre_mb_policy import (
 
 # Window-Properties für die Skin
 WINDOW = xbmcgui.Window(10000)  # Home window
+_DISPLAY_TEXT_KEYS = {
+    _P.STATION,
+    _P.TITLE,
+    _P.ARTIST,
+    _P.ARTIST_DISPLAY,
+    _P.ALBUM,
+    _P.ALBUM_DATE,
+    _P.GENRE,
+    _P.FIRST_REL,
+    _P.STREAM_TTL,
+    _P.API_NOW,
+    _P.ICY_NOW,
+    _P.BAND_FORM,
+    _P.BAND_MEM,
+    _P.QF_RESULT,
+}
 
 class PlayerMonitor(xbmc.Player):
     """Monitor für Player-Events um Logo SOFORT beim Stream-Start zu erfassen"""
@@ -1867,10 +1886,15 @@ class RadioMonitor(xbmc.Monitor):
         self._load_bullet_settings()
         log_debug("Einstellungen neu geladen (Bullet, Persistenz und ASM-QF Integration aktualisiert)")
 
+    def _normalize_display_text(self, value, collapse_whitespace=True):
+        return _normalize_text(value, collapse_whitespace=collapse_whitespace)
+
     def set_property_safe(self, key, value):
         """Setzt eine Window-Property nur wenn der Wert nicht leer ist."""
         if key == _P.STATION:
             value = self._sanitize_station_text(value)
+        elif key in _DISPLAY_TEXT_KEYS:
+            value = self._normalize_display_text(value)
         if value:
             text = f"{self._bullet_prefix}{value}" if key in self._BULLET_KEYS else str(value)
             WINDOW.setProperty(key, text)
@@ -1937,8 +1961,8 @@ class RadioMonitor(xbmc.Monitor):
             self._set_api_source(self.API_SOURCE_RADIODE)
 
     def _compose_song_label(self, artist=None, title=None):
-        a = (artist or '').strip()
-        t = (title or '').strip()
+        a = self._normalize_display_text(artist)
+        t = self._normalize_display_text(title)
         if a and t:
             return f"{a} - {t}"
         return t or a
@@ -2030,7 +2054,7 @@ class RadioMonitor(xbmc.Monitor):
         text = str(value or '')
         if not text:
             return ''
-        text = _repair_mojibake_text(text)
+        text = self._normalize_display_text(text)
         text = re.sub(r'\[[^\]]+\]', '', text)
         text = text.replace('•', ' ')
         text = ' '.join(text.split()).strip()
@@ -2174,8 +2198,8 @@ class RadioMonitor(xbmc.Monitor):
     def _qf_response_snapshot(self):
         response_id = (WINDOW.getProperty(_P.QF_RESPONSE_ID) or '').strip()
         status = (WINDOW.getProperty(_P.QF_RESPONSE_STATUS) or '').strip().lower()
-        artist = (WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '').strip()
-        title = (WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '').strip()
+        artist = self._normalize_display_text(WINDOW.getProperty(_P.QF_RESPONSE_ARTIST) or '')
+        title = self._normalize_display_text(WINDOW.getProperty(_P.QF_RESPONSE_TITLE) or '')
         response_source = (WINDOW.getProperty(_P.QF_RESPONSE_SOURCE) or '').strip().lower()
         meta_raw = (WINDOW.getProperty(_P.QF_RESPONSE_META) or '').strip()
         response_ts_raw = WINDOW.getProperty(_P.QF_RESPONSE_TS) or ''
@@ -2190,7 +2214,7 @@ class RadioMonitor(xbmc.Monitor):
             if isinstance(meta, dict):
                 raw_station_used = meta.get('station_used')
                 if isinstance(raw_station_used, str):
-                    station_used = raw_station_used
+                    station_used = self._normalize_display_text(raw_station_used)
             else:
                 meta = {}
         response_ts = self._parse_qf_epoch_ts(response_ts_raw)
@@ -3389,11 +3413,16 @@ class RadioMonitor(xbmc.Monitor):
         Normalisiert und validiert einen Kandidaten.
         Rückgabe: (artist, title) oder (None, None), wenn nicht verwertbar.
         """
-        a = (artist or '').strip()
-        t = (title or '').strip()
+        normalized_invalid = {
+            self._normalize_display_text(value)
+            for value in (invalid_values or [])
+            if self._normalize_display_text(value)
+        }
+        a = self._normalize_display_text(artist)
+        t = self._normalize_display_text(title)
         if not a or not t:
             return None, None
-        if a in invalid_values or t in invalid_values:
+        if a in normalized_invalid or t in normalized_invalid:
             return None, None
         # ID-Rauschen wie "277353 - 386535" nicht als Song werten.
         if re.match(r'^\d{3,}$', a) and re.match(r'^\d{3,}$', t):
@@ -4596,8 +4625,8 @@ class RadioMonitor(xbmc.Monitor):
             log_debug("=================================")
             
             # ICY-Metadaten aus den Headers
-            icy_name = _repair_mojibake_text(response.headers.get('icy-name', ''))
-            icy_genre = _repair_mojibake_text(response.headers.get('icy-genre', ''))
+            icy_name = self._normalize_display_text(response.headers.get('icy-name', ''))
+            icy_genre = self._normalize_display_text(response.headers.get('icy-genre', ''))
             
             # Station initial aus ICY-Header icy-name (wird von API überschrieben falls verfügbar)
             station_name = icy_name
@@ -4658,6 +4687,8 @@ class RadioMonitor(xbmc.Monitor):
         # Sonst flackert RadioMonitor.Source zwischen '' und dem finalen Gewinner.
         self._last_decision_source = ''
         self._last_decision_pair = ('', '')
+        stream_title = self._normalize_display_text(stream_title)
+        station_name = self._sanitize_station_text(station_name) if station_name else ''
         invalid = INVALID_METADATA_VALUES + ["", station_name]
         artist, title, is_von, has_multi = _parse_metadata_complex(stream_title, station_name)
 
