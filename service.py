@@ -57,6 +57,7 @@ from song_end_detector import SongEndDetector
 from raw_sources import RawSourceLabels, snapshot_getters
 from analysis_events import AnalysisEventStore, new_trace_id
 import skin_colors as _skin_colors
+from text_encoding import decode_text_bytes as _decode_text_bytes, repair_mojibake_text as _repair_mojibake_text
 from musicbrainz import (
     identify_artist_title_via_musicbrainz as _identify_artist_title_via_musicbrainz,
     musicbrainz_query_artist_info as _musicbrainz_query_artist_info,
@@ -2029,6 +2030,7 @@ class RadioMonitor(xbmc.Monitor):
         text = str(value or '')
         if not text:
             return ''
+        text = _repair_mojibake_text(text)
         text = re.sub(r'\[[^\]]+\]', '', text)
         text = text.replace('•', ' ')
         text = ' '.join(text.split()).strip()
@@ -4594,8 +4596,8 @@ class RadioMonitor(xbmc.Monitor):
             log_debug("=================================")
             
             # ICY-Metadaten aus den Headers
-            icy_name = response.headers.get('icy-name', '')
-            icy_genre = response.headers.get('icy-genre', '')
+            icy_name = _repair_mojibake_text(response.headers.get('icy-name', ''))
+            icy_genre = _repair_mojibake_text(response.headers.get('icy-genre', ''))
             
             # Station initial aus ICY-Header icy-name (wird von API überschrieben falls verfügbar)
             station_name = icy_name
@@ -5230,7 +5232,10 @@ class RadioMonitor(xbmc.Monitor):
                             metadata = response.raw.read(meta_length)
                             if generation != self.metadata_generation:
                                 break
-                            metadata_str = metadata.decode('utf-8', errors='ignore').strip('\x00')
+                            metadata_str = _decode_text_bytes(
+                                metadata,
+                                content_type=response.headers.get('Content-Type', ''),
+                            ).strip('\x00')
 
                             # KOMPLETT LOGGEN: Rohe ICY-Metadaten
                             if metadata_str:
