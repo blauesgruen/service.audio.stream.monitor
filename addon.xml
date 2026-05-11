@@ -19,7 +19,7 @@
     <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
     <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
     <news>v1.1.3.beta1
-  - Neu: Integrierung eines externen Quellenfinder-Tools (ASM-QF)
+  - Neu: Integrierung eines externen Quellenfinder-Addons (ASM-QF)
 
 v1.1.2 (2026-04-02)
   - Neu: Übersicht der gespielten Songs pro Sender im Einstellungsmenü.
