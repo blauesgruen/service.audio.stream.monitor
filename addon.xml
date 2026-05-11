@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.3.beta1">
+<addon id="service.audio.stream.monitor" name="Audio Stream Monitor" provider-name="blauesgruen" version="1.1.4">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" />
@@ -18,8 +18,10 @@
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
     <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
     <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
-    <news>v1.1.3.beta1
+    <news>v1.1.4
   - Neu: Integrierung eines externen Quellenfinder-Addons (ASM-QF)
+  - Fix: erkannte Senderlogik gefestigt
+  - Neu: mit Python ausführbare GUI für Testzwecke hinzugefügt
 
 v1.1.2 (2026-04-02)
   - Neu: Übersicht der gespielten Songs pro Sender im Einstellungsmenü.
