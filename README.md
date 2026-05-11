@@ -89,6 +89,7 @@ Das Service-Addon setzt folgende Properties, die in der Kodi-Skin verwendet werd
 | `RadioMonitor.VerifiedSourceUrl` | URL der gematchten verifizierten Senderquelle (falls vorhanden) | "https://stream.example.net/live" |
 | `RadioMonitor.VerifiedSourceBy` | Verifizierender Addon-Owner der Quelle | "service.audio.stream.monitor.qf" |
 | `RadioMonitor.VerifiedSourceConfidence` | Confidence der verifizierten Quelle (0..1) | "0.950" |
+| `RadioMonitor.QF.Enabled` | "true" wenn der ASM-QF-Settingschalter aktiviert ist, sonst "false" | "true" |
 | `RadioMonitor.QF.Result` | Song-Ergebnis aus ASM-QF als "Artist - Title" (nur bei `status=hit`) | "Backstreet Boys - Quit Playing Games (With My Heart)" |
 | `RadioMonitor.QF.Response.StationUsed` | 1:1-Spiegel aus `RadioMonitor.QF.Response.Meta.station_used` (leer/fehlend => Label-Clear) | "Antenne Bayern" |
 
@@ -138,7 +139,10 @@ Persistenz-Hinweis:
 
 ### Beispiel 7: ASM-QF Song-Ergebnis
 ```xml
-<label>QF: $INFO[Window(Home).Property(RadioMonitor.QF.Result)]</label>
+<control type="label">
+    <visible>String.IsEqual(Window(Home).Property(RadioMonitor.QF.Enabled),true) + !String.IsEmpty(Window(Home).Property(RadioMonitor.QF.Result))</visible>
+    <label>QF: $INFO[Window(Home).Property(RadioMonitor.QF.Result)]</label>
+</control>
 ```
 
 ## Installation

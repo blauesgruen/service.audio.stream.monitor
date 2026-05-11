@@ -226,6 +226,7 @@ class PropertyNames:
     QF_RESPONSE_STATION_USED = 'RadioMonitor.QF.Response.StationUsed'
     QF_RESPONSE_TS = 'RadioMonitor.QF.Response.Ts'
     QF_RESULT = 'RadioMonitor.QF.Result'
+    QF_ENABLED = 'RadioMonitor.QF.Enabled'
     AN_TRACE_ID = 'RadioMonitor.Analysis.TraceId'
     AN_TRIGGER = 'RadioMonitor.Analysis.Trigger'
     AN_WINNER_SOURCE = 'RadioMonitor.Analysis.WinnerSource'

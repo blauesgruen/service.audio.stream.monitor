@@ -1789,6 +1789,7 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.QF_REQUEST_TS)
         self._clear_qf_response_properties()
         WINDOW.clearProperty(_P.QF_RESULT)
+        WINDOW.clearProperty(_P.QF_ENABLED)
         WINDOW.clearProperty(_P.PLAYING)
         WINDOW.clearProperty(_P.LOGO)
         WINDOW.clearProperty(_P.BAND_FORM)
@@ -1800,6 +1801,7 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.AN_LAST_EVENT)
         
         self.raw_sources.clear_all()
+        self._sync_qf_enabled_property()
         log_debug(f"Properties gelöscht")
         
     def _handle_stream_transition(self, reason=''):
@@ -1868,6 +1870,10 @@ class RadioMonitor(xbmc.Monitor):
                 f"('{self.QF_SERVICE_ADDON_ID}'): {e}"
             )
 
+    def _sync_qf_enabled_property(self):
+        """Spiegelt den ASM-QF-Settingschalter als boolsche Window-Property fuer Skins."""
+        WINDOW.setProperty(_P.QF_ENABLED, 'true' if self._qf_enabled else 'false')
+
     def _load_bullet_settings(self):
         """Liest Addon-Settings und aktualisiert Bullet-Prefix und Persistenz-Flag."""
         import xbmcaddon as _xbmcaddon
@@ -1877,6 +1883,7 @@ class RadioMonitor(xbmc.Monitor):
         self._bullet_prefix = f'[COLOR {color}]•[/COLOR] ' if enabled else ''
         self._persist_data  = addon.getSetting('persist_data').lower() != 'false'
         self._qf_enabled = (addon.getSetting('qf_enabled') or 'false').lower() == 'true'
+        self._sync_qf_enabled_property()
         if not self._persist_data:
             log_info("Datenpersistenz deaktiviert – DB und JSON werden nicht geschrieben")
 
@@ -5672,7 +5679,19 @@ class RadioMonitor(xbmc.Monitor):
                                 self._has_station_analysis()
                                 and self._policy_preferred_source in ('musicplayer', 'api', 'icy')
                             ):
-                                parse_locked_source = self._policy_preferred_source
+                                preferred_family = str(self._policy_preferred_source or '').strip()
+                                current_locked = str(parse_locked_source or '').strip()
+                                current_family = self._source_family(current_locked)
+                                # Erhalte eine bereits bekannte direct/swapped-Richtung, wenn die
+                                # Policy nur dieselbe Quellenfamilie bestaetigt.
+                                if (
+                                    current_locked
+                                    and current_family == preferred_family
+                                    and current_locked != preferred_family
+                                ):
+                                    parse_locked_source = current_locked
+                                else:
+                                    parse_locked_source = preferred_family
                             self._parse_prev_winner_pair = last_winner_pair
                             self._parse_trigger_reason = trigger_reason
                             self._parse_locked_source = parse_locked_source

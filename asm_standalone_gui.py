@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Tuple
 # -----------------------------
 
 
+
 class _InMemoryWindow:
     def __init__(self) -> None:
         self._props: Dict[str, str] = {}
