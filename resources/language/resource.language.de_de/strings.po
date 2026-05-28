@@ -35,6 +35,10 @@ msgctxt "#32022"
 msgid "Enable ASM-QF integration"
 msgstr "ASM-QF-Integration aktivieren"
 
+msgctxt "#32023"
+msgid "Allow PVR radio via ASM-QF"
+msgstr "PVR-Radio über ASM-QF zulassen"
+
 msgctxt "#32031"
 msgid "Show song history by station"
 msgstr "Songverlauf pro Sender anzeigen"

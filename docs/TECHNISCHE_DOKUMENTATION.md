@@ -8,6 +8,11 @@ Die `README.md` bleibt der Nutzer-/Feature-Einstieg, diese Datei ist die Maintai
 Das Service-Addon beobachtet aktive HTTP/HTTPS-Audio-Streams in Kodi und schreibt normalisierte Metadaten in
 Window-Properties `RadioMonitor.*`.
 
+Ergaenzung:
+- HTTP/HTTPS bleibt der primaere Streampfad.
+- Optional kann ASM auch PVR-Radio-Sessions (`pvr://...` bzw. den aufgeloesten `rtsp://...` Backendstream) zulassen, aber nur im Zusammenspiel mit aktiviertem/installiertem ASM-QF.
+- In diesem Modus dient PVR ausschliesslich zur Senderidentifikation; der nachgelagerte QF-/MusicBrainz-/Winner-Pfad bleibt identisch zum normalen Streambetrieb.
+
 Kernziele:
 - robuste Erkennung von Artist/Title aus ICY, API (whitelisted) und Kodi MusicPlayer
 - Validierung/Anreicherung ueber MusicBrainz (MBID, Album, FirstRelease, Genre, Banddaten)
@@ -60,15 +65,18 @@ Event-/Polling-Quellen:
   - `onPlayBackStarted()`: erkennt API-Source frueh (radio.de/radio.de light/TuneIn)
   - `onPlayBackStopped()` / `onPlayBackEnded()`: loeschen Labels sofort (ohne Polling-Verzoegerung)
   - `onAVStarted()`: behandelt Video/Lokaldateien als harte Stop-Szenarien und liest frueh Logo aus `ListItem.Icon`
+  - bei aktiviertem PVR/QF-Modus seedet `onAVStarted()` zusaetzlich den Sendernamen aus Kodi-Feldern, bevor der normale QF-Pfad startet
 - `RadioMonitor.run()`:
   - Aufruf `skin_colors.update_settings_colors()` beim Start (aktualisiert Farbdropdown in settings.xml)
   - Polling alle 2 Sekunden (`check_playing()`)
   - `onSettingsChanged()`: laedt `bullet_enabled`, `bullet_color`, `persist_data` sofort neu
+  - zur Laufzeit gelten dabei auch `qf_enabled` und `pvr_qf_enabled`
 
 Worker:
 - `metadata_worker(url, generation)` fuer ICY-Streams
 - `api_metadata_worker(generation)` als Fallback bei fehlendem ICY (nur whitelisted API-Source)
 - `_musicplayer_metadata_fallback(generation)` als Fallback ohne ICY und ohne API-Basis
+- fuer PVR/RTSP+QF nutzt `metadata_worker(...)` einen Direktmodus ohne ICY-HTTP, damit der QF-/MB-Pfad gleich bleibt ohne `rtsp://` als HTTP zu behandeln
 
 ## 4) Zustandsmodell und Thread-Sicherheit
 
@@ -79,6 +87,7 @@ Wichtige Runtime-Felder in `RadioMonitor`:
 - `api_source`, `use_api_fallback`, `station_slug`, `plugin_slug`, `tunein_station_id`, `station_logo`
 - `_api_source_proof` (autoritative API-Quellverifikation aus echtem Plugin-Start)
 - `_last_song_time`, `_song_timeout` (song timeout management)
+- `_qf_enabled`, `_pvr_qf_enabled`
 - `_qf_station_anchor` (stabile `QF.Request.Station` pro Stream-Session)
 - `_last_qf_fresh_hit_pair` (gelatchtes frisches QF-Hit-Paar als Trigger-Anker bei Poll-Races)
 - `source_policy`, `_last_policy_context`, `_policy_preferred_source`
@@ -95,7 +104,7 @@ Thread-Kontrolle:
 ### 5.1 Erkennung neuer Wiedergabe
 
 `check_playing()`:
-- ignoriert Video und Nicht-HTTP(S)
+- ignoriert Video und nicht-monitorbare Quellen; HTTP/HTTPS immer, PVR/RTSP nur im aktivierten ASM-QF-PVR-Modus
 - bei URL-Wechsel:
   - setzt neuen Stream-Status
   - leert initial `MBID`, `Album`, `Station`
@@ -127,6 +136,14 @@ Bei Streamwechsel:
 
 ### 6.1 ICY-Pfad (primaer)
 
+PVR/QF-Direktmodus:
+- aktiv nur wenn `qf_enabled=true`, `pvr_qf_enabled=true` und `service.audio.stream.monitor.qf` installiert ist
+- `check_playing()`/`onAVStarted()` akzeptieren dann `pvr://...` und den aufgeloesten `rtsp://...` Backendstream als monitorbare Session
+- `RadioMonitor.Station` wird frueh aus Kodi-Feldern (`ListItem.Label`, `ListItem.Title`, `MusicPlayer.Album`, `MusicInfoTag`, `getPlayingItem()`) befuellt
+- `metadata_worker()` laeuft in diesem Modus ohne `parse_icy_metadata(url)` und ohne ICY-HTTP-Request gegen `rtsp://...`
+- API-Fallback bleibt dabei aus; PVR fuehrt keine neuen nicht-whitelisted API-Pfade ein
+- sobald ASM-QF einen `hit` liefert, laeuft der Kandidat durch denselben Trigger-/MB-/Winner-/Property-Pfad wie bei HTTP-Streams
+
 `metadata_worker()` -> `parse_icy_metadata(url)`:
 - Request mit Header `Icy-MetaData: 1`
 - liest `icy-name`, `icy-genre`, `icy-metaint`
@@ -144,6 +161,7 @@ Source-Proof fuer API-Stationsnamen:
 Im Loop:
 - liest Audio-Bytes bis `metaint`, dann Metadatenblocklaenge und Metadatenblock
 - extrahiert `StreamTitle` via `metadata.extract_stream_title`
+- im PVR/QF-Direktmodus gibt es bewusst keinen ICY-Read; der Loop pollt dort nur QF-/Policy-/MB-Zustand weiter
 - Auswertungs-Gate: Parse/Policy laeuft nicht nur bei `meta_length > 0`, sondern auch wenn die letzte Gewinnerquelle `asm-qf` ist; dadurch bleiben spaete QF-Hits ohne neuen ICY-Block verarbeitbar
 - API-Refresh nur nach stabilem Start oder nach gesetzter Erstquelle (kein Vorbefuellen waehrend Buffering)
 - bei Titelwechsel:
@@ -229,6 +247,7 @@ Im Loop:
 - QF-Terminalitaet: pro `RadioMonitor.QF.Request.Id` wird genau ein terminaler Abschluss erfasst. Bei ausbleibender Antwort wird nach `QF_NO_RESPONSE_FALLBACK_S` ein synthetischer terminaler Status `error` mit Reason `no_response_timeout` gesetzt; beim internen Ueberholen einer offenen Request-ID wird `superseded` mit Reason `new_request_sent` gesetzt.
 - QF-Degrade zentral: derselbe Degrade-Mode greift sowohl bei langem No-Response (`QF_NO_RESPONSE_DEGRADE_S`) als auch bei anhaltenden frischen externen `QF.Response.Status=error`-Antworten. Fuer den Error-Pfad wird nach `QF_ERROR_FALLBACK_S=30s` auf die Standard-Quellengruppe zurueckgefallen; Re-Probes laufen wie gewohnt ueber `QF_DEGRADE_PROBE_INTERVAL_S`.
 - Der QF-Degrade-Zustand wird pro Station in `song_data.db` persistiert. Wenn eine Station spaeter erneut gestartet wird und der persistierte Zustand noch aktiv ist, geht ASM sofort in den Fallback auf die Standard-Quellengruppe und nutzt QF nur fuer Recovery-Probes. Erst eine frische brauchbare externe QF-Response hebt den persistierten Degrade-Hinweis wieder auf.
+- Quellenunabhaengigkeit des QF-Hits: Ob der Sendername aus HTTP/HTTPS oder aus PVR/RTSP stammt, beeinflusst nicht den nachgelagerten Umgang mit `asm-qf`-Kandidaten. Unterschiede gibt es nur im Eintrittspfad (Stationsermittlung, kein ICY-HTTP bei PVR).
 
 ### 6.3 ASM-QF Runtime-Contract (Request/Response)
 

@@ -202,7 +202,7 @@ class PlayerMonitor(xbmc.Player):
                 playing_file = self.getPlayingFile()
 
                 # Lokale Datei → Radio-Properties sofort löschen
-                if not (playing_file.startswith('http://') or playing_file.startswith('https://')):
+                if not self.radio_monitor._is_monitorable_audio_source(playing_file):
                     log_info("Lokale Datei gestartet - lösche Radio-Properties sofort")
                     self.radio_monitor.is_playing = False
                     self.radio_monitor.current_url = None
@@ -211,6 +211,16 @@ class PlayerMonitor(xbmc.Player):
                     return
 
                 # HTTP/HTTPS Audio-Stream → SOFORT Logo vom ListItem lesen
+                if (
+                    self.radio_monitor._is_pvr_stream_source(playing_file)
+                    or self.radio_monitor._is_pvr_backend_stream_source(playing_file)
+                ):
+                    self.radio_monitor._capture_listitem_raw('onAVStarted')
+                    self.radio_monitor._seed_station_for_pvr_qf(
+                        playing_file,
+                        context='onAVStarted',
+                    )
+
                 listitem_icon = xbmc.getInfoLabel('ListItem.Icon')
                 if listitem_icon and self.radio_monitor.is_real_logo(listitem_icon):
                     self.radio_monitor.station_logo = listitem_icon
@@ -295,6 +305,7 @@ class RadioMonitor(xbmc.Monitor):
         self._last_station_profile_observe_ts = 0.0
         self._last_verified_source_write = ('', '', '', 0.0)
         self._qf_enabled = False
+        self._pvr_qf_enabled = True
         self._last_qf_install_request_ts = 0.0
         self._last_qf_result = ''
         self._last_qf_applied_pair = ('', '')
@@ -1874,6 +1885,90 @@ class RadioMonitor(xbmc.Monitor):
         """Spiegelt den ASM-QF-Settingschalter als boolsche Window-Property fuer Skins."""
         WINDOW.setProperty(_P.QF_ENABLED, 'true' if self._qf_enabled else 'false')
 
+    @staticmethod
+    def _is_http_stream_source(playing_file):
+        value = str(playing_file or '').strip().lower()
+        return value.startswith('http://') or value.startswith('https://')
+
+    @staticmethod
+    def _is_pvr_stream_source(playing_file):
+        return str(playing_file or '').strip().lower().startswith('pvr://')
+
+    @staticmethod
+    def _is_pvr_backend_stream_source(playing_file):
+        return str(playing_file or '').strip().lower().startswith('rtsp://')
+
+    def _is_pvr_qf_mode_active(self):
+        return bool(self._pvr_qf_enabled and self._qf_enabled)
+
+    def _is_monitorable_audio_source(self, playing_file):
+        if self._is_http_stream_source(playing_file):
+            return True
+        if (
+            (self._is_pvr_stream_source(playing_file) or self._is_pvr_backend_stream_source(playing_file))
+            and self._is_pvr_qf_mode_active()
+        ):
+            return True
+        return False
+
+    def _is_pvr_qf_direct_worker_source(self, playing_file):
+        if not self._is_pvr_qf_mode_active():
+            return False
+        return bool(
+            self._is_pvr_stream_source(playing_file)
+            or self._is_pvr_backend_stream_source(playing_file)
+        )
+
+    def _resolve_pvr_station_name(self, info_tag=None):
+        candidates = []
+
+        def _add(value):
+            text = self._sanitize_station_text(value)
+            if not text or '://' in text or text in candidates:
+                return
+            candidates.append(text)
+
+        for label_name in ('ListItem.Label', 'ListItem.Title', 'MusicPlayer.Album'):
+            _add(xbmc.getInfoLabel(label_name))
+
+        if info_tag is not None:
+            try:
+                _add(info_tag.getAlbum())
+            except Exception:
+                pass
+
+        try:
+            playing_item = self.player.getPlayingItem()
+        except Exception:
+            playing_item = None
+        if playing_item is not None:
+            for getter_name in ('getLabel', 'getTitle'):
+                getter = getattr(playing_item, getter_name, None)
+                if not callable(getter):
+                    continue
+                try:
+                    _add(getter())
+                except Exception:
+                    continue
+
+        return candidates[0] if candidates else ''
+
+    def _seed_station_for_pvr_qf(self, playing_file, info_tag=None, context=''):
+        if not self._is_pvr_qf_mode_active():
+            return ''
+        if not (
+            self._is_pvr_stream_source(playing_file)
+            or self._is_pvr_backend_stream_source(playing_file)
+        ):
+            return ''
+        station_name = self._resolve_pvr_station_name(info_tag=info_tag)
+        if not station_name:
+            return ''
+        self.set_property_safe(_P.STATION, station_name)
+        if context:
+            log_debug(f"PVR-Station fuer ASM-QF gesetzt ({context}): '{station_name}'")
+        return station_name
+
     def _load_bullet_settings(self):
         """Liest Addon-Settings und aktualisiert Bullet-Prefix und Persistenz-Flag."""
         import xbmcaddon as _xbmcaddon
@@ -1883,6 +1978,7 @@ class RadioMonitor(xbmc.Monitor):
         self._bullet_prefix = f'[COLOR {color}]•[/COLOR] ' if enabled else ''
         self._persist_data  = addon.getSetting('persist_data').lower() != 'false'
         self._qf_enabled = (addon.getSetting('qf_enabled') or 'false').lower() == 'true'
+        self._pvr_qf_enabled = (addon.getSetting('pvr_qf_enabled') or 'true').lower() != 'false'
         self._sync_qf_enabled_property()
         if not self._persist_data:
             log_info("Datenpersistenz deaktiviert – DB und JSON werden nicht geschrieben")
@@ -1891,7 +1987,7 @@ class RadioMonitor(xbmc.Monitor):
 
     def onSettingsChanged(self):
         self._load_bullet_settings()
-        log_debug("Einstellungen neu geladen (Bullet, Persistenz und ASM-QF Integration aktualisiert)")
+        log_debug("Einstellungen neu geladen (Bullet, Persistenz, ASM-QF und PVR-QF aktualisiert)")
 
     def _normalize_display_text(self, value, collapse_whitespace=True):
         return _normalize_text(value, collapse_whitespace=collapse_whitespace)
@@ -5205,7 +5301,17 @@ class RadioMonitor(xbmc.Monitor):
         self._reset_song_timeout_state(clear_debug=True)
         self.startup_qualifier.reset_session()
 
-        stream_info = self.parse_icy_metadata(url)
+        qf_direct_worker = self._is_pvr_qf_direct_worker_source(url)
+        if qf_direct_worker:
+            stream_info = {
+                'metaint': 0,
+                'response': None,
+                'station': WINDOW.getProperty(_P.STATION) or '',
+                'genre': '',
+            }
+            log_debug(f"PVR/QF-Direktpfad aktiv - starte Metadata Worker ohne ICY-HTTP fuer: {url}")
+        else:
+            stream_info = self.parse_icy_metadata(url)
         if not stream_info:
             log_warning("Keine ICY-Metadaten verfuegbar - wechsle zu Fallback")
             WINDOW.clearProperty(_P.ICY_NOW)
@@ -5247,25 +5353,31 @@ class RadioMonitor(xbmc.Monitor):
                     source_changed_trigger = False
                     trigger_reason = ''
 
-                    audio_data = response.raw.read(metaint)
-                    if not audio_data:
-                        break
+                    if qf_direct_worker:
+                        meta_length = 0
+                        time.sleep(0.25)
+                    else:
+                        audio_data = response.raw.read(metaint)
+                        if not audio_data:
+                            break
                         
-                    # Metadaten-Länge lesen (1 Byte * 16)
-                    meta_length_byte = response.raw.read(1)
-                    if not meta_length_byte:
-                        break
+                        # Metadaten-Länge lesen (1 Byte * 16)
+                        meta_length_byte = response.raw.read(1)
+                        if not meta_length_byte:
+                            break
                         
-                    meta_length = ord(meta_length_byte) * 16
+                        meta_length = ord(meta_length_byte) * 16
                     
                     if (
+                        qf_direct_worker
+                        or
                         meta_length > 0
                         or last_winner_source.startswith('musicplayer')
                         or last_winner_source.startswith('api')
                         or last_winner_source.startswith('asm-qf')
                         or initial_source_pending
                     ):
-                        if meta_length > 0:
+                        if not qf_direct_worker and meta_length > 0:
                             # Metadaten lesen
                             metadata = response.raw.read(meta_length)
                             if generation != self.metadata_generation:
@@ -5302,12 +5414,14 @@ class RadioMonitor(xbmc.Monitor):
                                 station_name=station_name,
                             )
                             current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
-                        icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
-                        icy_artist, icy_title = self._normalize_song_candidate(
-                            icy_artist,
-                            icy_title,
-                            invalid_values
-                        )
+                        icy_artist, icy_title = ('', '')
+                        if not qf_direct_worker:
+                            icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
+                            icy_artist, icy_title = self._normalize_song_candidate(
+                                icy_artist,
+                                icy_title,
+                                invalid_values
+                            )
                         current_icy_pair = self._pair_for_source(
                             last_winner_source,
                             (icy_artist, icy_title)
@@ -5316,7 +5430,7 @@ class RadioMonitor(xbmc.Monitor):
 
                         # API-Daten erst nach stabilem Start oder nach gesetzter Erstquelle aktualisieren.
                         # Dadurch wird waehrend sichtbarem Kodi-Buffering kein API-Property vorbefuellt.
-                        api_refresh_allowed = startup_stable_confirmed or bool(last_winner_source)
+                        api_refresh_allowed = (not qf_direct_worker) and (startup_stable_confirmed or bool(last_winner_source))
                         if api_refresh_allowed:
                             self._refresh_api_nowplaying_property(station_name)
                             current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
@@ -5434,20 +5548,26 @@ class RadioMonitor(xbmc.Monitor):
                                     current_mp_pair = self._sanitize_musicplayer_pair(current_mp_pair, station_name)
                                 else:
                                     current_mp_pair = ('', '')
-                                icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
-                                icy_artist, icy_title = self._normalize_song_candidate(
-                                    icy_artist,
-                                    icy_title,
-                                    invalid_values
-                                )
+                                icy_artist, icy_title = ('', '')
+                                if not qf_direct_worker:
+                                    icy_artist, icy_title = self.parse_stream_title_simple(stream_title or '')
+                                    icy_artist, icy_title = self._normalize_song_candidate(
+                                        icy_artist,
+                                        icy_title,
+                                        invalid_values
+                                    )
                                 current_icy_pair = self._pair_for_source(
                                     last_winner_source,
                                     (icy_artist, icy_title)
                                 )
                                 current_icy_pair = self._sanitize_stream_source_pair(current_icy_pair, station_name)
-                                self._refresh_api_nowplaying_property(station_name)
-                                current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
-                                current_api_pair = self._sanitize_stream_source_pair(current_api_pair, station_name)
+                                if not qf_direct_worker:
+                                    self._refresh_api_nowplaying_property(station_name)
+                                    current_api_pair = self._pair_for_source(last_winner_source, self._latest_api_pair)
+                                    current_api_pair = self._sanitize_stream_source_pair(current_api_pair, station_name)
+                                else:
+                                    self._latest_api_pair = ('', '')
+                                    current_api_pair = ('', '')
                                 if station_name:
                                     self.set_property_safe(_P.STATION, station_name)
                                 if stream_info.get('genre'):
@@ -6148,7 +6268,7 @@ class RadioMonitor(xbmc.Monitor):
                 playing_file = self.player.getPlayingFile()
                 
                 # Prüfen ob es ein Stream ist (http/https)
-                if playing_file.startswith('http://') or playing_file.startswith('https://'):
+                if self._is_monitorable_audio_source(playing_file):
                     
                     if playing_file != self.current_url:
                         if self.current_url:
@@ -6176,6 +6296,14 @@ class RadioMonitor(xbmc.Monitor):
                         WINDOW.clearProperty(_P.ALBUM)
                         WINDOW.clearProperty(_P.STATION)
                         self._apply_verified_source_hint(playing_file)
+                        if (
+                            self._is_pvr_stream_source(playing_file)
+                            or self._is_pvr_backend_stream_source(playing_file)
+                        ):
+                            self._seed_station_for_pvr_qf(
+                                playing_file,
+                                context='check_playing_pre_info_tag',
+                            )
                         
                         # Basis-Informationen aus dem Player
                         try:
@@ -6183,6 +6311,15 @@ class RadioMonitor(xbmc.Monitor):
                             title = info_tag.getTitle()
                             artist = info_tag.getArtist()
                             album = info_tag.getAlbum()
+                            if (
+                                self._is_pvr_stream_source(playing_file)
+                                or self._is_pvr_backend_stream_source(playing_file)
+                            ):
+                                self._seed_station_for_pvr_qf(
+                                    playing_file,
+                                    info_tag=info_tag,
+                                    context='check_playing_new_url',
+                                )
                             
                             # Hole das Logo/Thumbnail vom aktuellen Item
                             # Prüfe verschiedene Quellen in Prioritätsreihenfolge

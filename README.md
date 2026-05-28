@@ -5,7 +5,15 @@ Dieses Service-Addon überwacht **alle HTTP/HTTPS Audio-Streams** und liest die 
 Das Monitoring funktioniert mit jedem Addon, das HTTP/HTTPS Audio-Streams abspielt.
 **API-Now-Playing wird bewusst nur fuer folgende Quellen genutzt:** `plugin.audio.radiode`, `plugin.audio.radio_de_light`, `plugin.audio.tunein2017`.
 
+Ergaenzung zum Scope:
+- HTTP/HTTPS bleibt der primaere, vollstaendige Streampfad.
+- Optional kann ASM auch PVR-Radio als Einstieg fuer ASM-QF zulassen. Dabei wird nur der Sendername aus Kodi uebernommen; ein QF-Hit laeuft danach durch denselben ASM-QF-/MusicBrainz-/Winner-Pfad wie bei normalen Streams.
+
 ## Features
+
+- Optionaler PVR-Radio-Einstieg via ASM-QF
+- Neues ASM-Setting `pvr_qf_enabled` (default an), sichtbar nur wenn ASM-QF installiert ist und der ASM-QF-Schalter aktiv ist
+- PVR/RTSP-QF-Direktpfad ohne unpassenden ICY-HTTP-Request gegen den RTSP-Backendstream; der nachgelagerte QF-/MB-/Winner-Pfad bleibt identisch
 
 - ✅ Universelle Unterstützung für alle HTTP/HTTPS Audio-Streams
 - ✅ Automatische Erkennung von Radio- und Musik-Streams
@@ -172,6 +180,11 @@ Persistenz-Hinweis:
 ### ICY-Metadata
 Das Addon sendet den Header `Icy-MetaData: 1` beim Stream-Abruf und parst die Metadaten kontinuierlich aus dem Stream.
 
+Optionaler PVR-Radio-Modus:
+- aktiv nur wenn `qf_enabled=true`, `pvr_qf_enabled=true` und `service.audio.stream.monitor.qf` installiert ist
+- ASM setzt dann den Sendernamen aus Kodi-Feldern (`ListItem.*`, `MusicInfoTag`, `getPlayingItem()`) und sendet ihn an ASM-QF
+- fuer den RTSP-Backendstream wird kein ICY-HTTP-Request ausgefuehrt; der QF-Hit wird trotzdem wie bei HTTP-Streams weiterverarbeitet
+
 ### Metadaten-Format
 StreamTitle wird normalerweise im Format `Artist - Title` übertragen. Das Addon erkennt folgende Trennzeichen:
 - ` - ` (Leerzeichen-Minus-Leerzeichen)
@@ -256,6 +269,9 @@ Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die
 - Getestet mit: radio.de, radio.de light, TuneIn, Mother Earth Radio (AzuraCast), Intergalactic, I Love Music, Ampache
 
 ## Bekannte Limitierungen
+
+- PVR-Radio ist kein allgemeiner zusaetzlicher Metadatenpfad: der Modus dient nur als Sendernamen-Einstieg fuer ASM-QF. Ohne brauchbaren ASM-QF-Hit bleiben nur die ueblichen Fallback-Daten sichtbar.
+- `RadioMonitor.ArtistMBID` haengt auch im PVR-QF-Pfad ausschliesslich vom MusicBrainz-Match des QF-Ergebnisses ab. Nicht-songartige QF-Hits liefern daher bewusst keine MBID.
 
 - Nicht alle Radio-Streams senden ICY-Metadaten; für diese Streams greift entweder die API (nur whitelisted Addons: radio.de/radio.de light/TuneIn) oder der MusicPlayer-Fallback
 - Manche Sender senden nur Sender-/Promo-Text statt Interpret/Titel. In solchen Faellen bleiben Artist/Title leer; Station und StreamTitle bleiben fuer die Anzeige erhalten.

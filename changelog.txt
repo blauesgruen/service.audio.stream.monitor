@@ -1,6 +1,9 @@
 Unreleased
 - Doku: QF-Degrade-Abschnitte in `README.md` und `TECHNISCHE_DOKUMENTATION.md` um den persistenten senderbezogenen Degrade-Hinweis erweitert.
 - Dokumentiert: Wenn QF fuer eine Station ueber den Degrade-Schwellenwert ausfaellt, wird dieser Zustand in `song_data.db` gespeichert und bei der naechsten Session derselben Station sofort fuer den Fallback auf die Standard-Quellengruppe genutzt; Recovery bleibt ueber Probe-Requests erhalten.
+- Doku: optionalen PVR-Radio-Einstieg via ASM-QF dokumentiert (`pvr_qf_enabled`, Sichtbarkeit nur bei aktivem/installiertem ASM-QF).
+- Dokumentiert: PVR/RTSP setzt den Sendernamen aus Kodi-Feldern und fuehrt QF-Hits danach durch denselben ASM-QF-/MusicBrainz-/Winner-Pfad wie normale Streams.
+- Dokumentiert: PVR-QF nutzt den Metadata-Worker im Direktmodus ohne ICY-HTTP gegen `rtsp://...`; dadurch entfallen die frueheren RTSP/ICY-Fehler im Log, ohne den MBID-/SourceDetail-Pfad zu verlieren.
 
 v1.1.5 (2026-04-16)
 - QF-Runtime: QF-Rohpaar bleibt fuer Trigger/Songwechsel 1:1 aus `RadioMonitor.QF.Response.Artist/Title` (kein pre_mb-Sanitizer vor MB-Postcheck).
