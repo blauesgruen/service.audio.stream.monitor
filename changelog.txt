@@ -1,3 +1,6 @@
+v1.1.11 (2026-11-10)
+- Fix: Schließen-Schaltfläche im Songverlauf sichtbar und per Navigation erreichbar.
+
 v1.1.10 (2026-11-10)
 - Fix: Aktive Fokusspalte im Songverlauf wird durch einen Akzentbalken unter dem Spaltenkopf angezeigt.
 

@@ -46,10 +46,14 @@
                 <height>42</height>
                 <label>$ADDON[service.audio.stream.monitor 32043]</label>
                 <font>font13</font>
+                <align>center</align>
+                <aligny>center</aligny>
                 <textcolor>FF9BA5AD</textcolor>
                 <textcolorfocus>FFFFFFFF</textcolorfocus>
+                <texture colordiffuse="FF20262D">white.jpg</texture>
                 <texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus>
                 <onleft>111</onleft>
+                <ondown>111</ondown>
             </control>
 
             <control type="group">
@@ -83,8 +87,8 @@
                     <bottom>0</bottom>
                     <onright>120</onright>
                     <onleft>111</onleft>
-                    <onup>111</onup>
                     <ondown>111</ondown>
+                    <onup>100</onup>
                     <pagecontrol>-</pagecontrol>
                     <itemlayout height="42">
                         <control type="label">
@@ -145,7 +149,7 @@
                     <bottom>0</bottom>
                     <onleft>111</onleft>
                     <onright>120</onright>
-                    <onup>120</onup>
+                    <onup>100</onup>
                     <ondown>120</ondown>
                     <pagecontrol>-</pagecontrol>
                     <itemlayout height="68">
