@@ -1,6 +1,8 @@
 """
 WindowXMLDialog for song history in addon settings.
 """
+import re
+
 import xbmc
 import xbmcgui
 
@@ -20,9 +22,11 @@ def _display_station_name(station_key):
     value = str(station_key or '').strip()
     if not value:
         return '-'
+    value = xbmc.getInfoLabel(value) if value.startswith('$INFO[') else value
+    value = re.sub(r'\[[^\]]+\]', '', value).replace('•', ' ')
     if ':' in value:
         return value.split(':', 1)[1].strip() or value
-    return value
+    return ' '.join(value.split()) or '-'
 
 
 class SongHistoryWindow(xbmcgui.WindowXMLDialog):

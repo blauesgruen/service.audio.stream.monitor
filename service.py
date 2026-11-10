@@ -1840,8 +1840,8 @@ class RadioMonitor(xbmc.Monitor):
             log_debug(f"Wiedergabe beendet: Labels sofort geleert ({reason})")
 
     _BULLET_KEYS = {
-        'RadioMonitor.Station', 'RadioMonitor.Title', 'RadioMonitor.ArtistDisplay',
-        'RadioMonitor.Album', 'RadioMonitor.Genre', 'RadioMonitor.QF.Response.StationUsed',
+        'RadioMonitor.Title', 'RadioMonitor.ArtistDisplay',
+        'RadioMonitor.Album', 'RadioMonitor.Genre',
     }
 
     def _has_addon(self, addon_id):
