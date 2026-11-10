@@ -18,7 +18,11 @@
     <summary lang="en_GB">Universal monitor for HTTP/HTTPS audio streams</summary>
     <description lang="de_DE">Optimiert und normalisiert Metadaten aus HTTP/HTTPS-Audiostreams (z. B. Webradio), gleicht Artist- und Titelinformationen mit MusicBrainz ab und aktualisiert Kodi-InfoLabels für eine präzisere Weiterverarbeitung durch Addons wie Artist Slideshow.</description>
     <description lang="en_GB">Enhances and normalizes metadata from HTTP/HTTPS audio streams (e.g. web radio), matches artist and title information via MusicBrainz, and updates Kodi InfoLabels for improved compatibility with add-ons such as Artist Slideshow.</description>
-    <news>v 1.1.6 (2026-05-31)
+    <news>v 1.1.7 (2026-11-10)
+  - Neu: Songverlauf-Fenster im Embuary-inspirierten Stil mit Sendernavigation, Songdetails und Close-Schaltfläche.
+  - Neu: Lokalisierte Beschriftung für die Close-Schaltfläche ergänzt.
+
+v 1.1.6 (2026-05-31)
   - Neu: Icon aktualisiert.
 
 v1.1.5 (2026-05-28)

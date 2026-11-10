@@ -1,3 +1,7 @@
+v1.1.7 (2026-11-10)
+- Neu: Songverlauf-Fenster im Embuary-inspirierten Stil mit Sendernavigation, Songdetails und Close-Schaltfläche.
+- Neu: Lokalisierte Beschriftung für die Close-Schaltfläche ergänzt.
+
 Unreleased
 - Doku: QF-Degrade-Abschnitte in `README.md` und `TECHNISCHE_DOKUMENTATION.md` um den persistenten senderbezogenen Degrade-Hinweis erweitert.
 - Dokumentiert: Wenn QF fuer eine Station ueber den Degrade-Schwellenwert ausfaellt, wird dieser Zustand in `song_data.db` gespeichert und bei der naechsten Session derselben Station sofort fuer den Fallback auf die Standard-Quellengruppe genutzt; Recovery bleibt ueber Probe-Requests erhalten.
