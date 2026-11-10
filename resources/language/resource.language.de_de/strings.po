@@ -86,3 +86,7 @@ msgstr "Zuletzt gehört"
 msgctxt "#32042"
 msgid "Could not open song history."
 msgstr "Songverlauf konnte nicht geoeffnet werden."
+
+msgctxt "#32043"
+msgid "Close"
+msgstr "Schließen"

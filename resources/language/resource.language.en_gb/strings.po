@@ -86,3 +86,7 @@ msgstr ""
 msgctxt "#32042"
 msgid "Could not open song history."
 msgstr ""
+
+msgctxt "#32043"
+msgid "Close"
+msgstr ""
