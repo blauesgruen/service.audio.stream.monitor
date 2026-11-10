@@ -3,7 +3,7 @@
     <defaultcontrol always="true">111</defaultcontrol>
     <controls>
         <control type="image">
-            <texture colordiffuse="99000000">white.png</texture>
+            <texture colordiffuse="99000000">white.jpg</texture>
         </control>
         <control type="group">
             <left>5%</left>
@@ -14,11 +14,11 @@
             <animation effect="fade" time="120">WindowClose</animation>
 
             <control type="image">
-                <texture colordiffuse="FF171B20">white.png</texture>
+                <texture colordiffuse="FF171B20">white.jpg</texture>
             </control>
             <control type="image">
                 <height>5</height>
-                <texture colordiffuse="FF26A6A6">white.png</texture>
+                <texture colordiffuse="FF26A6A6">white.jpg</texture>
             </control>
 
             <control type="label">
@@ -48,7 +48,7 @@
                 <font>font13</font>
                 <textcolor>FF9BA5AD</textcolor>
                 <textcolorfocus>FFFFFFFF</textcolorfocus>
-                <texturefocus colordiffuse="FF26A6A6">white.png</texturefocus>
+                <texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus>
                 <onleft>111</onleft>
             </control>
 
@@ -68,7 +68,7 @@
                     <top>34</top>
                     <width>27%</width>
                     <bottom>0</bottom>
-                    <texture colordiffuse="FF20262D">white.png</texture>
+                    <texture colordiffuse="FF20262D">white.jpg</texture>
                 </control>
                 <control type="list" id="111">
                     <top>34</top>
@@ -94,7 +94,7 @@
                         <control type="image">
                             <width>4</width>
                             <height>100%</height>
-                            <texture colordiffuse="FF26A6A6">white.png</texture>
+                            <texture colordiffuse="FF26A6A6">white.jpg</texture>
                         </control>
                         <control type="label">
                             <left>16</left>
@@ -121,7 +121,7 @@
                     <top>34</top>
                     <right>0</right>
                     <bottom>0</bottom>
-                    <texture colordiffuse="FF20262D">white.png</texture>
+                    <texture colordiffuse="FF20262D">white.jpg</texture>
                 </control>
                 <control type="list" id="120">
                     <left>30%</left>
@@ -156,13 +156,13 @@
                         <control type="image">
                             <height>1</height>
                             <bottom>0</bottom>
-                            <texture colordiffuse="33FFFFFF">white.png</texture>
+                            <texture colordiffuse="33FFFFFF">white.jpg</texture>
                         </control>
                     </itemlayout>
                     <focusedlayout height="68">
                         <control type="image">
                             <height>100%</height>
-                            <texture colordiffuse="3326A6A6">white.png</texture>
+                            <texture colordiffuse="3326A6A6">white.jpg</texture>
                         </control>
                         <control type="label">
                             <left>18</left>
