@@ -1,3 +1,7 @@
+v1.1.13 (2026-11-10)
+- Fix: Songverlauf liest die Datenbank schreibgeschützt ohne konkurrierende Schema-Änderungen.
+- Fix: Unnötiger linker Symbol-Abstand in den Listenzeilen entfernt.
+
 v1.1.12 (2026-11-10)
 - Fix: Schließen-Schaltfläche verbreitert, damit die Beschriftung vollständig sichtbar bleibt.
 

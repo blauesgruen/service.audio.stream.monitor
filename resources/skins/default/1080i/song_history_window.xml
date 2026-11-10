@@ -92,7 +92,7 @@
                     <pagecontrol>-</pagecontrol>
                     <itemlayout height="42">
                         <control type="label">
-                            <left>16</left>
+                            <left>8</left>
                             <right>10</right>
                             <height>100%</height>
                             <aligny>center</aligny>
@@ -108,7 +108,7 @@
                             <texture colordiffuse="FF26A6A6">white.jpg</texture>
                         </control>
                         <control type="label">
-                            <left>16</left>
+                            <left>8</left>
                             <right>10</right>
                             <height>100%</height>
                             <aligny>center</aligny>
@@ -154,7 +154,7 @@
                     <pagecontrol>-</pagecontrol>
                     <itemlayout height="68">
                         <control type="label">
-                            <left>18</left>
+                            <left>10</left>
                             <right>18</right>
                             <height>50%</height>
                             <aligny>bottom</aligny>
@@ -163,7 +163,7 @@
                             <label>$INFO[ListItem.Label]</label>
                         </control>
                         <control type="label">
-                            <left>18</left>
+                            <left>10</left>
                             <top>50%</top>
                             <right>18</right>
                             <height>50%</height>

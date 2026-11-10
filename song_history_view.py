@@ -60,7 +60,7 @@ def _song_db_path():
 
 def show_song_history(day=None):
     target_day = str(day or datetime.utcnow().strftime('%Y-%m-%d'))
-    db = SongDatabase(_song_db_path())
+    db = SongDatabase(_song_db_path(), read_only=True)
     try:
         stations = db.get_station_overview(day=target_day, limit=SONG_HISTORY_STATION_LIMIT)
         if not stations:

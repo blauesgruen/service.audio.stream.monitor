@@ -92,8 +92,9 @@ class SongDatabase:
 
     _SONG_SEPARATORS = (' - ', ' – ', ' — ', ' | ')
 
-    def __init__(self, db_path):
+    def __init__(self, db_path, read_only=False):
         self._db_path = str(db_path or '')
+        self._read_only = bool(read_only)
         self._conn = None
         self._lock = threading.RLock()
         self._open()
@@ -106,8 +107,24 @@ class SongDatabase:
                 dir_path = os.path.dirname(self._db_path)
                 if dir_path:
                     os.makedirs(dir_path, exist_ok=True)
-                self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+                if self._read_only:
+                    uri_path = os.path.abspath(self._db_path).replace('\\', '/')
+                    self._conn = sqlite3.connect(
+                        f'file:{uri_path}?mode=ro',
+                        uri=True,
+                        check_same_thread=False,
+                        timeout=5.0,
+                    )
+                    self._conn.execute('PRAGMA busy_timeout=5000')
+                    self._conn.row_factory = sqlite3.Row
+                    return
+                self._conn = sqlite3.connect(
+                    self._db_path,
+                    check_same_thread=False,
+                    timeout=10.0,
+                )
                 self._conn.row_factory = sqlite3.Row
+                self._conn.execute('PRAGMA busy_timeout=10000')
                 self._conn.execute('PRAGMA journal_mode=WAL')
                 self._conn.executescript(_SCHEMA)
                 self._conn.commit()
