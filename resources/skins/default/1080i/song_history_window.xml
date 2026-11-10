@@ -40,12 +40,12 @@
                 <label>$ADDON[service.audio.stream.monitor 32040]: $INFO[System.Date(yyyy-MM-dd)]</label>
             </control>
             <control type="button" id="100">
-                <left>87%</left>
+                <left>82%</left>
                 <top>25</top>
-                <width>9%</width>
+                <width>15%</width>
                 <height>42</height>
                 <label>$ADDON[service.audio.stream.monitor 32043]</label>
-                <font>font13</font>
+                <font>font12</font>
                 <align>center</align>
                 <aligny>center</aligny>
                 <textcolor>FF9BA5AD</textcolor>
