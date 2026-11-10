@@ -1,3 +1,6 @@
+v1.1.10 (2026-11-10)
+- Fix: Aktive Fokusspalte im Songverlauf wird durch einen Akzentbalken unter dem Spaltenkopf angezeigt.
+
 v1.1.9 (2026-11-10)
 - Fix: Farbiger Bullet wird nicht mehr in Stationsnamen und Songverlauf-Einträgen gespeichert.
 

@@ -65,6 +65,13 @@
                     <label>$ADDON[service.audio.stream.monitor 32034]</label>
                 </control>
                 <control type="image">
+                    <top>30</top>
+                    <width>27%</width>
+                    <height>4</height>
+                    <texture colordiffuse="FF26A6A6">white.jpg</texture>
+                    <visible>Control.HasFocus(111)</visible>
+                </control>
+                <control type="image">
                     <top>34</top>
                     <width>27%</width>
                     <bottom>0</bottom>
@@ -115,6 +122,14 @@
                     <font>font13</font>
                     <textcolor>FF9BA5AD</textcolor>
                     <label/>
+                </control>
+                <control type="image">
+                    <left>30%</left>
+                    <top>30</top>
+                    <right>0</right>
+                    <height>4</height>
+                    <texture colordiffuse="FF26A6A6">white.jpg</texture>
+                    <visible>Control.HasFocus(120)</visible>
                 </control>
                 <control type="image">
                     <left>30%</left>
