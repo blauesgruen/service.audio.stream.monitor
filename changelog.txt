@@ -1,3 +1,6 @@
+v1.1.17 (2026-11-11)
+- Verbessert: Abstaende zwischen Diagnose-Kacheln vereinheitlicht und unteren Listenrand mit mehr Innenabstand versehen.
+
 v1.1.16 (2026-11-11)
 - Verbessert: Diagnosefenster zeigt die von ASM und ASM-QF verwendeten Sendernamen sowie den gemeldeten QF-Sender.
 - Fix: Sonderzeichen und Umlaute im Diagnosefenster werden korrekt dargestellt.

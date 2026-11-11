@@ -92,7 +92,7 @@
             </control>
 
             <control type="group">
-                <left>34</left><top>279</top><right>34</right><height>235</height>
+                <left>34</left><top>294</top><right>34</right><height>235</height>
                 <control type="image"><width>100%</width><height>100%</height><texture colordiffuse="FF20262D">white.jpg</texture></control>
                 <control type="label">
                     <left>24</left><top>15</top><width>80%</width><height>28</height>
@@ -142,7 +142,7 @@
             </control>
 
             <control type="group">
-                <left>34</left><top>532</top><right>34</right><height>330</height>
+                <left>34</left><top>547</top><right>34</right><height>299</height>
                 <control type="image"><width>100%</width><height>100%</height><texture colordiffuse="FF20262D">white.jpg</texture></control>
                 <control type="label">
                     <left>24</left><top>13</top><width>90%</width><height>26</height>
@@ -168,12 +168,12 @@
                 </control>
                 <control type="image"><left>24</left><top>108</top><right>24</right><height>1</height><texture colordiffuse="33FFFFFF">white.jpg</texture></control>
                 <control type="label"><left>24</left><top>116</top><width>90%</width><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>LETZTE SCHRITTE</label></control>
-                <control type="label"><left>24</left><top>146</top><right>24</right><height>24</height><font>font12</font><textcolor>FFD6DCE1</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity1)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity1))</visible></control>
-                <control type="label"><left>24</left><top>174</top><right>24</right><height>24</height><font>font12</font><textcolor>FFB7C1C9</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity2)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity2))</visible></control>
-                <control type="label"><left>24</left><top>202</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity3)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity3))</visible></control>
-                <control type="label"><left>24</left><top>230</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity4)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity4))</visible></control>
-                <control type="label"><left>24</left><top>258</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity5)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity5))</visible></control>
-                <control type="label"><left>24</left><top>286</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity6)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity6))</visible></control>
+                <control type="label"><left>24</left><top>143</top><right>24</right><height>21</height><font>font12</font><textcolor>FFD6DCE1</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity1)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity1))</visible></control>
+                <control type="label"><left>24</left><top>165</top><right>24</right><height>21</height><font>font12</font><textcolor>FFB7C1C9</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity2)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity2))</visible></control>
+                <control type="label"><left>24</left><top>187</top><right>24</right><height>21</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity3)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity3))</visible></control>
+                <control type="label"><left>24</left><top>209</top><right>24</right><height>21</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity4)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity4))</visible></control>
+                <control type="label"><left>24</left><top>231</top><right>24</right><height>21</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity5)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity5))</visible></control>
+                <control type="label"><left>24</left><top>253</top><right>24</right><height>21</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity6)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity6))</visible></control>
             </control>
         </control>
     </controls>
