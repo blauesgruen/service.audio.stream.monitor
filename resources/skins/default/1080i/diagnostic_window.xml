@@ -2,34 +2,167 @@
 <window>
     <defaultcontrol>100</defaultcontrol>
     <controls>
-        <control type="image"><texture colordiffuse="99000000">white.jpg</texture></control>
+        <control type="image">
+            <texture colordiffuse="99000000">white.jpg</texture>
+        </control>
         <control type="group">
-            <left>10%</left><top>10%</top><width>80%</width><height>80%</height>
+            <left>10%</left>
+            <top>10%</top>
+            <width>80%</width>
+            <height>80%</height>
             <animation effect="fade" time="180">WindowOpen</animation>
             <control type="image"><texture colordiffuse="FF171B20">white.jpg</texture></control>
             <control type="image"><height>5</height><texture colordiffuse="FF26A6A6">white.jpg</texture></control>
-            <control type="label"><left>30</left><top>22</top><width>75%</width><height>42</height><font>font24</font><textcolor>FFFFFFFF</textcolor><label>[B]Audio Stream Monitor – Live-Diagnose[/B]</label></control>
-            <control type="button" id="100"><left>84%</left><top>20</top><width>13%</width><height>44</height><label>Schließen</label><font>font12</font><align>center</align><textcolor>FF9BA5AD</textcolor><textcolorfocus>FFFFFFFF</textcolorfocus><texture colordiffuse="FF20262D">white.jpg</texture><texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus></control>
-            <control type="textbox" id="110"><left>34</left><top>88</top><right>34</right><bottom>25</bottom><font>font14</font><textcolor>FFD6DCE1</textcolor><autoscroll>false</autoscroll>
-                <label>Wiedergabe: $INFO[Window.Property(RadioMonitor.Playing),aktiv,Inaktiv]
-Sender: $INFO[Window.Property(RadioMonitor.Station),–]
-Erkannter Titel: $INFO[Window.Property(RadioMonitor.Artist)] – $INFO[Window.Property(RadioMonitor.Title)]
-Aktive Quelle: $INFO[Window.Property(RadioMonitor.Source),–]   Detail: $INFO[Window.Property(RadioMonitor.SourceDetail),–]
 
-ICY StreamTitle: $INFO[Window.Property(RadioMonitor.StreamTitle),–]
-ICY erkannt: $INFO[Window.Property(RadioMonitor.IcyNowPlaying),–]
-API erkannt: $INFO[Window.Property(RadioMonitor.ApiNowPlaying),–]
+            <control type="label">
+                <left>34</left><top>22</top><width>72%</width><height>42</height>
+                <font>font24</font><textcolor>FFFFFFFF</textcolor>
+                <label>[B]Audio Stream Monitor[/B]</label>
+            </control>
+            <control type="label">
+                <left>36</left><top>66</top><width>68%</width><height>28</height>
+                <font>font13</font><textcolor>FF9BA5AD</textcolor>
+                <label>Live-Übersicht</label>
+            </control>
+            <control type="button" id="100">
+                <left>84%</left><top>20</top><width>13%</width><height>44</height>
+                <label>Schließen</label><font>font12</font><align>center</align>
+                <textcolor>FF9BA5AD</textcolor><textcolorfocus>FFFFFFFF</textcolorfocus>
+                <texture colordiffuse="FF20262D">white.jpg</texture>
+                <texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus>
+            </control>
 
-ASM-QF: $INFO[Window.Property(RadioMonitor.QF.Enabled),nicht aktiv]   Status: $INFO[Window.Property(RadioMonitor.QF.Response.Status),–]
-QF Quelle: $INFO[Window.Property(RadioMonitor.QF.Response.Source),–]   Grund: $INFO[Window.Property(RadioMonitor.QF.Response.Reason),–]
-QF Ergebnis: $INFO[Window.Property(RadioMonitor.QF.Response.Artist)] – $INFO[Window.Property(RadioMonitor.QF.Response.Title)]
+            <control type="group">
+                <left>34</left><top>116</top><right>34</right><height>145</height>
+                <control type="image">
+                    <width>100%</width><height>100%</height>
+                    <texture colordiffuse="FF20262D">white.jpg</texture>
+                </control>
+                <control type="image">
+                    <left>0</left><width>5</width><height>100%</height>
+                    <texture colordiffuse="FF36B878">white.jpg</texture>
+                    <visible>String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
+                </control>
+                <control type="image">
+                    <left>0</left><width>5</width><height>100%</height>
+                    <texture colordiffuse="FF7B858E">white.jpg</texture>
+                    <visible>!String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>14</top><width>30%</width><height>28</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor><label>SENDER</label>
+                </control>
+                <control type="label">
+                    <left>24</left><top>42</top><right>18</right><height>38</height>
+                    <font>font20</font><textcolor>FFFFFFFF</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.Station)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Station))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>42</top><right>18</right><height>38</height>
+                    <font>font20</font><textcolor>FF9BA5AD</textcolor>
+                    <label>Sender wird gesucht</label>
+                    <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Station))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>91</top><width>38%</width><height>25</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor><label>STATUS</label>
+                </control>
+                <control type="label">
+                    <left>24</left><top>116</top><width>60%</width><height>25</height>
+                    <font>font13</font><textcolor>FF36B878</textcolor><label>Wiedergabe aktiv</label>
+                    <visible>String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>116</top><width>60%</width><height>25</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor><label>Keine Wiedergabe erkannt</label>
+                    <visible>!String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
+                </control>
+            </control>
 
-Analyse-Winner: $INFO[Window.Property(RadioMonitor.Analysis.WinnerSource),–]
-Analyse-Paar: $INFO[Window.Property(RadioMonitor.Analysis.WinnerPair),–]
-Letztes Analyseereignis: $INFO[Window.Property(RadioMonitor.Analysis.LastEvent),Keine Diagnose vorhanden]
+            <control type="group">
+                <left>34</left><top>279</top><right>34</right><height>235</height>
+                <control type="image"><width>100%</width><height>100%</height><texture colordiffuse="FF20262D">white.jpg</texture></control>
+                <control type="label">
+                    <left>24</left><top>15</top><width>80%</width><height>28</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor><label>JETZT ERKANNT</label>
+                </control>
+                <control type="label">
+                    <left>24</left><top>51</top><right>24</right><height>43</height>
+                    <font>font20</font><textcolor>FFFFFFFF</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.Artist)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Artist))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>51</top><right>24</right><height>43</height>
+                    <font>font20</font><textcolor>FF9BA5AD</textcolor>
+                    <label>Warte auf Künstler</label>
+                    <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Artist))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>98</top><right>24</right><height>52</height>
+                    <font>font24</font><textcolor>FF26A6A6</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.Title)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Title))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>98</top><right>24</right><height>52</height>
+                    <font>font24</font><textcolor>FF9BA5AD</textcolor>
+                    <label>Warte auf Titel</label>
+                    <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Title))</visible>
+                </control>
+                <control type="image"><left>24</left><top>165</top><right>24</right><height>1</height><texture colordiffuse="33FFFFFF">white.jpg</texture></control>
+                <control type="label">
+                    <left>24</left><top>178</top><width>100%</width><height>24</height>
+                    <font>font12</font><textcolor>FF9BA5AD</textcolor><label>Titel aus dem Stream</label>
+                </control>
+                <control type="label">
+                    <left>24</left><top>201</top><right>24</right><height>28</height>
+                    <font>font13</font><textcolor>FFD6DCE1</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.StreamTitle)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.StreamTitle))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>201</top><right>24</right><height>28</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor>
+                    <label>Warte auf Titelinformationen</label>
+                    <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.StreamTitle))</visible>
+                </control>
+            </control>
 
-MusicBrainz Artist-ID: $INFO[Window.Property(RadioMonitor.ArtistMBID),–]
-Timeout verbleibend: $INFO[Window.Property(RadioMonitor.TimeoutRemaining),–]</label>
+            <control type="group">
+                <left>34</left><top>532</top><right>34</right><height>330</height>
+                <control type="image"><width>100%</width><height>100%</height><texture colordiffuse="FF20262D">white.jpg</texture></control>
+                <control type="label">
+                    <left>24</left><top>13</top><width>90%</width><height>26</height>
+                    <font>font13</font><textcolor>FF9BA5AD</textcolor><label>WAS PASSIERT?</label>
+                </control>
+                <control type="label">
+                    <left>24</left><top>42</top><right>24</right><height>30</height>
+                    <font>font13</font><textcolor>FFFFFFFF</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.Diagnostic.Stage)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.Stage))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>42</top><right>24</right><height>30</height>
+                    <font>font13</font><textcolor>FFD6DCE1</textcolor>
+                    <label>Warte auf Erkennungsstatus</label>
+                    <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.Stage))</visible>
+                </control>
+                <control type="label">
+                    <left>24</left><top>70</top><right>24</right><height>30</height>
+                    <font>font12</font><textcolor>FFB7C1C9</textcolor>
+                    <label>$INFO[Window(Home).Property(RadioMonitor.Diagnostic.Detail)]</label>
+                    <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.Detail))</visible>
+                </control>
+                <control type="image"><left>24</left><top>108</top><right>24</right><height>1</height><texture colordiffuse="33FFFFFF">white.jpg</texture></control>
+                <control type="label"><left>24</left><top>116</top><width>90%</width><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>LETZTE SCHRITTE</label></control>
+                <control type="label"><left>24</left><top>146</top><right>24</right><height>24</height><font>font12</font><textcolor>FFD6DCE1</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity1)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity1))</visible></control>
+                <control type="label"><left>24</left><top>174</top><right>24</right><height>24</height><font>font12</font><textcolor>FFB7C1C9</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity2)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity2))</visible></control>
+                <control type="label"><left>24</left><top>202</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity3)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity3))</visible></control>
+                <control type="label"><left>24</left><top>230</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity4)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity4))</visible></control>
+                <control type="label"><left>24</left><top>258</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity5)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity5))</visible></control>
+                <control type="label"><left>24</left><top>286</top><right>24</right><height>24</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Analysis.Activity6)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Analysis.Activity6))</visible></control>
             </control>
         </control>
     </controls>

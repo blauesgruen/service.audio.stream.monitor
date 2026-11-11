@@ -5,6 +5,7 @@ import time
 import threading
 import json
 import os
+from collections import deque
 from urllib.parse import urlparse, parse_qs, unquote
 try:
     import xbmcvfs
@@ -359,6 +360,10 @@ class RadioMonitor(xbmc.Monitor):
         self.song_end_detector_enabled = bool(SONG_END_DETECTOR_ENABLED)
         self.analysis_enabled = bool(ANALYSIS_ENABLED)
         self._analysis_seq = 0
+        self._diagnostic_activity = deque(maxlen=7)
+        self._last_diagnostic_qf_nohit_id = ''
+        self._last_diagnostic_qf_hit_id = ''
+        self._last_diagnostic_qf_error_id = ''
         self.analysis_store = self._init_analysis_store() if self.analysis_enabled else None
         self.mp_decision_enabled = bool(self.MP_DECISION_ENABLED)
         
@@ -1667,6 +1672,16 @@ class RadioMonitor(xbmc.Monitor):
     def _clear_song_properties(self, reason_text, last_song_key=('', ''), enable_api_block=False):
         if reason_text:
             log_debug(str(reason_text))
+            reason_lower = str(reason_text).casefold()
+            if 'song-timeout abgelaufen' in reason_lower:
+                clear_summary = 'Songanzeige geleert: der Titel blieb länger als erwartet unverändert'
+            elif 'status/nicht-song erkannt' in reason_lower or 'status erkannt' in reason_lower:
+                clear_summary = 'Songanzeige geleert: Streamtext wurde als Sender- oder Programminfo eingestuft'
+            elif 'songende-detektor' in reason_lower:
+                clear_summary = 'Songanzeige geleert: mehrere Hinweise sprechen für ein Songende'
+            else:
+                clear_summary = 'Songanzeige geleert: ' + str(reason_text)
+            self._append_diagnostic_activity(f"{time.strftime('%H:%M:%S')}  {clear_summary}")
 
         if enable_api_block and last_song_key[0] and last_song_key[1]:
             self._api_timeout_block_key = (last_song_key[0], last_song_key[1])
@@ -1810,6 +1825,17 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.AN_WINNER_SOURCE)
         WINDOW.clearProperty(_P.AN_WINNER_PAIR)
         WINDOW.clearProperty(_P.AN_LAST_EVENT)
+        WINDOW.clearProperty(_P.DIAG_STAGE)
+        WINDOW.clearProperty(_P.DIAG_DETAIL)
+        self._diagnostic_activity.clear()
+        self._last_diagnostic_qf_nohit_id = ''
+        self._last_diagnostic_qf_hit_id = ''
+        self._last_diagnostic_qf_error_id = ''
+        for activity_property in (
+            _P.AN_ACTIVITY_1, _P.AN_ACTIVITY_2, _P.AN_ACTIVITY_3,
+            _P.AN_ACTIVITY_4, _P.AN_ACTIVITY_5, _P.AN_ACTIVITY_6,
+        ):
+            WINDOW.clearProperty(activity_property)
         
         self.raw_sources.clear_all()
         self._sync_qf_enabled_property()
@@ -2726,6 +2752,10 @@ class RadioMonitor(xbmc.Monitor):
         self._last_qf_request_station = station
         self._last_qf_request_station_id = station_id_text
         self._last_qf_request_ts = now_ts
+        self._set_diagnostic_stage(
+            'ASM-QF-Suche läuft',
+            f"ASM-QF prüft Songdaten für den Sender {station}.",
+        )
         log_debug(
             f"ASM-QF Request gesendet: id='{request_id}', station='{station}', "
             f"station_id='{station_id_text or '-'}', mode='{mode}'"
@@ -2993,6 +3023,16 @@ class RadioMonitor(xbmc.Monitor):
                     'authoritative': qf_authoritative,
                     'hold_active': self._is_qf_no_hit_hold_active(),
                 }, level=log_level)
+                if fresh_reason == 'stale_response':
+                    qf_wait_reason = 'Antwort kam zu spät und wurde nicht verwendet'
+                elif fresh_reason in ('id_mismatch_waiting', 'missing_response_id'):
+                    qf_wait_reason = 'Antwort gehört nicht zur aktuellen Suche und wurde zurückgestellt'
+                else:
+                    qf_wait_reason = 'Antwort ließ sich keiner aktuellen Suche zuordnen'
+                self._set_diagnostic_stage('ASM-QF prüft Antwort', qf_wait_reason)
+                self._append_diagnostic_activity(
+                    f"{time.strftime('%H:%M:%S')}  ASM-QF: {qf_wait_reason}"
+                )
             return
         self._last_qf_nonfresh_diag = ''
         self._last_qf_nonfresh_log_ts = 0.0
@@ -3002,6 +3042,72 @@ class RadioMonitor(xbmc.Monitor):
         if response_id and response_id != self._last_qf_response_id:
             self._last_qf_response_id = response_id
             self._last_qf_response_match_ts = time.time()
+            if response_status == 'no_hit' and response_id != self._last_diagnostic_qf_nohit_id:
+                self._last_diagnostic_qf_nohit_id = response_id
+                qf_reason = str(snapshot.get('reason') or '').strip().lower()
+                api_pair = self._latest_api_pair if self._is_song_pair(self._latest_api_pair) else ('', '')
+                api_label = self._label_from_pair(api_pair) if api_pair[0] and api_pair[1] else ''
+                if qf_reason == 'station_lookup_failed':
+                    qf_detail = (
+                        'ASM-QF konnte die Senderdaten bei Radio-Browser nicht abrufen. '
+                        'Die Suche nach einem Song wurde deshalb nicht gestartet.'
+                    )
+                elif qf_reason == 'missing_station':
+                    qf_detail = (
+                        'ASM-QF hat den Sender bei Radio-Browser nicht gefunden. '
+                        'Die Suche nach einem Song wurde deshalb nicht gestartet.'
+                    )
+                else:
+                    qf_detail = (
+                        'ASM-QF hat den Sender geprüft, aber keinen passenden Song erkannt. '
+                        'Es wird auf neue Titelinformationen gewartet.'
+                    )
+                if api_label:
+                    qf_detail += f" Ein anderer Senderdienst meldet {api_label}; ASM-QF hat diesen Titel nicht bestätigt."
+                self._set_diagnostic_stage('ASM-QF ohne Treffer', qf_detail)
+                if qf_reason == 'missing_station':
+                    qf_activity = 'ASM-QF: Sender bei Radio-Browser nicht gefunden; Songprüfung nicht gestartet'
+                elif qf_reason == 'station_lookup_failed':
+                    qf_activity = 'ASM-QF: Senderdaten nicht abrufbar; Songprüfung nicht gestartet'
+                else:
+                    qf_activity = 'ASM-QF ohne Treffer: kein passender Song'
+                self._append_diagnostic_activity(
+                    f"{time.strftime('%H:%M:%S')}  {qf_activity}"
+                )
+            elif response_status == 'hit' and response_id != self._last_diagnostic_qf_hit_id:
+                self._last_diagnostic_qf_hit_id = response_id
+                qf_artist = str(snapshot.get('artist') or '').strip()
+                qf_title = str(snapshot.get('title') or '').strip()
+                if qf_artist and qf_title:
+                    qf_pair_text = f"{qf_artist} – {qf_title}"
+                    self._set_diagnostic_stage(
+                        'ASM-QF hat einen Treffer',
+                        f"{qf_pair_text} wird auf Vollständigkeit geprüft und für Kodi vorbereitet.",
+                    )
+                    self._append_diagnostic_activity(
+                        f"{time.strftime('%H:%M:%S')}  ASM-QF fand: {qf_pair_text}"
+                    )
+                else:
+                    self._set_diagnostic_stage(
+                        'ASM-QF lieferte unvollständige Daten',
+                        'Künstler oder Titel fehlen. Das Ergebnis kann nicht übernommen werden.',
+                    )
+                    self._append_diagnostic_activity(
+                        f"{time.strftime('%H:%M:%S')}  ASM-QF: Treffer verworfen, Künstler oder Titel fehlt"
+                    )
+            elif response_status in ('error', 'timeout', 'resolve_error') and response_id != self._last_diagnostic_qf_error_id:
+                self._last_diagnostic_qf_error_id = response_id
+                qf_error_reason = str(snapshot.get('reason') or '').replace('_', ' ').strip()
+                if response_status == 'timeout':
+                    qf_error_text = 'ASM-QF hat nicht rechtzeitig geantwortet'
+                elif response_status == 'resolve_error':
+                    qf_error_text = 'ASM-QF konnte den Stream nicht auflösen'
+                else:
+                    qf_error_text = 'ASM-QF meldet einen Fehler'
+                if qf_error_reason:
+                    qf_error_text += f" ({qf_error_reason})"
+                self._set_diagnostic_stage('ASM-QF-Ergebnis nicht verwendbar', qf_error_text)
+                self._append_diagnostic_activity(f"{time.strftime('%H:%M:%S')}  {qf_error_text}")
         if response_id and self._is_qf_terminal_status(response_status):
             self._remember_qf_terminal_response(
                 response_id,
@@ -3191,6 +3297,34 @@ class RadioMonitor(xbmc.Monitor):
         except Exception as e:
             log_debug(f"Fehler beim Erfassen JSON-RPC-Rohdaten: {e}")
 
+    def _append_diagnostic_activity(self, text):
+        message = str(text or '').strip()
+        if not message or (self._diagnostic_activity and self._diagnostic_activity[0] == message):
+            return
+        if len(message) > 160:
+            message = message[:157].rstrip() + '...'
+        self._diagnostic_activity.appendleft(message)
+        activity_properties = (
+            _P.AN_ACTIVITY_1, _P.AN_ACTIVITY_2, _P.AN_ACTIVITY_3,
+            _P.AN_ACTIVITY_4, _P.AN_ACTIVITY_5, _P.AN_ACTIVITY_6,
+        )
+        for index, activity_property in enumerate(activity_properties):
+            if index < len(self._diagnostic_activity):
+                self.raw_sources.set_text(activity_property, self._diagnostic_activity[index], max_len=512)
+            else:
+                WINDOW.clearProperty(activity_property)
+
+    def _set_diagnostic_stage(self, stage, detail=''):
+        stage_text = str(stage or '').strip()
+        detail_text = str(detail or '').strip()
+        if (
+            stage_text == (WINDOW.getProperty(_P.DIAG_STAGE) or '')
+            and detail_text == (WINDOW.getProperty(_P.DIAG_DETAIL) or '')
+        ):
+            return
+        self.raw_sources.set_text(_P.DIAG_STAGE, stage_text, max_len=256)
+        self.raw_sources.set_text(_P.DIAG_DETAIL, detail_text, max_len=512)
+
     def _emit_analysis_event(
         self,
         station_name='',
@@ -3248,7 +3382,52 @@ class RadioMonitor(xbmc.Monitor):
                 },
                 'note': note or '',
             }
+            if note == 'title_applied' and (winner_artist or winner_title):
+                source_labels = {
+                    'icy': 'Stream', 'api': 'Senderdienst', 'musicplayer': 'Player',
+                    'asm-qf': 'ASM-QF',
+                }
+                source_family = self._source_family(decision_source or '')
+                source_label = source_labels.get(source_family, 'Erkennung')
+                decision_reason = f"vollständiges Künstler-Titel-Paar aus {source_label} übernommen"
+            elif note == 'status_transition_clear':
+                decision_reason = 'Text als Sender- oder Programminfo erkannt; kein Songpaar vorhanden'
+            elif note == 'no_usable_metadata':
+                if self._is_generic_stream_title(stream_title, station_name):
+                    decision_reason = 'Sender- oder Programminfo statt Songtitel'
+                else:
+                    parsed_artist, parsed_title = self.parse_stream_title_simple(stream_title)
+                    if not parsed_artist or not parsed_title:
+                        decision_reason = 'Künstler und Titel ließen sich nicht aus dem Text trennen'
+                    else:
+                        decision_reason = 'Songdaten waren unvollständig oder nicht gültig'
+            elif note == 'streamtitle_ignored_no_source_change':
+                source_family = self._source_family(decision_source or '')
+                source_label = {
+                    'icy': 'Stream', 'api': 'Senderdienst', 'musicplayer': 'Player',
+                    'asm-qf': 'ASM-QF',
+                }.get(source_family, 'Aktive Quelle')
+                decision_reason = f"{source_label} meldete keinen neuen Song; bisherige Auswahl bleibt aktiv"
+            elif note == 'qf_no_hit_hold_skip_clear':
+                decision_reason = 'keine neuen Songdaten; vorherige Anzeige bleibt vorübergehend erhalten'
+            else:
+                decision_reason = 'keine verwertbare neue Songmeldung'
+            event['decision_reason'] = decision_reason
             self.analysis_store.add_event(event)
+            event_time = time.strftime('%H:%M:%S', time.localtime(event['ts']))
+            if note == 'title_applied' and (winner_artist or winner_title):
+                activity_text = f"{event_time}  Übernommen: {winner_artist} – {winner_title} ({decision_reason})"
+            elif note == 'status_transition_clear':
+                activity_text = f"{event_time}  Nicht übernommen: {decision_reason}"
+            elif note == 'no_usable_metadata':
+                activity_text = f"{event_time}  Nicht erkannt: {decision_reason}"
+            elif note == 'streamtitle_ignored_no_source_change':
+                activity_text = f"{event_time}  Nicht gewechselt: {decision_reason}"
+            elif note == 'qf_no_hit_hold_skip_clear':
+                activity_text = f"{event_time}  Zurückgehalten: {decision_reason}"
+            else:
+                activity_text = f"{event_time}  {note or 'Erkennung aktualisiert'}"
+            self._append_diagnostic_activity(activity_text)
             self.raw_sources.set_text(_P.AN_TRACE_ID, trace_id, max_len=64)
             self.raw_sources.set_text(_P.AN_TRIGGER, trigger_reason or note or '', max_len=256)
             self.raw_sources.set_text(_P.AN_WINNER_SOURCE, decision_source or '', max_len=64)
@@ -5295,6 +5474,13 @@ class RadioMonitor(xbmc.Monitor):
     def metadata_worker(self, url, generation):
         """Worker-Thread zum kontinuierlichen Auslesen der Metadaten"""
         log_debug(f"Metadata Worker gestartet")
+        self._set_diagnostic_stage(
+            'Stream wird geöffnet',
+            'Verbindung zum Audiostream wird aufgebaut.',
+        )
+        self._append_diagnostic_activity(
+            f"{time.strftime('%H:%M:%S')}  Streamverbindung wird aufgebaut"
+        )
 
         # Timer-Status beim Start des Workers sauber initialisieren.
         # Gilt auch für den No-ICY-Pfad (API/MusicPlayer-Fallback).
@@ -5313,6 +5499,13 @@ class RadioMonitor(xbmc.Monitor):
         else:
             stream_info = self.parse_icy_metadata(url)
         if not stream_info:
+            self._set_diagnostic_stage(
+                'Streamtitel nicht verfügbar',
+                'Der Stream liefert keine ICY-Titel. Verfügbare Senderdienste werden geprüft.',
+            )
+            self._append_diagnostic_activity(
+                f"{time.strftime('%H:%M:%S')}  Stream liefert keine ICY-Titel; Fallback wird geprüft"
+            )
             log_warning("Keine ICY-Metadaten verfuegbar - wechsle zu Fallback")
             WINDOW.clearProperty(_P.ICY_NOW)
             if not self._is_api_source_allowed():
@@ -5330,6 +5523,13 @@ class RadioMonitor(xbmc.Monitor):
             return
             
         metaint = stream_info['metaint']
+        self._set_diagnostic_stage(
+            'Stream verbunden',
+            'Titelinformationen werden laufend aus dem Audiostream gelesen.',
+        )
+        self._append_diagnostic_activity(
+            f"{time.strftime('%H:%M:%S')}  Stream verbunden; Titelinformationen werden gelesen"
+        )
         response = stream_info.get('response')
         last_title = ""
         last_song_key = ('', '', '')
@@ -5501,6 +5701,20 @@ class RadioMonitor(xbmc.Monitor):
                         if stream_title_changed:
                             last_title = stream_title
                             log_debug(f"Neuer StreamTitle erkannt: '{stream_title}'")
+                            if stream_title:
+                                self._append_diagnostic_activity(
+                                    f"{time.strftime('%H:%M:%S')}  Streamtitel empfangen: {stream_title}"
+                                )
+                            if self._is_generic_stream_title(stream_title, station_name):
+                                self._set_diagnostic_stage(
+                                    'Senderinformation erkannt',
+                                    'Das ist noch kein Songtitel. Der Stream wird weiter nach Musikdaten geprüft.',
+                                )
+                            elif stream_title:
+                                self._set_diagnostic_stage(
+                                    'Neuer Titel empfangen',
+                                    'Künstler und Titel werden geprüft und den verfügbaren Quellen zugeordnet.',
+                                )
                             self.raw_sources.set_text(_P.RAW_ICY_STREAMTITLE, stream_title, max_len=4000)
                             self._last_icy_format_hint = self._classify_icy_format(stream_title, station_name)
                             self.raw_sources.set_json(
@@ -5745,6 +5959,10 @@ class RadioMonitor(xbmc.Monitor):
                             initial_source_pending = True
 
                         if source_changed_trigger:
+                            self._set_diagnostic_stage(
+                                'Songdaten werden ausgewertet',
+                                'Künstler und Titel werden getrennt, geprüft und für Kodi vorbereitet.',
+                            )
                             observed_source = last_winner_source or 'initial'
                             log_debug(
                                 f"Songwechsel-Trigger aktiv: reason='{trigger_reason}', "
@@ -5860,6 +6078,10 @@ class RadioMonitor(xbmc.Monitor):
                                     initial_source_pending = False
                                     continue
                                 log_debug(f"Keine verwertbaren Metadaten fuer '{stream_title}' - RadioMonitor Properties bleiben leer")
+                                self._set_diagnostic_stage(
+                                    'Kein Song erkannt',
+                                    'Der empfangene Text enthält noch keine verwendbaren Künstler- und Titelangaben.',
+                                )
                                 # Bei klar fehlenden Songdaten: nur Song-Properties löschen,
                                 # Station + StreamTitle bleiben gesetzt.
                                 if stream_title and stream_title not in INVALID_METADATA_VALUES:
@@ -6019,6 +6241,12 @@ class RadioMonitor(xbmc.Monitor):
                                 f"Title: {title if title else 'N/A'}, "
                                 f"Album: {album if album else 'N/A'}, "
                                 f"StreamTitleRaw: {stream_title if stream_title else 'N/A'})"
+                            )
+                            self._set_diagnostic_stage(
+                                'Song erkannt',
+                                'Künstler und Titel wurden übernommen und an Kodi weitergegeben.'
+                                if artist and title else
+                                'Unvollständige Künstler- oder Titelangaben wurden verworfen.',
                             )
                             if title:
                                 last_song_key = current_song_key

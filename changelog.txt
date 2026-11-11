@@ -1,3 +1,8 @@
+v1.1.15 (2026-11-11)
+- Verbessert: Live-Diagnose zeigt den Erkennungsweg mit Gründen für übernommene und verworfene Titel.
+- Verbessert: ASM-QF-Anfragen, Treffer, fehlende Treffer und nicht passende Antworten werden verständlich erklärt.
+- Fix: Ereignisliste ohne doppelte Statusmeldungen und mit verbessertem Innenabstand.
+
 v1.1.14 (2026-11-11)
 - Neu: Live-Diagnosefenster zeigt Wiedergabe, erkannte Metadaten, aktive Quellen und Analysezustand.
 - Neu: Diagnosefenster per RunScript-Befehl und aus den Add-on-Einstellungen aufrufbar.

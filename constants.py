@@ -232,6 +232,14 @@ class PropertyNames:
     AN_WINNER_SOURCE = 'RadioMonitor.Analysis.WinnerSource'
     AN_WINNER_PAIR = 'RadioMonitor.Analysis.WinnerPair'
     AN_LAST_EVENT = 'RadioMonitor.Analysis.LastEvent'
+    AN_ACTIVITY_1 = 'RadioMonitor.Analysis.Activity1'
+    AN_ACTIVITY_2 = 'RadioMonitor.Analysis.Activity2'
+    AN_ACTIVITY_3 = 'RadioMonitor.Analysis.Activity3'
+    AN_ACTIVITY_4 = 'RadioMonitor.Analysis.Activity4'
+    AN_ACTIVITY_5 = 'RadioMonitor.Analysis.Activity5'
+    AN_ACTIVITY_6 = 'RadioMonitor.Analysis.Activity6'
+    DIAG_STAGE = 'RadioMonitor.Diagnostic.Stage'
+    DIAG_DETAIL = 'RadioMonitor.Diagnostic.Detail'
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames
