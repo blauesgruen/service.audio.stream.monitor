@@ -22,18 +22,18 @@
             <control type="label">
                 <left>36</left><top>66</top><width>68%</width><height>28</height>
                 <font>font13</font><textcolor>FF9BA5AD</textcolor>
-                <label>Live-Übersicht</label>
+                <label>Live-&#xDC;bersicht</label>
             </control>
             <control type="button" id="100">
                 <left>84%</left><top>20</top><width>13%</width><height>44</height>
-                <label>Schließen</label><font>font12</font><align>center</align>
+                <label>Schlie&#xDF;en</label><font>font12</font><align>center</align>
                 <textcolor>FF9BA5AD</textcolor><textcolorfocus>FFFFFFFF</textcolorfocus>
                 <texture colordiffuse="FF20262D">white.jpg</texture>
                 <texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus>
             </control>
 
             <control type="group">
-                <left>34</left><top>116</top><right>34</right><height>145</height>
+                <left>34</left><top>116</top><right>34</right><height>160</height>
                 <control type="image">
                     <width>100%</width><height>100%</height>
                     <texture colordiffuse="FF20262D">white.jpg</texture>
@@ -49,17 +49,17 @@
                     <visible>!String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
                 </control>
                 <control type="label">
-                    <left>24</left><top>14</top><width>30%</width><height>28</height>
+                    <left>24</left><top>14</top><width>42%</width><height>28</height>
                     <font>font13</font><textcolor>FF9BA5AD</textcolor><label>SENDER</label>
                 </control>
                 <control type="label">
-                    <left>24</left><top>42</top><right>18</right><height>38</height>
+                    <left>24</left><top>42</top><width>44%</width><height>38</height>
                     <font>font20</font><textcolor>FFFFFFFF</textcolor>
                     <label>$INFO[Window(Home).Property(RadioMonitor.Station)]</label>
                     <visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Station))</visible>
                 </control>
                 <control type="label">
-                    <left>24</left><top>42</top><right>18</right><height>38</height>
+                    <left>24</left><top>42</top><width>44%</width><height>38</height>
                     <font>font20</font><textcolor>FF9BA5AD</textcolor>
                     <label>Sender wird gesucht</label>
                     <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Station))</visible>
@@ -78,6 +78,17 @@
                     <font>font13</font><textcolor>FF9BA5AD</textcolor><label>Keine Wiedergabe erkannt</label>
                     <visible>!String.IsEqual(Window(Home).Property(RadioMonitor.Playing),true)</visible>
                 </control>
+                <control type="image"><left>48%</left><top>14</top><width>1</width><height>132</height><texture colordiffuse="338FFFFFF">white.jpg</texture></control>
+                <control type="label"><left>51%</left><top>10</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>ASM &#x2013; SENDERSUCHE</label></control>
+                <control type="label"><left>51%</left><top>34</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Diagnostic.ASM.SearchStation)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.ASM.SearchStation))</visible></control>
+                <control type="label"><left>51%</left><top>34</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF7B858E</textcolor><label>Noch keine ASM-Suche</label><visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.ASM.SearchStation))</visible></control>
+                <control type="label"><left>51%</left><top>59</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>ASM &#x2013; SENDER GEFUNDEN</label></control>
+                <control type="label"><left>51%</left><top>82</top><width>45%</width><height>23</height><font>font12</font><textcolor>FFFFFFFF</textcolor><label>$INFO[Window(Home).Property(RadioMonitor.Diagnostic.ASM.FoundStation)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.ASM.FoundStation))</visible></control>
+                <control type="label"><left>51%</left><top>82</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF7B858E</textcolor><label>Noch kein Sendername geliefert</label><visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Diagnostic.ASM.FoundStation))</visible></control>
+                <control type="label"><left>51%</left><top>106</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>ASM-QF sucht: $INFO[Window(Home).Property(RadioMonitor.QF.Request.Station)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.QF.Request.Station))</visible></control>
+                <control type="label"><left>51%</left><top>106</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF7B858E</textcolor><label>ASM-QF hat noch keine Suche gestartet</label><visible>String.IsEmpty(Window(Home).Property(RadioMonitor.QF.Request.Station))</visible></control>
+                <control type="label"><left>51%</left><top>129</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF9BA5AD</textcolor><label>ASM-QF verwendete Sender: $INFO[Window(Home).Property(RadioMonitor.QF.Response.StationUsed)]</label><visible>!String.IsEmpty(Window(Home).Property(RadioMonitor.QF.Response.StationUsed))</visible></control>
+                <control type="label"><left>51%</left><top>129</top><width>45%</width><height>23</height><font>font12</font><textcolor>FF7B858E</textcolor><label>ASM-QF meldet noch keinen Sender</label><visible>String.IsEmpty(Window(Home).Property(RadioMonitor.QF.Response.StationUsed))</visible></control>
             </control>
 
             <control type="group">
@@ -96,7 +107,7 @@
                 <control type="label">
                     <left>24</left><top>51</top><right>24</right><height>43</height>
                     <font>font20</font><textcolor>FF9BA5AD</textcolor>
-                    <label>Warte auf Künstler</label>
+                    <label>Warte auf K&#xFC;nstler</label>
                     <visible>String.IsEmpty(Window(Home).Property(RadioMonitor.Artist))</visible>
                 </control>
                 <control type="label">

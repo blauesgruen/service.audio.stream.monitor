@@ -1,3 +1,7 @@
+v1.1.16 (2026-11-11)
+- Verbessert: Diagnosefenster zeigt die von ASM und ASM-QF verwendeten Sendernamen sowie den gemeldeten QF-Sender.
+- Fix: Sonderzeichen und Umlaute im Diagnosefenster werden korrekt dargestellt.
+
 v1.1.15 (2026-11-11)
 - Verbessert: Live-Diagnose zeigt den Erkennungsweg mit Gründen für übernommene und verworfene Titel.
 - Verbessert: ASM-QF-Anfragen, Treffer, fehlende Treffer und nicht passende Antworten werden verständlich erklärt.

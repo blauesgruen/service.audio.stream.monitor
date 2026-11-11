@@ -1827,6 +1827,8 @@ class RadioMonitor(xbmc.Monitor):
         WINDOW.clearProperty(_P.AN_LAST_EVENT)
         WINDOW.clearProperty(_P.DIAG_STAGE)
         WINDOW.clearProperty(_P.DIAG_DETAIL)
+        WINDOW.clearProperty(_P.DIAG_ASM_SEARCH_STATION)
+        WINDOW.clearProperty(_P.DIAG_ASM_FOUND_STATION)
         self._diagnostic_activity.clear()
         self._last_diagnostic_qf_nohit_id = ''
         self._last_diagnostic_qf_hit_id = ''
@@ -3571,6 +3573,8 @@ class RadioMonitor(xbmc.Monitor):
 
     def get_tunein_api_nowplaying(self, station_name=None):
         """Delegiert an tunein-Modul."""
+        search_station = str(station_name or self.tunein_station_id or '').strip()
+        self.raw_sources.set_text(_P.DIAG_ASM_SEARCH_STATION, search_station, max_len=256)
         return _tunein_get_nowplaying(
             self.api_client,
             self.tunein_station_id,
@@ -4511,6 +4515,8 @@ class RadioMonitor(xbmc.Monitor):
     
     def get_radiode_api_nowplaying(self, station_name):
         """Delegiert an radiode-Modul; verarbeitet Seiteneffekte (Logo, Sendername)."""
+        search_station = str(station_name or self.plugin_slug or self.station_id or '').strip()
+        self.raw_sources.set_text(_P.DIAG_ASM_SEARCH_STATION, search_station, max_len=256)
         artist, title, resolved_name, det_logo, search_logo = _radiode_get_nowplaying(
             self.api_client,
             self.plugin_slug,
@@ -4519,6 +4525,7 @@ class RadioMonitor(xbmc.Monitor):
             debug_log=self._debug_log_api_raw
         )
         if resolved_name:
+            self.raw_sources.set_text(_P.DIAG_ASM_FOUND_STATION, resolved_name, max_len=256)
             if self._can_promote_station_name(self.API_SOURCE_RADIODE):
                 self.set_property_safe(_P.STATION, resolved_name)
                 self._record_verified_station_source(
@@ -5521,6 +5528,10 @@ class RadioMonitor(xbmc.Monitor):
             elif generation == self.metadata_generation:
                 log_debug("Kein No-ICY-Fallback aktiv: MP-Entscheidung ist deaktiviert")
             return
+
+        detected_station = str(stream_info.get('station') or '').strip()
+        if detected_station:
+            self.raw_sources.set_text(_P.DIAG_ASM_FOUND_STATION, detected_station, max_len=256)
             
         metaint = stream_info['metaint']
         self._set_diagnostic_stage(

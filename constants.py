@@ -240,6 +240,8 @@ class PropertyNames:
     AN_ACTIVITY_6 = 'RadioMonitor.Analysis.Activity6'
     DIAG_STAGE = 'RadioMonitor.Diagnostic.Stage'
     DIAG_DETAIL = 'RadioMonitor.Diagnostic.Detail'
+    DIAG_ASM_SEARCH_STATION = 'RadioMonitor.Diagnostic.ASM.SearchStation'
+    DIAG_ASM_FOUND_STATION = 'RadioMonitor.Diagnostic.ASM.FoundStation'
 
 # Alias für Kompatibilität mit bestehendem Code
 _P = PropertyNames
