@@ -87,6 +87,10 @@ msgctxt "#32042"
 msgid "Could not open song history."
 msgstr "Songverlauf konnte nicht geoeffnet werden."
 
+msgctxt "#32050"
+msgid "Open live diagnostics"
+msgstr "Live-Diagnose öffnen"
+
 msgctxt "#32043"
 msgid "Close"
 msgstr "Schließen"

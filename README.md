@@ -252,6 +252,23 @@ Parsing-Regeln:
 
 ## Debugging
 
+### Live-Diagnosefenster
+
+Das Diagnosefenster zeigt den aktuellen Kodi-Laufzeitzustand: Wiedergabe, Sender,
+erkannte Artist-/Titelwerte, aktive Quelle samt Detailquelle, ICY- und API-Werte,
+ASM-QF-Status sowie Analyse-Winner und letztes Analyseereignis. Es liest die
+`RadioMonitor.*`-Window-Properties live; leere Werte bedeuten, dass die jeweilige
+Property aktuell nicht gesetzt ist.
+
+Aufruf aus den Add-on-Einstellungen: **Audio Stream Monitor → Live-Diagnose öffnen**.
+Alternativ als Kodi-Befehl:
+
+```text
+RunScript(special://home/addons/service.audio.stream.monitor/default.py,show_diagnostics)
+```
+
+Das Fenster belegt 80 % der Bildschirmbreite und -höhe.
+
 Das Addon schreibt wichtige Ereignisse (z.B. Songwechsel) standardmäßig in die `kodi.log`. Für eine detaillierte Analyse, insbesondere bei Problemen mit der Titelerkennung, sollte das Debug-Logging in Kodi aktiviert werden.
 
 1. **Log-Datei ansehen:** Die `kodi.log` befindet sich typischerweise unter:

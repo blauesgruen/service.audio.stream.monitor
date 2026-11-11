@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window>
+    <defaultcontrol>100</defaultcontrol>
+    <controls>
+        <control type="image"><texture colordiffuse="99000000">white.jpg</texture></control>
+        <control type="group">
+            <left>10%</left><top>10%</top><width>80%</width><height>80%</height>
+            <animation effect="fade" time="180">WindowOpen</animation>
+            <control type="image"><texture colordiffuse="FF171B20">white.jpg</texture></control>
+            <control type="image"><height>5</height><texture colordiffuse="FF26A6A6">white.jpg</texture></control>
+            <control type="label"><left>30</left><top>22</top><width>75%</width><height>42</height><font>font24</font><textcolor>FFFFFFFF</textcolor><label>[B]Audio Stream Monitor – Live-Diagnose[/B]</label></control>
+            <control type="button" id="100"><left>84%</left><top>20</top><width>13%</width><height>44</height><label>Schließen</label><font>font12</font><align>center</align><textcolor>FF9BA5AD</textcolor><textcolorfocus>FFFFFFFF</textcolorfocus><texture colordiffuse="FF20262D">white.jpg</texture><texturefocus colordiffuse="FF26A6A6">white.jpg</texturefocus></control>
+            <control type="textbox" id="110"><left>34</left><top>88</top><right>34</right><bottom>25</bottom><font>font14</font><textcolor>FFD6DCE1</textcolor><autoscroll>false</autoscroll>
+                <label>Wiedergabe: $INFO[Window.Property(RadioMonitor.Playing),aktiv,Inaktiv]
+Sender: $INFO[Window.Property(RadioMonitor.Station),–]
+Erkannter Titel: $INFO[Window.Property(RadioMonitor.Artist)] – $INFO[Window.Property(RadioMonitor.Title)]
+Aktive Quelle: $INFO[Window.Property(RadioMonitor.Source),–]   Detail: $INFO[Window.Property(RadioMonitor.SourceDetail),–]
+
+ICY StreamTitle: $INFO[Window.Property(RadioMonitor.StreamTitle),–]
+ICY erkannt: $INFO[Window.Property(RadioMonitor.IcyNowPlaying),–]
+API erkannt: $INFO[Window.Property(RadioMonitor.ApiNowPlaying),–]
+
+ASM-QF: $INFO[Window.Property(RadioMonitor.QF.Enabled),nicht aktiv]   Status: $INFO[Window.Property(RadioMonitor.QF.Response.Status),–]
+QF Quelle: $INFO[Window.Property(RadioMonitor.QF.Response.Source),–]   Grund: $INFO[Window.Property(RadioMonitor.QF.Response.Reason),–]
+QF Ergebnis: $INFO[Window.Property(RadioMonitor.QF.Response.Artist)] – $INFO[Window.Property(RadioMonitor.QF.Response.Title)]
+
+Analyse-Winner: $INFO[Window.Property(RadioMonitor.Analysis.WinnerSource),–]
+Analyse-Paar: $INFO[Window.Property(RadioMonitor.Analysis.WinnerPair),–]
+Letztes Analyseereignis: $INFO[Window.Property(RadioMonitor.Analysis.LastEvent),Keine Diagnose vorhanden]
+
+MusicBrainz Artist-ID: $INFO[Window.Property(RadioMonitor.ArtistMBID),–]
+Timeout verbleibend: $INFO[Window.Property(RadioMonitor.TimeoutRemaining),–]</label>
+            </control>
+        </control>
+    </controls>
+</window>

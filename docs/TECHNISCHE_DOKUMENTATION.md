@@ -524,6 +524,22 @@ Nicht verletzen ohne expliziten Grund:
 
 ## 11) Debugging-Playbook
 
+### Live-Diagnosefenster
+
+Das Fenster wird ueber `default.py,show_diagnostics` gestartet und liest direkt die
+Kodi-Window-Properties:
+
+```text
+RunScript(special://home/addons/service.audio.stream.monitor/default.py,show_diagnostics)
+```
+
+Es zeigt Wiedergabe-/Senderstatus, Artist und Titel, `Source`/`SourceDetail`, ICY-/API-
+Anzeigen, QF-Antwortstatus und -Ergebnis sowie Analyse-Winner und letztes Analyseereignis.
+Die Skin-Datei ist `resources/skins/default/1080i/diagnostic_window.xml`; die Fenstergruppe
+nutzt 80 % der Bildschirmbreite und -hoehe. Leere Propertywerte bedeuten, dass Kodi
+dafuer aktuell keinen Wert bereitstellt. Fuer Ereignisse und Fehler weiterhin `kodi.log`
+mit `[Audio Stream Monitor]` und `ASM-QF DIAG` heranziehen.
+
 1. Kodi Debug-Logging aktivieren.
 2. In `kodi.log` nach `[Audio Stream Monitor]` filtern.
 3. Erwartete Kernmarker:

@@ -9,5 +9,6 @@
         <setting id="qf_enabled" type="bool" label="32022" default="false" />
         <setting id="pvr_qf_enabled" type="bool" label="32023" default="true" visible="eq(-1,true) + System.HasAddon(service.audio.stream.monitor.qf)" />
         <setting id="open_song_history" type="action" label="32031" action="RunScript(special://home/addons/service.audio.stream.monitor/default.py,show_song_history)" option="close" />
+        <setting id="open_diagnostics" type="action" label="32050" action="RunScript(special://home/addons/service.audio.stream.monitor/default.py,show_diagnostics)" option="close" />
     </category>
 </settings>

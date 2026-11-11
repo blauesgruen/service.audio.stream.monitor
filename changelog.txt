@@ -1,3 +1,8 @@
+v1.1.14 (2026-11-11)
+- Neu: Live-Diagnosefenster zeigt Wiedergabe, erkannte Metadaten, aktive Quellen und Analysezustand.
+- Neu: Diagnosefenster per RunScript-Befehl und aus den Add-on-Einstellungen aufrufbar.
+- Doku: Live-Diagnoseaufruf und angezeigte Laufzeitinformationen beschrieben.
+
 v1.1.13 (2026-11-10)
 - Fix: Songverlauf liest die Datenbank schreibgeschützt ohne konkurrierende Schema-Änderungen.
 - Fix: Unnötiger linker Symbol-Abstand in den Listenzeilen entfernt.
